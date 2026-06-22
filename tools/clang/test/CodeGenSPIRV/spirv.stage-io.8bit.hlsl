@@ -8,9 +8,9 @@ struct VSOut {
     uint8_t4 outB : B;
 };
 
-VSOut main(int8_t3 inA : A, uint8_t inB : B) {
+VSOut main(int8_t3 inA : A, uint8_t2 inB : B) {
     VSOut o;
     o.outA = inA.xy;
-    o.outB = uint8_t4(inB, inB, inB, inB);
+    o.outB = uint8_t4(inB, inB);
     return o;
 }

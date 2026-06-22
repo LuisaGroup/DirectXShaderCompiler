@@ -57,6 +57,9 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
       addCapability(spv::Capability::Int8);
 
       // Usage of an 8-bit integer type as stage I/O.
+      // Note: KHR_8bit_storage does not define StorageInputOutput8.
+      // Only Int8 capability + KHR_8bit_storage extension are used for
+      // 8-bit stage I/O variables.
       if (sc == spv::StorageClass::Input || sc == spv::StorageClass::Output) {
         addExtension(Extension::KHR_8bit_storage, "8-bit stage IO variables",
                      loc);

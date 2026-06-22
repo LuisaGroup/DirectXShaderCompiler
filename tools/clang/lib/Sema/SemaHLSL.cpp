@@ -4585,9 +4585,13 @@ public:
           return false;
         R.addDecl(typeDecl);
       } else if (rowCount == 0) { // vector
+        if (!DiagnoseHLSLScalarType(parsedType, R.getNameLoc()))
+          return false;
         TypedefDecl *qts = LookupVectorShorthandType(parsedType, colCount);
         R.addDecl(qts);
       } else { // matrix
+        if (!DiagnoseHLSLScalarType(parsedType, R.getNameLoc()))
+          return false;
         TypedefDecl *qts =
             LookupMatrixShorthandType(parsedType, rowCount, colCount);
         R.addDecl(qts);
