@@ -5,6 +5,8 @@ find_package(TAEF REQUIRED)
 find_package(DiaSDK REQUIRED) # Used for constants and declarations.
 find_package(D3D12 REQUIRED)  # Used in DxilContainerTest for DXBC compilation/reflection
 endif(WIN32)
+include_directories(${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include)
+include_directories(${LLVM_MAIN_SRC_DIR}/utils/unittest/googlemock/include)
 
 set( LLVM_LINK_COMPONENTS
   support
