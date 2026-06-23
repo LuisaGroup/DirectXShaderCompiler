@@ -263,8 +263,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "--targets",
-        default="dxc,dxcompiler,dxv,dxilconv",
-        help="Comma-separated list of CMake targets to build (default: dxc,dxcompiler,dxv,dxilconv).",
+        default="dxc,dxcompiler,dxv,dxildll",
+        help="Comma-separated list of CMake targets to build (default: dxc,dxcompiler,dxv,dxildll).",
     )
     parser.add_argument(
         "--jobs",
@@ -547,6 +547,7 @@ def main(argv=None):
         "dxv": bin_dir / "dxv.exe",
         "dxcompiler": bin_dir / "dxcompiler.dll",
         "dxilconv": bin_dir / "dxilconv.dll",
+        "dxildll": bin_dir / "dxil.dll",
     }
 
     missing = []
