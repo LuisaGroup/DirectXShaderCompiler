@@ -45,6 +45,12 @@ if (${ENABLE_SPIRV_CODEGEN})
       # This add_compile_options() will only affect the current directory and its subdirectories.
       if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         add_compile_options(-Wno-implicit-fallthrough)
+        # clang-cl enables additional /W2 diagnostics (e.g. missing field
+        # initializers) that the SPIRV-Tools sources don't build cleanly with
+        # under /WX. Suppress them so clang-cl can build this external project.
+        if(MSVC)
+          add_compile_options(-Wno-missing-field-initializers)
+        endif()
       endif()
       # We only need the library from SPIRV-Tools.
       set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "Skip building SPIRV-Tools executables")

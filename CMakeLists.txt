@@ -645,9 +645,11 @@ endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
 set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")
 
 # enable warnings as errors for debug build
-if (MSVC)
+if (MSVC AND NOT CLANG_CL)
+  # /WX is clean with MSVC's /W4, but clang-cl's /W4 enables many additional
+  # diagnostics that the DXC codebase does not build cleanly with.
   SET(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} /WX")
-endif (MSVC)
+endif (MSVC AND NOT CLANG_CL)
 
 include(AddLLVM)
 include(TableGen)

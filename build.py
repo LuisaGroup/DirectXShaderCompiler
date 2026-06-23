@@ -25,14 +25,20 @@ def run(cmd, **kwargs):
 def find_clang():
     """Locate the LLVM Clang compiler executables on the current platform.
 
-    Returns a ``(cc, cxx)`` tuple of absolute paths. ``cc`` is ``clang``
-    (Unix-like) or ``clang.exe`` (Windows), and ``cxx`` is ``clang++`` or
-    ``clang++.exe`` when present in the same directory, otherwise the same
-    path as ``cc``. Returns ``None`` if clang cannot be found on ``PATH``.
+    Returns a ``(cc, cxx)`` tuple of absolute paths. On Windows, the
+    clang-cl driver (``clang-cl.exe``) is used for both C and C++ so that
+    Clang's MSVC-compatible command-line is used. On Unix-like systems,
+    ``cc`` is ``clang`` and ``cxx`` is ``clang++`` when present in the same
+    directory, otherwise the same path as ``cc``. Returns ``None`` if clang
+    cannot be found on ``PATH``.
     """
     is_windows = platform.system() == "Windows"
-    cc_name = "clang.exe" if is_windows else "clang"
-    cxx_name = "clang++.exe" if is_windows else "clang++"
+    if is_windows:
+        cc_name = "clang-cl.exe"
+        cxx_name = "clang-cl.exe"
+    else:
+        cc_name = "clang"
+        cxx_name = "clang++"
 
     cc = shutil.which(cc_name)
     if not cc:

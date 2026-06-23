@@ -37,6 +37,8 @@ python build.py --targets dxc,dxcompiler
 |-----|---------|-------------|
 | `--build-dir` | `build` | Build directory relative to repo root. |
 | `--generator` | `Visual Studio 17 2022` (Win) / `Ninja` (other) | CMake generator. |
+| `--vs-version` | `latest` | Visual Studio version to use on Windows (`2019`, `2022`, `latest`). |
+| `--jobs` / `-j` | (unlimited) | Number of parallel build jobs. |
 
 ### Build Control
 
@@ -53,6 +55,7 @@ python build.py --targets dxc,dxcompiler
 | `--spirv-build-tests` | `false` | Build SPIR-V tests (requires extra deps). |
 | `--coverage` | `false` | Code coverage instrumentation. |
 | `--werror` | `false` | Treat warnings as errors. |
+| `--clang` | `auto` | Use Clang. `auto` uses it if found, `on` requires it, `off` disables it. On Windows this selects `clang-cl.exe` and switches the generator to Ninja. |
 
 ### Linker & Sanitizer (Ninja / non-Windows)
 
@@ -104,3 +107,10 @@ python build.py --targets dxcompiler
 ```bash
 python build.py --sanitizer "Address;Undefined"
 ```
+
+**Build with clang-cl on Windows (Debug)**:
+```bash
+python build.py --build-type Debug --clang=on
+```
+
+The `--clang=on` form fails if Clang/`clang-cl.exe` is not on `PATH`. Use `--clang=auto` to use it only when available.
