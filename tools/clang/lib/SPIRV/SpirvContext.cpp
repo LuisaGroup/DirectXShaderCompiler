@@ -638,5 +638,17 @@ SpirvContext::getCreatedSpirvIntrinsicType(unsigned typeId) {
   return spirvIntrinsicTypesById[typeId];
 }
 
+bool SpirvContext::hasCooperativeVectorOrMatrixType() const {
+  for (const auto *type : spirvIntrinsicTypes) {
+    unsigned opcode = type->getOpCode();
+    // OpTypeCooperativeMatrixKHR = 4456
+    // OpTypeCooperativeVectorNV = 5288
+    if (opcode == 4456 || opcode == 5288) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // end namespace spirv
 } // end namespace clang

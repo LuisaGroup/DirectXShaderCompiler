@@ -138,9 +138,20 @@ def refresh_windows_env() -> None:
         os.environ["PATHEXT"] = _merge_dedup_paths(*pathext_parts)
 
 
-def run(cmd, **kwargs):
-    """Run a command and print it."""
+def run(cmd, cwd=None, env=None, **kwargs):
+    """Run a command and print it.
+
+    Defaults to running in the caller-supplied working directory and with a
+    fresh copy of the current process environment so that any vcvars/Windows
+    SDK PATH updates made by this script are reliably propagated to the child
+    process.
+    """
     print("\n>>>", " ".join(str(c) for c in cmd), flush=True)
+    if env is None:
+        env = os.environ.copy()
+    if cwd is not None:
+        kwargs.setdefault("cwd", cwd)
+    kwargs.setdefault("env", env)
     subprocess.run(cmd, check=True, **kwargs)
 
 
@@ -311,6 +322,36 @@ def load_vcvars_env(version):
     return env
 
 
+def _ensure_on_path(directory: str) -> None:
+    """Add *directory* to the front of ``PATH`` if it is not already present."""
+    if not directory:
+        return
+    directory = os.path.normcase(os.path.normpath(directory))
+    current_parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    if directory.lower() not in [p.lower() for p in current_parts]:
+        os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
+
+
+def _clean_cmake_scratch(build_dir: Path) -> None:
+    """Remove leftover CMake try_compile scratch directories.
+
+    Stale ``CMakeFiles/CMakeScratch`` directories from an interrupted or
+    partially failed configure can cause Ninja to fail with
+    ``loading 'CMakeFiles\\rules.ninja': The system cannot find the file
+    specified`` on the next run.
+    """
+    scratch_dir = build_dir / "CMakeFiles" / "CMakeScratch"
+    if scratch_dir.exists():
+        try:
+            shutil.rmtree(scratch_dir)
+            print(f"Cleaned CMake scratch directory: {scratch_dir}")
+        except OSError as e:
+            print(
+                f"WARNING: could not clean CMake scratch directory: {e}",
+                file=sys.stderr,
+            )
+
+
 def find_windows_sdk_bin_dir():
     """Return the x64 Windows SDK bin directory, or None if not found.
 
@@ -331,6 +372,34 @@ def find_windows_sdk_bin_dir():
         candidate = version / "x64"
         if (candidate / "mc.exe").exists():
             return candidate
+    return None
+
+
+def find_windows_sdk_tool(tool_name):
+    """Return the absolute path to a Windows SDK tool, or None.
+
+    Looks for ``tool_name`` (e.g. ``rc.exe``, ``mt.exe``, ``mc.exe``) first on
+    ``PATH`` (so a loaded ``vcvars64.bat`` environment is respected) and then
+    falls back to scanning the standard Windows SDK installation directories.
+    """
+    found = shutil.which(tool_name)
+    if found:
+        return Path(found).resolve()
+
+    sdk_root = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+    sdk_bin = sdk_root / "Windows Kits" / "10" / "bin"
+    if not sdk_bin.exists():
+        return None
+
+    versions = sorted(
+        (d for d in sdk_bin.iterdir() if d.is_dir() and d.name[0].isdigit()),
+        reverse=True,
+    )
+    for version in versions:
+        for arch in ("x64", "x86"):
+            candidate = version / arch / tool_name
+            if candidate.exists():
+                return candidate.resolve()
     return None
 
 
@@ -499,6 +568,41 @@ def main(argv=None):
         return 1
 
     if platform.system() == "Windows":
+        # The Ninja generator on Windows does not set up the MSVC/Windows SDK
+        # environment automatically. Load vcvars64.bat as early as possible so
+        # that every subsequent tool lookup and the CMake subprocess itself run
+        # with the right PATH, INCLUDE, and LIB variables.
+        required_tools = ("cl.exe", "rc.exe", "mt.exe", "mc.exe")
+        need_vcvars = (
+            not os.environ.get("VSCMD_VER")
+            or not all(shutil.which(t) for t in required_tools)
+        )
+        if need_vcvars:
+            vs_env = load_vcvars_env(vs_version)
+            if vs_env:
+                for key, value in vs_env.items():
+                    os.environ[key] = value
+                print(
+                    f"Loaded MSVC environment from vcvars64.bat "
+                    f"(VS {vs_version or 'latest'})"
+                )
+                if not os.environ.get("VSCMD_VER"):
+                    print(
+                        "WARNING: vcvars64.bat completed but VSCMD_VER is not set; "
+                        "the loaded environment may be incomplete.",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    "WARNING: failed to load MSVC environment from vcvars64.bat; "
+                    "falling back to PATH scanning.",
+                    file=sys.stderr,
+                )
+                # Make sure the Windows SDK tools are at least on PATH.
+                sdk_bin = find_windows_sdk_bin_dir()
+                if sdk_bin:
+                    _ensure_on_path(str(sdk_bin))
+
         cl_path = find_msvc(vs_version, "**/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe")
         if cl_path is None:
             print(
@@ -511,6 +615,10 @@ def main(argv=None):
             cl_path = cl_path[-1]
         cl_path = Path(cl_path.replace("/", "\\"))
         print(f"Using MSVC compiler: {cl_path}")
+        # Make sure the compiler directory is on PATH. This is required for
+        # CMake's compiler detection/try_compile steps even when the compiler
+        # path is passed explicitly.
+        _ensure_on_path(str(cl_path.parent))
     else:
         cl_path = None
 
@@ -527,8 +635,8 @@ def main(argv=None):
         "-DCLANG_INCLUDE_TESTS=OFF",
     ]
     if cl_path is not None:
-        configure_cmd.append(f"-DCMAKE_C_COMPILER={cl_path}")
-        configure_cmd.append(f"-DCMAKE_CXX_COMPILER={cl_path}")
+        configure_cmd.append(f"-DCMAKE_C_COMPILER={cl_path.as_posix()}")
+        configure_cmd.append(f"-DCMAKE_CXX_COMPILER={cl_path.as_posix()}")
     if not args.enable_spirv_codegen:
         configure_cmd.append("-DENABLE_SPIRV_CODEGEN=OFF")
     if args.spirv_build_tests:
@@ -550,22 +658,51 @@ def main(argv=None):
     if args.split_dwarf:
         configure_cmd.append("-DLLVM_USE_SPLIT_DWARF=On")
 
+    sdk_tools = {}
     if platform.system() == "Windows":
-        if not os.environ.get("VSCMD_VER"):
-            vs_env = load_vcvars_env(vs_version)
-            if vs_env:
-                for key, value in vs_env.items():
-                    os.environ[key] = value
-                print(f"Loaded MSVC environment from vcvars64.bat (VS {vs_version or 'latest'})")
-            else:
-                # Fall back to adding just the Windows SDK tools to PATH.
+        # Make sure rc.exe/mt.exe/mc.exe are available on PATH and tell CMake
+        # exactly where they are so that try_compile and manifest steps do not
+        # silently fail when the calling shell is not a VS Developer Command
+        # Prompt.
+        for tool_name in ("rc.exe", "mt.exe", "mc.exe"):
+            if shutil.which(tool_name) is None:
                 sdk_bin = find_windows_sdk_bin_dir()
-                if sdk_bin and str(sdk_bin) not in os.environ.get("PATH", ""):
-                    os.environ["PATH"] = str(sdk_bin) + os.pathsep + os.environ.get("PATH", "")
-                    print(f"Added Windows SDK tools to PATH: {sdk_bin}")
+                if sdk_bin:
+                    _ensure_on_path(str(sdk_bin))
+                break
+
+        missing_tools = []
+        for tool_name, cmake_var in (
+            ("rc.exe", "CMAKE_RC_COMPILER"),
+            ("mt.exe", "CMAKE_MT"),
+            ("mc.exe", "CMAKE_MC_COMPILER"),
+        ):
+            tool_path = find_windows_sdk_tool(tool_name)
+            if tool_path is None:
+                missing_tools.append(tool_name)
+            else:
+                sdk_tools[cmake_var] = tool_path
+
+        if missing_tools:
+            print(
+                f"ERROR: Required Windows SDK tool(s) not found: {', '.join(missing_tools)}. "
+                "Install the Windows SDK or run from a Visual Studio Developer Command Prompt.",
+                file=sys.stderr,
+            )
+            return 1
+
+        ninja_path = shutil.which("ninja")
+        if ninja_path:
+            ninja_path = Path(ninja_path).resolve()
+            configure_cmd.append(f"-DCMAKE_MAKE_PROGRAM={ninja_path.as_posix()}")
+            _ensure_on_path(str(ninja_path.parent))
+
+    for cmake_var, tool_path in sdk_tools.items():
+        configure_cmd.append(f"-D{cmake_var}={tool_path.as_posix()}")
 
     if needs_configure:
-        run(configure_cmd)
+        _clean_cmake_scratch(build_dir)
+        run(configure_cmd, cwd=str(repo_root))
     else:
         print("Skipping configure (use --clean to force a full rebuild).")
 
@@ -589,7 +726,7 @@ def main(argv=None):
         ]
         if args.jobs is not None:
             build_cmd.extend(["-j", str(args.jobs)])
-        run(build_cmd)
+        run(build_cmd, cwd=str(repo_root))
 
     # Ninja is a single-config generator, so binaries land under <build>/bin.
     bin_dir = build_dir / "bin"

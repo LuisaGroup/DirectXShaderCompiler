@@ -29,7 +29,13 @@ vk::nv::CooperativeVector<OutType, out_dim> CoopMul(
   // CHECK: OpCooperativeVectorLoadNV
   // CHECK: OpCooperativeVectorMatrixMulNV
   return vk::nv::cooperativeVectorMatrixMul<OutType, InType, out_dim, in_dim>(
-      result, input_vec);
+      input_vec,
+      /* inputInterpretation */ 0,
+      mat_buffer, mat_offset,
+      /* matrixInterpretation */ 0,
+      /* stride */ 16,
+      vk::CooperativeVectorMatrixLayoutRowMajorNV,
+      /* transpose */ false);
 }
 
 // CoopVectorAccumulate: accumulate a vector into buffer

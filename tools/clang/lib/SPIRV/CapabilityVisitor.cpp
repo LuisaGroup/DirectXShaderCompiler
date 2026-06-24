@@ -223,6 +223,23 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
                    "SPV_KHR_physical_storage_buffer", loc);
       addCapability(spv::Capability::PhysicalStorageBufferAddresses);
     }
+    // Check for pointer-to-pointer patterns that require VariablePointers
+    // capability. Cooperative vector/matrix intrinsics (OpTypeCooperativeVectorNV
+    // and OpTypeCooperativeMatrixKHR) pass buffer references that create
+    // Function-scope variables holding pointers to StorageBuffer/Uniform.
+    // We only add VariablePointersStorageBuffer when cooperative vector/matrix
+    // types are actually present, to avoid adding it for common vectors.
+    if (ptrType->getStorageClass() == spv::StorageClass::Function) {
+      if (const auto *pointeePtrType =
+              dyn_cast<SpirvPointerType>(ptrType->getPointeeType())) {
+        if ((pointeePtrType->getStorageClass() == spv::StorageClass::Uniform ||
+             pointeePtrType->getStorageClass() ==
+                 spv::StorageClass::StorageBuffer) &&
+            context.hasCooperativeVectorOrMatrixType()) {
+          addCapability(spv::Capability::VariablePointersStorageBuffer);
+        }
+      }
+    }
   }
   // Struct type
   else if (const auto *structType = dyn_cast<StructType>(type)) {

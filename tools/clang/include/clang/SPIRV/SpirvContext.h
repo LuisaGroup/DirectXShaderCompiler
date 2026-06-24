@@ -320,6 +320,13 @@ public:
 
   SpirvIntrinsicType *getCreatedSpirvIntrinsicType(unsigned typeId);
 
+  /// Returns true if any cooperative vector (OpTypeCooperativeVectorNV, 5288)
+  /// or cooperative matrix (OpTypeCooperativeMatrixKHR, 4456) type has been
+  /// created. Used to decide whether VariablePointersStorageBuffer capability
+  /// is required (cooperative vector/matrix intrinsics pass buffer references
+  /// that create pointer-to-pointer patterns).
+  bool hasCooperativeVectorOrMatrixType() const;
+
   /// --- Hybrid type getter functions ---
   ///
   /// Concrete SpirvType objects represent a SPIR-V type completely. Hybrid

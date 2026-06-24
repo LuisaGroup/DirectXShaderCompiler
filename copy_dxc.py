@@ -9,7 +9,8 @@ from pathlib import Path
 def copy_dlls(src_dir: Path, dst_dir: Path) -> None:
     """Copy all .dll files from src_dir to dst_dir."""
     if not src_dir.exists():
-        print(f"WARNING: Source directory does not exist, skipping: {src_dir}", file=sys.stderr)
+        print(
+            f"WARNING: Source directory does not exist, skipping: {src_dir}", file=sys.stderr)
         return
 
     dll_files = list(src_dir.glob("*.dll"))
@@ -36,8 +37,8 @@ def main() -> None:
     base_build = Path("build")
     base_dst = Path(sys.argv[1])
 
-    copy_dlls(base_build / "Debug" / "bin", base_dst / "debug")
-    copy_dlls(base_build / "Release" / "bin", base_dst / "release")
+    copy_dlls(base_build / "bin", base_dst / 'bin' / "debug")
+    copy_dlls(base_build / "bin", base_dst / 'bin' / "release")
 
 
 if __name__ == "__main__":

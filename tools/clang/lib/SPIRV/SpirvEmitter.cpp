@@ -16336,18 +16336,16 @@ SpirvEmitter::processSpvIntrinsicCallExpr(const CallExpr *expr) {
       // we need to dereference it to get the actual StorageBuffer pointer.
       if (isAKindOfStructuredOrByteBuffer(arg->getType())) {
         loadIfAliasVarRef(arg, &argInst, arg->getSourceRange());
-        // For ByteAddressBuffer types, we need to access chain to the
-        // runtime array member (index 0) because the buffer is represented
-        // as a struct containing a runtime array, and cooperative vector
-        // intrinsics expect a pointer to the array directly.
-        if (isByteAddressBuffer(arg->getType()) ||
-            isRWByteAddressBuffer(arg->getType())) {
-          auto *constUint0 = spvBuilder.getConstantInt(
-              astContext.UnsignedIntTy, llvm::APInt(32, 0));
-          argInst = spvBuilder.createAccessChain(
-              arg->getType(), argInst, {constUint0},
-              arg->getExprLoc(), arg->getSourceRange());
-        }
+        // All structured/byte buffer types (RWStructuredBuffer,
+        // RWByteAddressBuffer, AppendStructuredBuffer, etc.) are
+        // represented as a struct containing a runtime array (or uint).
+        // Cooperative vector/matrix intrinsics expect a pointer to the
+        // inner array directly, so we access-chain to member 0.
+        auto *constUint0 = spvBuilder.getConstantInt(
+            astContext.UnsignedIntTy, llvm::APInt(32, 0));
+        argInst = spvBuilder.createAccessChain(
+            arg->getType(), argInst, {constUint0},
+            arg->getExprLoc(), arg->getSourceRange());
       }
       spvArgs.push_back(argInst);
     } else if (param->hasAttr<VKLiteralExtAttr>()) {
