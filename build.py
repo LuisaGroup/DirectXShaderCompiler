@@ -375,6 +375,12 @@ def main(argv=None):
         help="Remove the build directory before configuring.",
     )
     parser.add_argument(
+        "-rebuild",
+        action="store_true",
+        default=False,
+        help="Force CMake reconfigure even if the build directory is already configured.",
+    )
+    parser.add_argument(
         "--enable-spirv-codegen",
         dest="enable_spirv_codegen",
         action="store_true",
@@ -459,9 +465,20 @@ def main(argv=None):
         print(f"ERROR: DXC cache script not found: {cache_script}", file=sys.stderr)
         return 1
 
-    if args.clean and build_dir.exists():
+    if (args.clean or args.rebuild) and build_dir.exists():
         print(f"Removing existing build directory: {build_dir}")
         shutil.rmtree(build_dir)
+
+    # Determine whether we need to run CMake configure.
+    # If the build directory already has a CMake cache, skip configure
+    # and go straight to incremental compile.
+    cache_file = build_dir / "CMakeCache.txt"
+    needs_configure = not cache_file.exists() or args.rebuild
+    if not args.clean and not args.rebuild and cache_file.exists():
+        print(
+            "Build directory already configured; skipping CMake configure "
+            "and proceeding to incremental compile."
+        )
 
     generator = args.generator if args.generator is not None else "Ninja"
 
@@ -547,7 +564,10 @@ def main(argv=None):
                     os.environ["PATH"] = str(sdk_bin) + os.pathsep + os.environ.get("PATH", "")
                     print(f"Added Windows SDK tools to PATH: {sdk_bin}")
 
-    run(configure_cmd)
+    if needs_configure:
+        run(configure_cmd)
+    else:
+        print("Skipping configure (use --clean to force a full rebuild).")
 
     targets = [t.strip() for t in args.targets.split(",") if t.strip()]
     if not targets:
