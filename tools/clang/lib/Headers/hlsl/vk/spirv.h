@@ -33,6 +33,14 @@ enum CooperativeMatrixOperandsMask {
   CooperativeMatrixOperandsSaturatingAccumulationKHRMask = 0x00000010,
 };
 
+// Cooperative Matrix Reduce Mode (SPV_NV_cooperative_matrix2)
+enum CooperativeMatrixReduceMode {
+  CooperativeMatrixReduceRow = 0x1,
+  CooperativeMatrixReduceColumn = 0x2,
+  CooperativeMatrixReduce2x2 = 0x4,
+  CooperativeMatrixReduceMax = 0x7fffffff,
+};
+
 // Cooperative Vector Matrix Layout (SPV_NV_cooperative_vector)
 enum CooperativeVectorMatrixLayout {
   CooperativeVectorMatrixLayoutRowMajorNV = 0,

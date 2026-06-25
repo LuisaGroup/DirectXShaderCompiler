@@ -1,0 +1,173 @@
+// Copyright (c) 2024 Google LLC
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <vk/opcode_selector.h>
+
+// ============================================================================
+// Inline-SPIR-V Builtin Declarations
+// ============================================================================
+
+// --- OpCooperativeMatrixConvertNV (5293) ---
+// Requires: CooperativeMatrixConversionsNV (5431), SPV_NV_cooperative_matrix2
+
+template <typename ResultType, typename OperandType>
+[[vk::ext_instruction(/* OpCooperativeMatrixConvertNV */ 5293)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionsNV */ 5431)]]
+[[vk::ext_extension("SPV_NV_cooperative_matrix2")]]
+ResultType __builtin_spv_CooperativeMatrixConvertNV(OperandType matrix);
+
+// --- OpCooperativeMatrixTransposeNV (5390) ---
+// Requires: CooperativeMatrixConversionsNV (5431), SPV_NV_cooperative_matrix2
+
+template <typename ResultType, typename OperandType>
+[[vk::ext_instruction(/* OpCooperativeMatrixTransposeNV */ 5390)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionsNV */ 5431)]]
+[[vk::ext_extension("SPV_NV_cooperative_matrix2")]]
+ResultType __builtin_spv_CooperativeMatrixTransposeNV(OperandType matrix);
+
+// --- OpCooperativeMatrixReduceNV (5366) ---
+// STILL BLOCKED: Crash at 0xA0 in SpirvEmitter when processing 3 operands.
+// The crash occurs after doExpr/loadIfGLValue succeed and after
+// createSpirvIntrInstExt returns successfully. Root cause appears to be a
+// memory corruption during SpirvEmitter processing of 3-operand ext_instruction
+// calls where one operand is a literal between two IdRefs.
+// ext_literal attribute removed to avoid crash path; even without it,
+// custom SpirvEmitter handler still crashes at same address.
+// See report.md for details.
+
+template <typename ResultType, typename OperandType>
+[[vk::ext_instruction(/* OpCooperativeMatrixReduceNV */ 5366)]]
+[[vk::ext_capability(/* CooperativeMatrixReductionsNV */ 5430)]]
+[[vk::ext_extension("SPV_NV_cooperative_matrix2")]]
+ResultType __builtin_spv_CooperativeMatrixReduceNV(
+    OperandType matrix,
+    uint reduceMode,
+    uint combineOp);
+
+// --- OpCooperativeMatrixPerElementOpNV (5369) ---
+// STILL BLOCKED: Same 0xA0 crash as reduce.
+
+template <typename ResultType, typename OperandType>
+[[vk::ext_instruction(/* OpCooperativeMatrixPerElementOpNV */ 5369)]]
+[[vk::ext_capability(/* CooperativeMatrixPerElementOperationsNV */ 5432)]]
+[[vk::ext_extension("SPV_NV_cooperative_matrix2")]]
+ResultType __builtin_spv_CooperativeMatrixPerElementOpNV(
+    OperandType matrix,
+    uint32_t functionId);
+
+
+// ============================================================================
+// Template Function Implementations
+// ============================================================================
+
+namespace vk {
+namespace nv {
+
+// --- cooperativeMatrixConvertUse ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse NewUse, CooperativeMatrixUse OldUse>
+khr::CooperativeMatrix<ComponentType, scope, rows, columns, NewUse>
+cooperativeMatrixConvertUse(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, OldUse> matrix) {
+  using ResultType =
+      khr::CooperativeMatrix<ComponentType, scope, rows, columns, NewUse>;
+  ResultType result;
+  result._matrix =
+      __builtin_spv_CooperativeMatrixConvertNV<
+          typename ResultType::SpirvMatrixType>(matrix._matrix);
+  return result;
+}
+
+// --- cooperativeMatrixTranspose ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns>
+khr::CooperativeMatrix<ComponentType, scope, columns, rows,
+                       CooperativeMatrixUseMatrixBKHR>
+cooperativeMatrixTranspose(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns,
+                           CooperativeMatrixUseMatrixAccumulatorKHR> matrix) {
+  using ResultType =
+      khr::CooperativeMatrix<ComponentType, scope, columns, rows,
+                             CooperativeMatrixUseMatrixBKHR>;
+  ResultType result;
+  result._matrix =
+      __builtin_spv_CooperativeMatrixTransposeNV<
+          typename ResultType::SpirvMatrixType>(matrix._matrix);
+  return result;
+}
+
+// --- cooperativeMatrixReduce (row reduction) ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+CooperativeVector<ComponentType, columns>
+cooperativeMatrixReduceRow(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, use> matrix,
+    uint combineOp) {
+  using ResultType = CooperativeVector<ComponentType, columns>;
+  ResultType result;
+  result._vector =
+      __builtin_spv_CooperativeMatrixReduceNV<
+          typename ResultType::SpirvVectorType>(
+          matrix._matrix, 1, combineOp);
+  return result;
+}
+
+// --- cooperativeMatrixReduce (column reduction) ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+CooperativeVector<ComponentType, rows>
+cooperativeMatrixReduceColumn(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, use> matrix,
+    uint combineOp) {
+  using ResultType = CooperativeVector<ComponentType, rows>;
+  ResultType result;
+  result._vector =
+      __builtin_spv_CooperativeMatrixReduceNV<
+          typename ResultType::SpirvVectorType>(
+          matrix._matrix, 2, combineOp);
+  return result;
+}
+
+// --- cooperativeMatrixReduce (2x2 reduction) ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+khr::CooperativeMatrix<ComponentType, scope, rows / 2, columns / 2, use>
+cooperativeMatrixReduce2x2(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, use> matrix,
+    uint combineOp) {
+  using ResultType =
+      khr::CooperativeMatrix<ComponentType, scope, rows / 2, columns / 2, use>;
+  ResultType result;
+  result._matrix =
+      __builtin_spv_CooperativeMatrixReduceNV<
+          typename ResultType::SpirvMatrixType>(
+          matrix._matrix, 4, combineOp);
+  return result;
+}
+
+// --- cooperativeMatrixPerElementOp ---
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+khr::CooperativeMatrix<ComponentType, scope, rows, columns, use>
+cooperativeMatrixPerElementOp(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, use> matrix,
+    uint functionId) {
+  using ResultType =
+      khr::CooperativeMatrix<ComponentType, scope, rows, columns, use>;
+  ResultType result;
+  result._matrix =
+      __builtin_spv_CooperativeMatrixPerElementOpNV<
+          typename ResultType::SpirvMatrixType>(matrix._matrix, functionId);
+  return result;
+}
+
+} // namespace nv
+} // namespace vk

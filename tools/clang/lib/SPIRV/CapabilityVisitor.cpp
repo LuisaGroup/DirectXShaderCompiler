@@ -524,6 +524,27 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
 
   // Add opcode-specific capabilities
   switch (opcode) {
+  case spv::Op::OpCooperativeMatrixLoadKHR:
+  case spv::Op::OpCooperativeMatrixStoreKHR: {
+    // Check for ARM cooperative matrix layouts and add the corresponding
+    // capability and extension if used.
+    if (auto *pSpvInst =
+            dyn_cast<SpirvIntrinsicInstruction>(instr)) {
+      auto operands = pSpvInst->getOperands();
+      // The layout parameter is the second operand (index 1).
+      if (operands.size() > 1) {
+        if (auto *constInst = dyn_cast<SpirvConstantInteger>(operands[1])) {
+          int64_t layoutVal = constInst->getValue().getSExtValue();
+          if (layoutVal == 4202 || layoutVal == 4203) {
+            addCapability(spv::Capability::CooperativeMatrixLayoutsARM, loc);
+            spvBuilder.requireExtension(
+                "SPV_ARM_cooperative_matrix_layouts", loc);
+          }
+        }
+      }
+    }
+    break;
+  }
   case spv::Op::OpDPdxCoarse:
   case spv::Op::OpDPdyCoarse:
   case spv::Op::OpFwidthCoarse:

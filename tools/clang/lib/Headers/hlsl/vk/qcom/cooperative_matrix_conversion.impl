@@ -1,0 +1,111 @@
+// Copyright (c) 2024 Google LLC
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <vk/opcode_selector.h>
+
+// ============================================================================
+// Inline-SPIR-V Builtin Declarations
+// ============================================================================
+
+// --- OpBitCastArrayQCOM (4497) ---
+// Custom handler in SpirvEmitter: processCooperativeMatrixBitCastQCOM
+// Uses out-pointer to avoid RWStructuredBuffer counter-variable lookup.
+
+template <typename ArrayPointerType, typename ResultPointerType>
+[[vk::ext_instruction(/* OpBitCastArrayQCOM */ 4497)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionQCOM */ 4496)]]
+[[vk::ext_extension("SPV_QCOM_cooperative_matrix_conversion")]]
+void __builtin_spv_BitCastArrayQCOM(
+    [[vk::ext_reference]] ArrayPointerType array,
+    [[vk::ext_reference]] ResultPointerType resultArray);
+
+// --- OpCompositeConstructCoopMatQCOM (4540) ---
+// Custom handler in SpirvEmitter: processCooperativeMatrixConstructQCOM
+// Loads array value from pointer for OpTypeArray requirement.
+
+template <typename CoopMatSpirvType, typename ArrayPointerType>
+[[vk::ext_instruction(/* OpCompositeConstructCoopMatQCOM */ 4540)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionQCOM */ 4496)]]
+[[vk::ext_extension("SPV_QCOM_cooperative_matrix_conversion")]]
+CoopMatSpirvType __builtin_spv_CompositeConstructCoopMatQCOM(
+    [[vk::ext_reference]] ArrayPointerType array);
+
+// --- OpCompositeExtractCoopMatQCOM (4541) ---
+// Custom handler in SpirvEmitter: processCooperativeMatrixExtractQCOM
+// Uses out-pointer to avoid RWStructuredBuffer counter-variable lookup.
+
+template <typename CoopMatSpirvType, typename ResultPointerType>
+[[vk::ext_instruction(/* OpCompositeExtractCoopMatQCOM */ 4541)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionQCOM */ 4496)]]
+[[vk::ext_extension("SPV_QCOM_cooperative_matrix_conversion")]]
+void __builtin_spv_CompositeExtractCoopMatQCOM(
+    CoopMatSpirvType matrix,
+    [[vk::ext_reference]] ResultPointerType resultArray);
+
+// --- OpExtractSubArrayQCOM (4542) ---
+// Custom handler in SpirvEmitter: processCooperativeMatrixSubArrayQCOM
+// Uses out-pointer to avoid RWStructuredBuffer counter-variable lookup.
+
+template <typename ArrayPointerType, typename ResultPointerType>
+[[vk::ext_instruction(/* OpExtractSubArrayQCOM */ 4542)]]
+[[vk::ext_capability(/* CooperativeMatrixConversionQCOM */ 4496)]]
+[[vk::ext_extension("SPV_QCOM_cooperative_matrix_conversion")]]
+void __builtin_spv_ExtractSubArrayQCOM(
+    [[vk::ext_reference]] ArrayPointerType array,
+    uint index,
+    [[vk::ext_reference]] ResultPointerType resultArray);
+
+
+// ============================================================================
+// Template Function Implementations
+// ============================================================================
+
+namespace vk {
+namespace qcom {
+
+// --- bitCastArray ---
+
+template <typename ResultType, typename ArrayType>
+void bitCastArray(ArrayType array, ResultType result) {
+  __builtin_spv_BitCastArrayQCOM(array, result);
+}
+
+// --- compositeConstructCooperativeMatrix ---
+// Fixed: The custom emitter in SpirvEmitter.cpp loads the array value from
+// the pointer, creating a proper OpTypeArray operand for the SPIR-V instruction.
+
+template <typename ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use, typename ArrayType>
+khr::CooperativeMatrix<ComponentType, scope, rows, columns, use>
+compositeConstructCooperativeMatrix(ArrayType array) {
+  using CoopMatType =
+      khr::CooperativeMatrix<ComponentType, scope, rows, columns, use>;
+  CoopMatType result;
+  result._matrix =
+      __builtin_spv_CompositeConstructCoopMatQCOM<
+          typename CoopMatType::SpirvMatrixType>(array);
+  return result;
+}
+
+// --- compositeExtractCooperativeMatrix ---
+
+template <typename ResultArrayType, typename ComponentType, Scope scope,
+          uint rows, uint columns, CooperativeMatrixUse use>
+void compositeExtractCooperativeMatrix(
+    khr::CooperativeMatrix<ComponentType, scope, rows, columns, use> matrix,
+    ResultArrayType resultArray) {
+  __builtin_spv_CompositeExtractCoopMatQCOM(matrix._matrix, resultArray);
+}
+
+// --- extractSubArray ---
+
+template <typename ResultType, typename ArrayType>
+void extractSubArray(ArrayType array, uint index, ResultType result) {
+  __builtin_spv_ExtractSubArrayQCOM(array, index, result);
+}
+
+} // namespace qcom
+} // namespace vk

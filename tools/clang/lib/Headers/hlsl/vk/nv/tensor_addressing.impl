@@ -1,0 +1,225 @@
+// Copyright (c) 2024 Google LLC
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <vk/opcode_selector.h>
+
+// ============================================================================
+// Inline-SPIR-V Builtin Declarations
+// ============================================================================
+
+// --- OpCreateTensorLayoutNV (5372) ---
+// Requires: TensorAddressingNV (5439), SPV_NV_tensor_addressing
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpCreateTensorLayoutNV */ 5372)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_CreateTensorLayoutNV();
+
+// --- OpTensorLayoutSetDimensionNV (5373) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorLayoutSetDimensionNV */ 5373)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorLayoutSetDimensionNV(
+    ResultType layout, uint dim, uint size);
+
+// --- OpTensorLayoutSetStrideNV (5374) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorLayoutSetStrideNV */ 5374)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorLayoutSetStrideNV(
+    ResultType layout, uint dim, uint stride);
+
+// --- OpTensorLayoutSetBlockSizeNV (5384) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorLayoutSetBlockSizeNV */ 5384)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorLayoutSetBlockSizeNV(
+    ResultType layout, uint dim, uint blockSize);
+
+// --- OpTensorLayoutSliceNV (5375) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorLayoutSliceNV */ 5375)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorLayoutSliceNV(
+    ResultType layout, uint dim, uint offset, uint span);
+
+// --- OpTensorLayoutSetClampValueNV (5376) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorLayoutSetClampValueNV */ 5376)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorLayoutSetClampValueNV(
+    ResultType layout, uint clampValue);
+
+// --- OpCreateTensorViewNV (5377) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpCreateTensorViewNV */ 5377)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_CreateTensorViewNV();
+
+// --- OpTensorViewSetDimensionNV (5378) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorViewSetDimensionNV */ 5378)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorViewSetDimensionNV(
+    ResultType view, uint dim, uint size);
+
+// --- OpTensorViewSetStrideNV (5379) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorViewSetStrideNV */ 5379)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorViewSetStrideNV(
+    ResultType view, uint dim, uint stride);
+
+// --- OpTensorViewSetClipNV (5382) ---
+
+template <typename ResultType>
+[[vk::ext_instruction(/* OpTensorViewSetClipNV */ 5382)]]
+[[vk::ext_capability(/* TensorAddressingNV */ 5439)]]
+[[vk::ext_extension("SPV_NV_tensor_addressing")]]
+ResultType __builtin_spv_TensorViewSetClipNV(
+    ResultType view, uint rowOffset, uint rowSpan,
+    uint colOffset, uint colSpan);
+
+
+// ============================================================================
+// Template Function Implementations
+// ============================================================================
+
+namespace vk {
+namespace nv {
+
+// --- Tensor Layout Functions ---
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> createTensorLayout() {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_CreateTensorLayoutNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>();
+  return result;
+}
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> tensorLayoutSetDimension(
+    TensorLayout<Dim, ClampMode> layout, uint dim, uint size) {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_TensorLayoutSetDimensionNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>(
+          layout._layout, dim, size);
+  return result;
+}
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> tensorLayoutSetStride(
+    TensorLayout<Dim, ClampMode> layout, uint dim, uint stride) {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_TensorLayoutSetStrideNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>(
+          layout._layout, dim, stride);
+  return result;
+}
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> tensorLayoutSetBlockSize(
+    TensorLayout<Dim, ClampMode> layout, uint dim, uint blockSize) {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_TensorLayoutSetBlockSizeNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>(
+          layout._layout, dim, blockSize);
+  return result;
+}
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> tensorLayoutSlice(
+    TensorLayout<Dim, ClampMode> layout, uint dim, uint offset, uint span) {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_TensorLayoutSliceNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>(
+          layout._layout, dim, offset, span);
+  return result;
+}
+
+template <uint Dim, uint ClampMode>
+TensorLayout<Dim, ClampMode> tensorLayoutSetClampValue(
+    TensorLayout<Dim, ClampMode> layout, uint clampValue) {
+  TensorLayout<Dim, ClampMode> result;
+  result._layout =
+      __builtin_spv_TensorLayoutSetClampValueNV<
+          typename TensorLayout<Dim, ClampMode>::SpirvLayoutType>(
+          layout._layout, clampValue);
+  return result;
+}
+
+// --- Tensor View Functions ---
+
+template <uint Dim, bool HasDimensions, uint Perm0, uint Perm1>
+TensorView<Dim, HasDimensions, Perm0, Perm1> createTensorView() {
+  TensorView<Dim, HasDimensions, Perm0, Perm1> result;
+  result._view =
+      __builtin_spv_CreateTensorViewNV<
+          typename TensorView<Dim, HasDimensions, Perm0, Perm1>::SpirvViewType>();
+  return result;
+}
+
+template <uint Dim, bool HasDimensions, uint Perm0, uint Perm1>
+TensorView<Dim, HasDimensions, Perm0, Perm1> tensorViewSetDimension(
+    TensorView<Dim, HasDimensions, Perm0, Perm1> view,
+    uint dim, uint size) {
+  TensorView<Dim, HasDimensions, Perm0, Perm1> result;
+  result._view =
+      __builtin_spv_TensorViewSetDimensionNV<
+          typename TensorView<Dim, HasDimensions, Perm0, Perm1>::SpirvViewType>(
+          view._view, dim, size);
+  return result;
+}
+
+template <uint Dim, bool HasDimensions, uint Perm0, uint Perm1>
+TensorView<Dim, HasDimensions, Perm0, Perm1> tensorViewSetStride(
+    TensorView<Dim, HasDimensions, Perm0, Perm1> view,
+    uint dim, uint stride) {
+  TensorView<Dim, HasDimensions, Perm0, Perm1> result;
+  result._view =
+      __builtin_spv_TensorViewSetStrideNV<
+          typename TensorView<Dim, HasDimensions, Perm0, Perm1>::SpirvViewType>(
+          view._view, dim, stride);
+  return result;
+}
+
+template <uint Dim, bool HasDimensions, uint Perm0, uint Perm1>
+TensorView<Dim, HasDimensions, Perm0, Perm1> tensorViewSetClip(
+    TensorView<Dim, HasDimensions, Perm0, Perm1> view,
+    uint rowOffset, uint rowSpan, uint colOffset, uint colSpan) {
+  TensorView<Dim, HasDimensions, Perm0, Perm1> result;
+  result._view =
+      __builtin_spv_TensorViewSetClipNV<
+          typename TensorView<Dim, HasDimensions, Perm0, Perm1>::SpirvViewType>(
+          view._view, rowOffset, rowSpan, colOffset, colSpan);
+  return result;
+}
+
+} // namespace nv
+} // namespace vk

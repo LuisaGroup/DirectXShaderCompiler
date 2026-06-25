@@ -52,6 +52,12 @@ if (ENABLE_SPIRV_CODEGEN)
        vk/khr/cooperative_matrix.impl
        vk/nv/cooperative_vector.h
        vk/nv/cooperative_vector.impl
+       vk/nv/cooperative_matrix2.h
+       vk/nv/cooperative_matrix2.impl
+       vk/nv/tensor_addressing.h
+       vk/nv/tensor_addressing.impl
+       vk/qcom/cooperative_matrix_conversion.h
+       vk/qcom/cooperative_matrix_conversion.impl
        vk/opcode_selector.h
        vk/spirv.h
        )
