@@ -16876,21 +16876,36 @@ SpirvInstruction *SpirvEmitter::processIntrinsicGroupAsyncCopy(
 
   // Expect: execution_scope, dest, source, elem_bytes, num_elems, stride, event
   // Optional: destMemoryAccess, srcMemoryAccess
-  auto handleRefParam = [&](uint32_t idx) -> SpirvInstruction * {
+  auto createUntypedRef = [&](uint32_t idx) -> SpirvInstruction * {
     const Expr *arg = args[idx]->IgnoreParenLValueCasts();
-    SpirvInstruction *argInst = doExpr(arg);
-    if (argInst->isRValue()) {
+    llvm::SmallVector<SpirvInstruction *, 4> indices;
+    const Expr *baseExpr = collectArrayStructIndices(
+        arg, /*rawIndex=*/false, /*rawIndices=*/nullptr, &indices);
+    SpirvInstruction *base = doExpr(baseExpr);
+    if (base->isRValue()) {
       emitError("argument for a parameter with vk::ext_reference attribute "
                 "must be a reference",
                 arg->getExprLoc());
       return nullptr;
     }
-    return argInst;
+    spv::StorageClass sc = base->getStorageClass();
+    const SpirvPointerType *ptrType =
+        dyn_cast<SpirvPointerType>(base->getResultType());
+    if (!ptrType) {
+      emitError("expected pointer type for vk::ext_reference parameter",
+                arg->getExprLoc());
+      return nullptr;
+    }
+    const SpirvType *baseType = ptrType->getPointeeType();
+    const UntypedPointerKHRType *untypedPtrType =
+        spvContext.getUntypedPointerKHRType(sc);
+    return spvBuilder.createUntypedAccessChainKHR(
+        untypedPtrType, baseType, base, indices, loc);
   };
 
   SpirvInstruction *execScope = doExpr(args[0]);
-  SpirvInstruction *dest = handleRefParam(1);
-  SpirvInstruction *src = handleRefParam(2);
+  SpirvInstruction *dest = createUntypedRef(1);
+  SpirvInstruction *src = createUntypedRef(2);
   SpirvInstruction *elemBytes = doExpr(args[3]);
   SpirvInstruction *numElems = doExpr(args[4]);
   SpirvInstruction *stride = doExpr(args[5]);
