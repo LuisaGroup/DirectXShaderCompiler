@@ -1199,8 +1199,8 @@ class db_dxil(object):
         retoload_param = db_dxil_param(0, "$o", "", "no return value")
         oload_all_arith = "hfd1wil"  # note that 8 is missing
         oload_all_arith_v = "v" + oload_all_arith
-        oload_int_arith = "wil"  # note that 8 is missing
-        oload_int_arith_b = "1wil"  # note that 8 is missing
+        oload_int_arith = "wil8"  # SM 6.9+: native i8 overloads
+        oload_int_arith_b = "1wil8"  # SM 6.9+: native i8 overloads
         oload_float_arith = "hfd"
         oload_cast_params = [
             retoload_param,
@@ -1734,7 +1734,7 @@ class db_dxil(object):
             "TempRegLoad",
             "TempRegLoad",
             "helper load operation",
-            "hfwi",
+            "hfwi8",
             "ro",
             [
                 db_dxil_param(0, "$o", "", "register value"),
@@ -1745,7 +1745,7 @@ class db_dxil(object):
             "TempRegStore",
             "TempRegStore",
             "helper store operation",
-            "hfwi",
+            "hfwi8",
             "",
             [
                 retvoid_param,
@@ -1784,7 +1784,7 @@ class db_dxil(object):
             "LoadInput",
             "LoadInput",
             "loads the value from shader input",
-            "hfwi",
+            "hfwi8",
             "rn",
             [
                 db_dxil_param(0, "$o", "", "input value"),
@@ -1799,7 +1799,7 @@ class db_dxil(object):
             "StoreOutput",
             "StoreOutput",
             "stores the value to shader output",
-            "hfwi",
+            "hfwi8",
             "",
             [  # note, cannot store bit even though load supports it
                 retvoid_param,
@@ -2203,7 +2203,7 @@ class db_dxil(object):
             "CBufferLoadLegacy",
             "CBufferLoadLegacy",
             "loads a value from a constant buffer resource",
-            "hfdwil",
+            "hfdwil8",
             "ro",
             [
                 db_dxil_param(
@@ -2550,7 +2550,7 @@ class db_dxil(object):
             "BufferLoad",
             "BufferLoad",
             "reads from a TypedBuffer",
-            "hfwi",
+            "hfwi8",
             "ro",
             [
                 db_dxil_param(0, "$r", "", "the loaded value"),
@@ -2564,7 +2564,7 @@ class db_dxil(object):
             "BufferStore",
             "BufferStore",
             "writes to a RWTypedBuffer",
-            "hfwi",
+            "hfwi8",
             "",
             [
                 db_dxil_param(0, "v", "", ""),
@@ -3641,7 +3641,7 @@ class db_dxil(object):
             "RawBufferLoad",
             "RawBufferLoad",
             "reads from a raw buffer and structured buffer",
-            "hfwidl",
+            "hfwi8dl",
             "ro",
             [
                 db_dxil_param(0, "$r", "", "the loaded value"),
@@ -3674,7 +3674,7 @@ class db_dxil(object):
             "RawBufferStore",
             "RawBufferStore",
             "writes to a RWByteAddressBuffer or RWStructuredBuffer",
-            "hfwidl",
+            "hfwi8dl",
             "",
             [
                 db_dxil_param(0, "v", "", ""),

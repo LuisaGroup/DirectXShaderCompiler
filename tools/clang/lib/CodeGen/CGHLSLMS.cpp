@@ -617,6 +617,14 @@ static CompType::Kind BuiltinTyToCompTy(const BuiltinType *BTy, bool bSNorm,
 
   switch (BTy->getKind()) {
   // HLSL Changes begin
+  // Native 8-bit signed/unsigned integer types (SM 6.9+).
+  case BuiltinType::SChar:
+    kind = CompType::Kind::I8;
+    break;
+  case BuiltinType::UChar:
+    kind = CompType::Kind::U8;
+    break;
+  // Packed 8-bit types (stored in i32, unrelated to native int8_t/uint8_t).
   case BuiltinType::Int8_4Packed:
     kind = CompType::Kind::PackedS8x32;
     break;

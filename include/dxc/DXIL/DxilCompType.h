@@ -39,9 +39,11 @@ public:
   static CompType getF16();
   static CompType getF32();
   static CompType getF64();
+  static CompType getI8();
   static CompType getI16();
   static CompType getI32();
   static CompType getI64();
+  static CompType getU8();
   static CompType getU16();
   static CompType getU32();
   static CompType getU64();
@@ -64,6 +66,7 @@ public:
   bool IsUNorm() const;
   bool Is64Bit() const;
   bool Is16Bit() const;
+  bool Is8Bit() const;
 
   /// For min-precision types, returns upconverted (base) type.
   CompType GetBaseCompType() const;

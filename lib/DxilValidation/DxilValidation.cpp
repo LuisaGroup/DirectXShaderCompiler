@@ -3108,9 +3108,10 @@ static void ValidateFunctionBody(Function *F, ValidationContext &ValCtx) {
         if (IntegerType *IT = dyn_cast<IntegerType>(op->getType())) {
           unsigned BW = IT->getBitWidth();
           if (BW == 8) {
-            // We always fail if we see i8 as operand type of a non-lifetime
-            // instruction.
-            ValCtx.EmitInstrError(&I, ValidationRule::TypesI8);
+            // i8 operands are only allowed for SM 6.9+.
+            if (!ValCtx.DxilMod.GetShaderModel()->IsSM69Plus()) {
+              ValCtx.EmitInstrError(&I, ValidationRule::TypesI8);
+            }
           } else {
             ValidateType(IT, ValCtx);
           }
@@ -3125,9 +3126,13 @@ static void ValidateFunctionBody(Function *F, ValidationContext &ValCtx) {
       if (IntegerType *IT = dyn_cast<IntegerType>(Ty)) {
         unsigned BW = IT->getBitWidth();
         if (BW == 8) {
-          // Allow i8* cast for llvm.lifetime.* intrinsics.
-          if (!SupportsLifetimeIntrinsics || !isa<BitCastInst>(I) ||
-              !onlyUsedByLifetimeMarkers(&I)) {
+          // Allow i8* cast for llvm.lifetime.* intrinsics on all shader models.
+          // For other instructions, i8 results are only allowed for SM 6.9+.
+          bool IsLifetimeCast = SupportsLifetimeIntrinsics &&
+                                isa<BitCastInst>(I) &&
+                                onlyUsedByLifetimeMarkers(&I);
+          if (!IsLifetimeCast &&
+              !ValCtx.DxilMod.GetShaderModel()->IsSM69Plus()) {
             ValCtx.EmitInstrError(&I, ValidationRule::TypesI8);
           }
         } else {
@@ -4133,6 +4138,11 @@ static void ValidateResource(hlsl::DxilResource &Res,
   case DXIL::ComponentType::I16:
   case DXIL::ComponentType::U16:
     break;
+  case DXIL::ComponentType::I8:
+  case DXIL::ComponentType::U8:
+    if (!ValCtx.DxilMod.GetShaderModel()->IsSM69Plus())
+      ValCtx.EmitResourceError(&Res, ValidationRule::SmInvalidResourceCompType);
+    break;
   default:
     if (!Res.IsStructuredBuffer() && !Res.IsRawBuffer() &&
         !Res.IsFeedbackTexture())
@@ -4439,6 +4449,15 @@ static void ValidateSignatureElement(DxilSignatureElement &SE,
     break;
   case CompType::Kind::U16:
     CompWidth = 16;
+    CompInt = true;
+    break;
+  case CompType::Kind::I8:
+  case CompType::Kind::U8:
+    if (!ValCtx.DxilMod.GetShaderModel()->IsSM69Plus()) {
+      ValCtx.EmitFormatError(ValidationRule::MetaSignatureCompType,
+                             {SE.GetName()});
+    }
+    CompWidth = 8;
     CompInt = true;
     break;
   case CompType::Kind::I16:

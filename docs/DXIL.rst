@@ -2009,33 +2009,33 @@ Instruction    Action                                                           
 Ret            returns a value (possibly void), from a function.                       vhfd1wil
 Br             branches (conditional or unconditional)
 Switch         performs a multiway switch
-Add            returns the sum of its two operands                                     wil
+Add            returns the sum of its two operands                                     wil8
 FAdd           returns the sum of its two operands                                     hfd
-Sub            returns the difference of its two operands                              wil
+Sub            returns the difference of its two operands                              wil8
 FSub           returns the difference of its two operands                              hfd
-Mul            returns the product of its two operands                                 wil
+Mul            returns the product of its two operands                                 wil8
 FMul           returns the product of its two operands                                 hfd
-UDiv           returns the quotient of its two unsigned operands                       wil
-SDiv           returns the quotient of its two signed operands                         wil
+UDiv           returns the quotient of its two unsigned operands                       wil8
+SDiv           returns the quotient of its two signed operands                         wil8
 FDiv           returns the quotient of its two operands                                hfd
-URem           returns the remainder from the unsigned division of its two operands    wil
-SRem           returns the remainder from the signed division of its two operands      wil
+URem           returns the remainder from the unsigned division of its two operands    wil8
+SRem           returns the remainder from the signed division of its two operands      wil8
 FRem           returns the remainder from the division of its two operands             hfd
-Shl            shifts left (logical)                                                   wil
-LShr           shifts right (logical), with zero bit fill                              wil
-AShr           shifts right (arithmetic), with 'a' operand sign bit fill               wil
-And            returns a  bitwise logical and of its two operands                      1wil
-Or             returns a bitwise logical or of its two operands                        1wil
-Xor            returns a bitwise logical xor of its two operands                       1wil
+Shl            shifts left (logical)                                                   wil8
+LShr           shifts right (logical), with zero bit fill                              wil8
+AShr           shifts right (arithmetic), with 'a' operand sign bit fill               wil8
+And            returns a  bitwise logical and of its two operands                      1wil8
+Or             returns a bitwise logical or of its two operands                        1wil8
+Xor            returns a bitwise logical xor of its two operands                       1wil8
 Alloca         allocates memory on the stack frame of the currently executing function
 Load           reads from memory
 Store          writes to memory
 GetElementPtr  gets the address of a subelement of an aggregate value
 AtomicCmpXchg  atomically modifies memory
 AtomicRMW      atomically modifies memory
-Trunc          truncates an integer                                                    1wil
-ZExt           zero extends an integer                                                 1wil
-SExt           sign extends an integer                                                 1wil
+Trunc          truncates an integer                                                    1wil8
+ZExt           zero extends an integer                                                 1wil8
+SExt           sign extends an integer                                                 1wil8
 FPToUI         converts a floating point to UInt                                       hfd1wil
 FPToSI         converts a floating point to SInt                                       hfd1wil
 UIToFP         converts a UInt to floating point                                       hfd1wil
@@ -2044,7 +2044,7 @@ FPTrunc        truncates a floating point                                       
 FPExt          extends a floating point                                                hfd
 BitCast        performs a bit-preserving type cast                                     hfd1wil
 AddrSpaceCast  casts a value addrspace
-ICmp           compares integers                                                       1wil
+ICmp           compares integers                                                       1wil8
 FCmp           compares floating points                                                hfd
 PHI            is a PHI node instruction
 Call           calls a function

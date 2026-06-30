@@ -2364,15 +2364,14 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
 
   DXASSERT(uBits != BPROP_BITS0,
            "CombineBasicTypes: uBits should not be zero at this point");
-  DXASSERT(uBits != BPROP_BITS8,
-           "CombineBasicTypes: 8-bit types not supported at this time");
+  // BPROP_BITS8 is now supported for native int8_t/uint8_t (SM 6.9+).
 
   if (bMinPrecisionResult) {
     DXASSERT(
         uBits < BPROP_BITS32,
         "CombineBasicTypes: min-precision result must be less than 32-bits");
   } else {
-    DXASSERT(uBits > BPROP_BITS12,
+    DXASSERT(uBits != BPROP_BITS10 && uBits != BPROP_BITS12,
              "CombineBasicTypes: 10 or 12 bit result must be min precision");
   }
   if (bFloatResult) {
@@ -2410,6 +2409,10 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
     switch (uBits) {
     case BPROP_BITS12:
       *pOutKind = AR_BASIC_MIN12INT;
+      break;
+    case BPROP_BITS8:
+      *pOutKind = (uResultFlags & BPROP_UNSIGNED) ? AR_BASIC_UINT8
+                                                  : AR_BASIC_INT8;
       break;
     case BPROP_BITS16:
       if (uResultFlags & BPROP_UNSIGNED)
@@ -4538,14 +4541,23 @@ public:
         break;
       }
     }
-    // int8_t/uint8_t are only supported with -spirv (Vulkan SPIR-V backend).
+    // int8_t/uint8_t require SM 6.9+ for the DXIL backend. The SPIR-V backend
+    // already allows these types without an SM gate.
+    // int8_t4_packed/uint8_t4_packed remain i32 packed types and are separate
+    // from native int8_t/uint8_t vectors.
     if (!getSema()->getLangOpts().SPIRV) {
       switch (type) {
       case HLSLScalarType_int8:
-      case HLSLScalarType_uint8:
-        m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_spirv)
-            << HLSLScalarTypeNames[type];
-        return false;
+      case HLSLScalarType_uint8: {
+        const ShaderModel *SM =
+            hlsl::ShaderModel::GetByName(m_sema->getLangOpts().HLSLProfile.c_str());
+        if (!SM->IsSM69Plus()) {
+          m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
+              << HLSLScalarTypeNames[type] << "6.9";
+          return false;
+        }
+        break;
+      }
       default:
         break;
       }

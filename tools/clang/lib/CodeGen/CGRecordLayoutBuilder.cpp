@@ -754,7 +754,20 @@ CGRecordLayout *CodeGenTypes::ComputeRecordLayout(const RecordDecl *D,
 #if 1 // HLSL Change - Re-enable validation with HLSL struct size guard.
   const ASTRecordLayout &Layout = getContext().getASTRecordLayout(D);
   uint64_t TypeSizeInBits = getContext().toBits(Layout.getSize());
-  if (!getContext().getLangOpts().HLSL) {
+  // HLSL Change: Validate struct size for HLSL when the data layout uses
+  // natural alignment for small types (i.e. -enable-16bit-types / new layout
+  // where i8 align = 1). The legacy layout inflates i8/i16/f16 alignment to
+  // 32 bits, so LLVM type sizes legitimately differ from the AST layout in
+  // that mode.  When the new layout is active the LLVM struct mirrors the
+  // C++ / MSVC-compatible layout produced by the AST, so the size check
+  // is meaningful and should fire on any mismatch.
+  bool ShouldCheckSize = !getContext().getLangOpts().HLSL;
+  if (getContext().getLangOpts().HLSL) {
+    llvm::Type *I8Ty = llvm::Type::getInt8Ty(getLLVMContext());
+    ShouldCheckSize =
+        getDataLayout().getABITypeAlignment(I8Ty) == 1; // new layout
+  }
+  if (ShouldCheckSize) {
     assert(TypeSizeInBits == getDataLayout().getTypeAllocSizeInBits(Ty) &&
            "Type size mismatch!");
   }

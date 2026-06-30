@@ -28,6 +28,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
@@ -646,15 +647,18 @@ void DxilMutateResourceToHandle::mutateCandidates(Module &M) {
       // Make sure C is mutated so the GEP get correct sourceElementType.
       C->mutateType(mutateToHandleTy(C->getType()));
 
-      // Collect user of GEPs, then replace all use with undef.
-      SmallVector<Use *, 2> Uses;
+      // Collect users of the GEP so we can redirect them to the new GEP.
+      // Use WeakVHs so that if removeDeadConstantUsers deletes a user, we
+      // safely skip it instead of dereferencing a freed Use object.
+      SmallVector<WeakVH, 2> Users;
       for (Use &U : GEPO->uses()) {
-        Uses.emplace_back(&U);
+        Users.emplace_back(U.getUser());
       }
 
       SmallVector<Value *, 2> idxList(GEPO->idx_begin(), GEPO->idx_end());
       Type *Ty = GEPO->getType();
-      GEPO->replaceAllUsesWith(UndefValue::get(Ty));
+      Value *Undef = UndefValue::get(Ty);
+      GEPO->replaceAllUsesWith(Undef);
       StringRef Name = GEPO->getName();
 
       // GO and newGO will be same constant except has different
@@ -663,9 +667,25 @@ void DxilMutateResourceToHandle::mutateCandidates(Module &M) {
       C->removeDeadConstantUsers();
 
       Value *newGO = B.CreateGEP(C, idxList, Name);
-      // update uses.
-      for (Use *U : Uses) {
-        U->set(newGO);
+      // Update live users.  WeakVHs that have been deleted reset to null.
+      for (WeakVH &UserVH : Users) {
+        Value *User = UserVH;
+        if (!User)
+          continue;
+        if (Instruction *I = dyn_cast<Instruction>(User)) {
+          for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i) {
+            if (I->getOperand(i) == Undef) {
+              I->setOperand(i, newGO);
+              break;
+            }
+          }
+        } else if (Constant *CE = dyn_cast<Constant>(User)) {
+          // If the constant user survived, replace its uses with a fresh undef
+          // to preserve the original behavior.  Direct operand replacement is
+          // not safe for arbitrary constants.
+          if (!CE->use_empty())
+            CE->replaceAllUsesWith(UndefValue::get(CE->getType()));
+        }
       }
       continue;
     }

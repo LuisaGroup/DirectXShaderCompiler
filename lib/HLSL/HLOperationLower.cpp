@@ -8456,10 +8456,13 @@ Value *GenerateCBLoadLegacy(Value *handle, Value *legacyIdx,
   Type *halfTy = Type::getHalfTy(EltTy->getContext());
   Type *i64Ty = Type::getInt64Ty(EltTy->getContext());
   Type *i16Ty = Type::getInt16Ty(EltTy->getContext());
+  Type *i8Ty = Type::getInt8Ty(EltTy->getContext());
 
   bool is64 = (EltTy == doubleTy) | (EltTy == i64Ty);
   bool is16 = (EltTy == halfTy || EltTy == i16Ty) && !hlslOP->UseMinPrecision();
-  DXASSERT_LOCALVAR(is16, (is16 && channelOffset < 8) || channelOffset < 4,
+  bool is8 = (EltTy == i8Ty) && !hlslOP->UseMinPrecision();
+  DXASSERT_LOCALVAR(is8, (is8 && channelOffset < 16) ||
+                             (is16 && channelOffset < 8) || channelOffset < 4,
                     "legacy cbuffer don't across 16 bytes register.");
   if (is64) {
     Function *CBLoad = hlslOP->GetOpFunc(OP::OpCode::CBufferLoadLegacy, EltTy);
@@ -8490,11 +8493,14 @@ Value *GenerateCBLoadLegacy(Value *handle, Value *legacyIdx,
   Type *i64Ty = Type::getInt64Ty(EltTy->getContext());
   Type *halfTy = Type::getHalfTy(EltTy->getContext());
   Type *shortTy = Type::getInt16Ty(EltTy->getContext());
+  Type *byteTy = Type::getInt8Ty(EltTy->getContext());
 
   bool is64 = (EltTy == doubleTy) | (EltTy == i64Ty);
   bool is16 =
       (EltTy == shortTy || EltTy == halfTy) && !hlslOP->UseMinPrecision();
-  DXASSERT((is16 && channelOffset + vecSize <= 8) ||
+  bool is8 = (EltTy == byteTy) && !hlslOP->UseMinPrecision();
+  DXASSERT((is8 && channelOffset + vecSize <= 16) ||
+               (is16 && channelOffset + vecSize <= 8) ||
                (channelOffset + vecSize) <= 4,
            "legacy cbuffer don't across 16 bytes register.");
   if (is16) {
@@ -8905,8 +8911,14 @@ void TranslateCBGepLegacy(GetElementPtrInst *GEP, Value *handle,
 
       unsigned idxInc = 0;
       unsigned structOffset = 0;
-      if (fieldAnnotation->GetCompType().Is16Bit() &&
+      if (fieldAnnotation->GetCompType().Is8Bit() &&
           !hlslOP->UseMinPrecision()) {
+        structOffset = fieldAnnotation->GetCBufferOffset();
+        channel += structOffset;
+        idxInc = channel >> 4;
+        channel = channel & 0xf;
+      } else if (fieldAnnotation->GetCompType().Is16Bit() &&
+                 !hlslOP->UseMinPrecision()) {
         structOffset = fieldAnnotation->GetCBufferOffset() >> 1;
         channel += structOffset;
         idxInc = channel >> 3;
@@ -8955,11 +8967,14 @@ void TranslateCBGepLegacy(GetElementPtrInst *GEP, Value *handle,
         if (immIdx < GEPIt->getVectorNumElements()) {
           const unsigned vectorElmSize =
               DL.getTypeAllocSize(GEPIt->getVectorElementType());
+          const bool bIs8bitType = vectorElmSize == 1;
           const bool bIs16bitType = vectorElmSize == 2;
           const unsigned tempOffset = vectorElmSize * immIdx;
-          const unsigned numChannelsPerRow = bIs16bitType ? 8 : 4;
-          const unsigned channelInc =
-              bIs16bitType ? tempOffset >> 1 : tempOffset >> 2;
+          const unsigned numChannelsPerRow =
+              bIs8bitType ? 16 : (bIs16bitType ? 8 : 4);
+          const unsigned channelInc = bIs8bitType   ? tempOffset
+                                      : bIs16bitType ? tempOffset >> 1
+                                                     : tempOffset >> 2;
 
           DXASSERT((channel + channelInc) < numChannelsPerRow,
                    "vector should not cross cb register");

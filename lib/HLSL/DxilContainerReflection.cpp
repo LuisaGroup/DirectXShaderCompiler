@@ -2094,9 +2094,11 @@ CompTypeToRegisterComponentType(CompType CT) {
   case DXIL::ComponentType::F32:
     return D3D_REGISTER_COMPONENT_FLOAT32;
   case DXIL::ComponentType::I1:
+  case DXIL::ComponentType::U8:
   case DXIL::ComponentType::U16:
   case DXIL::ComponentType::U32:
     return D3D_REGISTER_COMPONENT_UINT32;
+  case DXIL::ComponentType::I8:
   case DXIL::ComponentType::I16:
   case DXIL::ComponentType::I32:
     return D3D_REGISTER_COMPONENT_SINT32;
