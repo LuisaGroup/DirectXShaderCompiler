@@ -828,6 +828,34 @@ private:
   /// call to __builtin_spv_CooperativeMatrixLengthKHR.
   SpirvInstruction *processCooperativeMatrixGetLength(const CallExpr *call);
 
+  /// Process QCOM cooperative matrix conversion builtins.
+  SpirvInstruction *processCooperativeMatrixBitCastQCOM(const CallExpr *call);
+  SpirvInstruction *processCooperativeMatrixExtractQCOM(const CallExpr *call);
+  SpirvInstruction *processCooperativeMatrixSubArrayQCOM(const CallExpr *call);
+
+  /// Process NV cooperative matrix reduce builtin.
+  SpirvInstruction *processCooperativeMatrixReduceNV(const CallExpr *call);
+  /// Process NV cooperative matrix per-element-op builtin.
+  SpirvInstruction *processCooperativeMatrixPerElementOpNV(const CallExpr *call);
+
+  /// Extract the component type from a cooperative matrix call argument.
+  QualType getComponentTypeFromCallee(const CallExpr *call);
+
+  /// Convert basic AST types (float, int, etc.) to SPIR-V types.
+  const SpirvType *convertASTTypeToSpirvType(QualType type);
+
+  /// Get or create a SPIR-V function declaration for a cooperative matrix
+  /// combine operation. The function takes two parameters of the component
+  /// type and returns the component type.
+  SpirvFunction *getOrCreateCombineFunction(const SpirvType *componentType,
+                                          QualType astComponentType);
+
+  /// Get or create a SPIR-V function declaration for a cooperative matrix
+  /// per-element operation. The function takes three parameters (int32, int32,
+  /// component_type) and returns component_type.
+  SpirvFunction *getOrCreatePerElementFunction(const SpirvType *componentType,
+                                                QualType astComponentType);
+
   /// Process vk::ext_execution_mode intrinsic
   SpirvInstruction *processIntrinsicExecutionMode(const CallExpr *expr);
   /// Process vk::ext_execution_mode_id intrinsic

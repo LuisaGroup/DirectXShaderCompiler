@@ -239,6 +239,11 @@ void SpirvModule::addFunctionToListOfSortedModuleFunctions(SpirvFunction *fn) {
   functions.push_back(fn);
 }
 
+void SpirvModule::addFunctionDeclaration(SpirvFunction *fn) {
+  assert(fn && "cannot add null function to the module");
+  functions.insert(functions.begin(), fn);
+}
+
 void SpirvModule::addFunction(SpirvFunction *fn) {
   assert(fn && "cannot add null function to the module");
   allFunctions.insert(fn);

@@ -2138,6 +2138,32 @@ std::vector<uint32_t> SpirvBuilder::takeModule() {
   // Lower types
   mod->invokeVisitor(&lowerTypeVisitor);
 
+  // Fix up cooperative matrix helper function declarations: LowerTypeVisitor
+  // converts all function parameters to pointer types, but NV cooperative
+  // matrix instructions (OpCooperativeMatrixReduceNV, OpCooperativeMatrixPerElementOpNV)
+  // require value-type parameters.  Restore the correct value types.
+  for (auto *fn : mod->getFunctions()) {
+    llvm::StringRef name = fn->getFunctionName();
+    if (name.startswith("__coopmat_")) {
+      auto params = fn->getParameters();
+      const SpirvType *retType = fn->getReturnType();
+      llvm::SmallVector<const SpirvType *, 4> paramTypes;
+      for (auto *param : params) {
+        const SpirvType *ty = param->getResultType();
+        // LowerTypeVisitor converts parameter types to pointers.
+        // Unwrap to get the underlying value type.
+        while (isa<SpirvPointerType>(ty)) {
+          ty = cast<SpirvPointerType>(ty)->getPointeeType();
+        }
+        paramTypes.push_back(ty);
+        param->setResultType(ty);
+      }
+      if (!paramTypes.empty() && retType) {
+        fn->setFunctionType(context.getFunctionType(retType, paramTypes));
+      }
+    }
+  }
+
   // Generate debug types (if needed)
   if (spirvOptions.debugInfoRich) {
     DebugTypeVisitor debugTypeVisitor(astContext, context, spirvOptions, *this,

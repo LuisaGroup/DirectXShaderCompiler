@@ -144,6 +144,7 @@ public:
     IK_NullaryOp,                   // Nullary operations
     IK_VectorShuffle,               // OpVectorShuffle
     IK_SpirvIntrinsicInstruction,   // Spirv Intrinsic Instructions
+    IK_FunctionRef,                 // Reference to a SpirvFunction
 
     // For DebugInfo instructions defined in
     // OpenCL.DebugInfo.100 and NonSemantic.Shader.DebugInfo.100
@@ -2598,6 +2599,30 @@ private:
   llvm::SmallVector<uint32_t, 4> capabilities;
   llvm::SmallVector<std::string, 4> extensions;
   SpirvExtInstImport *instructionSet;
+};
+
+/// \brief A wrapper instruction that references a SpirvFunction.
+/// Used as an operand in intrinsic instructions that need to reference
+/// a function (e.g., OpCooperativeMatrixReduceNV, OpCooperativeMatrixPerElementOpNV).
+class SpirvFunctionRef : public SpirvInstruction {
+public:
+  SpirvFunctionRef(SpirvFunction *func);
+
+  DEFINE_RELEASE_MEMORY_FOR_CLASS(SpirvFunctionRef)
+
+  static bool classof(const SpirvInstruction *inst) {
+    return inst->getKind() == IK_FunctionRef;
+  }
+
+  bool invokeVisitor(Visitor *v) override;
+
+  SpirvFunction *getFunction() const { return function; }
+  void replaceOperand(
+      llvm::function_ref<SpirvInstruction *(SpirvInstruction *)> remapOp,
+      bool inEntryFunctionWrapper) override {}
+
+private:
+  SpirvFunction *function;
 };
 
 /// \brief Base class for all rich DebugInfo extension instructions.

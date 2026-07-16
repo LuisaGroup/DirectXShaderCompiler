@@ -339,13 +339,21 @@ const SpirvType *LowerTypeVisitor::lowerType(const SpirvType *type,
   }
   // Vectors could contain a hybrid type
   else if (const auto *vecType = dyn_cast<VectorType>(type)) {
+    const uint32_t elemCount = vecType->getElementCount();
+    // SPIR-V only supports 2-, 3- and 4-component vectors.  In cooperative
+    // matrix/vector contexts (e.g. HLSL SM 6.9+ vectors) we lower vectors
+    // with more than 4 components as arrays.
+    if (elemCount > 4 && spvContext.hasCooperativeVectorOrMatrixType()) {
+      const auto *loweredElemType =
+          lowerType(vecType->getElementType(), rule, loc);
+      return spvContext.getArrayType(loweredElemType, elemCount, /*stride*/ 0);
+    }
     const auto *loweredElemType =
         lowerType(vecType->getElementType(), rule, loc);
     // If vector didn't contain any hybrid types, return itself.
     if (vecType->getElementType() == loweredElemType)
       return vecType;
-    return spvContext.getVectorType(loweredElemType,
-                                    vecType->getElementCount());
+    return spvContext.getVectorType(loweredElemType, elemCount);
   }
   // Arrays could contain a hybrid type
   else if (const auto *arrType = dyn_cast<ArrayType>(type)) {
@@ -524,9 +532,22 @@ const SpirvType *LowerTypeVisitor::lowerType(QualType type,
   { // Vector types
     QualType elemType = {};
     uint32_t elemCount = {};
-    if (isVectorType(type, &elemType, &elemCount))
+    if (isVectorType(type, &elemType, &elemCount)) {
+      // SPIR-V only supports 2-, 3- and 4-component vectors.  In cooperative
+      // matrix/vector contexts (e.g. HLSL SM 6.9+ vectors) we lower vectors
+      // with more than 4 components as arrays.
+      if (elemCount > 4) {
+        uint32_t stride = 0;
+        if (rule != SpirvLayoutRule::Void)
+          alignmentCalc.getAlignmentAndSize(type, rule, isRowMajor, &stride);
+        return spvContext.getArrayType(
+            lowerType(elemType, rule, isRowMajor, srcLoc), elemCount,
+            rule != SpirvLayoutRule::Void ? llvm::Optional<uint32_t>(stride)
+                                          : llvm::None);
+      }
       return spvContext.getVectorType(
           lowerType(elemType, rule, isRowMajor, srcLoc), elemCount);
+    }
   }
 
   { // Matrix types

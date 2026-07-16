@@ -93,6 +93,13 @@ public:
   // Add a function to the list of module functions.
   void addFunctionToListOfSortedModuleFunctions(SpirvFunction *);
 
+  // Add a function declaration to the front of the function list (so it
+  // appears before any definitions).
+  void addFunctionDeclaration(SpirvFunction *);
+
+  /// Returns the list of functions to be emitted.
+  std::vector<SpirvFunction *> &getFunctions() { return functions; }
+
   // Adds the given function to the vector of all discovered functions. Calling
   // this function will not result in emitting the function.
   void addFunction(SpirvFunction *);

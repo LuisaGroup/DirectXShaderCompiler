@@ -149,14 +149,15 @@ bool isReferencingNonAliasStructuredOrByteBuffer(const Expr *expr) {
 }
 
 /// Translates atomic HLSL opcodes into the equivalent SPIR-V opcode.
-spv::Op translateAtomicHlslOpcodeToSpirvOpcode(hlsl::IntrinsicOp opcode) {
+spv::Op translateAtomicHlslOpcodeToSpirvOpcode(hlsl::IntrinsicOp opcode,
+                                               bool isFloat = false) {
   using namespace hlsl;
   using namespace spv;
 
   switch (opcode) {
   case IntrinsicOp::IOP_InterlockedAdd:
   case IntrinsicOp::MOP_InterlockedAdd:
-    return Op::OpAtomicIAdd;
+    return isFloat ? Op::OpAtomicFAddEXT : Op::OpAtomicIAdd;
   case IntrinsicOp::IOP_InterlockedAnd:
   case IntrinsicOp::MOP_InterlockedAnd:
     return Op::OpAtomicAnd;
@@ -174,13 +175,21 @@ spv::Op translateAtomicHlslOpcodeToSpirvOpcode(hlsl::IntrinsicOp opcode) {
     return Op::OpAtomicUMin;
   case IntrinsicOp::IOP_InterlockedMax:
   case IntrinsicOp::MOP_InterlockedMax:
-    return Op::OpAtomicSMax;
+    return isFloat ? Op::OpAtomicFMaxEXT : Op::OpAtomicSMax;
   case IntrinsicOp::IOP_InterlockedMin:
   case IntrinsicOp::MOP_InterlockedMin:
-    return Op::OpAtomicSMin;
+    return isFloat ? Op::OpAtomicFMinEXT : Op::OpAtomicSMin;
   case IntrinsicOp::IOP_InterlockedExchange:
   case IntrinsicOp::MOP_InterlockedExchange:
+  case IntrinsicOp::MOP_InterlockedExchangeFloat:
     return Op::OpAtomicExchange;
+  case IntrinsicOp::IOP_InterlockedCompareExchangeFloatBitwise:
+  case IntrinsicOp::MOP_InterlockedCompareExchangeFloatBitwise:
+  case IntrinsicOp::IOP_InterlockedCompareStoreFloatBitwise:
+  case IntrinsicOp::MOP_InterlockedCompareStoreFloatBitwise:
+    // These are handled via createAtomicCompareExchange, not this function.
+    // If reached, fall through to error.
+    break;
   default:
     // Only atomic opcodes are relevant.
     break;
@@ -538,6 +547,21 @@ bool isCooperativeMatrixGetLengthIntrinsic(
     const FunctionDecl *functionDeclaration) {
   return functionDeclaration->getName().equals(
       "__builtin_spv_CooperativeMatrixLengthKHR");
+}
+bool isCooperativeMatrixBitCastQCOMIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_BitCastArrayQCOM");
+}
+bool isCooperativeMatrixExtractQCOMIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_CompositeExtractCoopMatQCOM");
+}
+bool isCooperativeMatrixSubArrayQCOMIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_ExtractSubArrayQCOM");
+}
+bool isCooperativeMatrixReduceNVIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_CooperativeMatrixReduceNV");
+}
+bool isCooperativeMatrixPerElementOpNVIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_CooperativeMatrixPerElementOpNV");
 }
 
 // Takes an AST member type, and determines its index in the equivalent SPIR-V
@@ -2095,7 +2119,8 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
        isBuffer(decl->getType()) || isRWBuffer(decl->getType()))) {
     const auto sampledType = hlsl::GetHLSLResourceResultType(decl->getType());
     if (isFloatOrVecMatOfFloatType(sampledType) &&
-        isOrContains16BitType(sampledType, spirvOptions.enable16BitTypes)) {
+        (isOrContains16BitType(sampledType, spirvOptions.enable16BitTypes) ||
+         isOrContains8BitType(sampledType))) {
       emitError("The sampled type for textures cannot be a floating point type "
                 "smaller than 32-bits when targeting a Vulkan environment.",
                 loc);
@@ -3174,6 +3199,17 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
       return processSpvIntrinsicCallExpr(callExpr);
     else if (funcDecl->hasAttr<VKTypeDefExtAttr>())
       return processSpvIntrinsicTypeDef(callExpr);
+
+    if (isCooperativeMatrixBitCastQCOMIntrinsic(funcDecl))
+      return processCooperativeMatrixBitCastQCOM(callExpr);
+    if (isCooperativeMatrixExtractQCOMIntrinsic(funcDecl))
+      return processCooperativeMatrixExtractQCOM(callExpr);
+    if (isCooperativeMatrixSubArrayQCOMIntrinsic(funcDecl))
+      return processCooperativeMatrixSubArrayQCOM(callExpr);
+    if (isCooperativeMatrixReduceNVIntrinsic(funcDecl))
+      return processCooperativeMatrixReduceNV(callExpr);
+    if (isCooperativeMatrixPerElementOpNVIntrinsic(funcDecl))
+      return processCooperativeMatrixPerElementOpNV(callExpr);
   }
   // Intrinsic functions such as 'dot' or 'mul'
   if (hlsl::IsIntrinsicOp(funcDecl)) {
@@ -4218,8 +4254,41 @@ SpirvInstruction *SpirvEmitter::processRWByteAddressBufferAtomicMethods(
   // The signature of RWByteAddressBuffer atomic methods are largely:
   // void Interlocked*(in UINT dest, in UINT value);
   // void Interlocked*(in UINT dest, in UINT value, out UINT original_value);
+  //
+  // Note: RWByteAddressBuffer is represented as an array of 32-bit unsigned
+  // integers in SPIR-V. Float atomic operations (InterlockedMin/Max with float
+  // value type) are not directly supported on this buffer type because the
+  // SPIR-V float atomic instructions require a float-typed pointer, but the
+  // underlying buffer is always uint-typed. For float atomics, use typed
+  // buffers (RWBuffer<float> or RWStructuredBuffer<float>) or groupshared
+  // float variables instead.
   const auto *object = expr->getImplicitObjectArgument();
   auto *objectInfo = loadIfAliasVarRef(object);
+
+  // Check if this is a float atomic operation. Look through implicit casts
+  // to determine the true argument type (the frontend may have inserted an
+  // int-to-float cast if it resolved to the float overload).
+  const Expr *valueArg = expr->getArg(1);
+  const bool isFloat = valueArg->getType()->isFloatingType();
+  // If the value argument has an implicit int-to-float cast, treat it as integer.
+  const Expr *valueIntArg = nullptr;
+  bool isFloatMinMax = isFloat && (opcode == hlsl::IntrinsicOp::MOP_InterlockedMin || opcode == hlsl::IntrinsicOp::MOP_InterlockedMax);
+  if (isFloatMinMax) {
+    if (const auto *ice = dyn_cast<ImplicitCastExpr>(valueArg)) {
+      if (ice->getSubExpr()->getType()->isIntegerType()) {
+        valueIntArg = ice->getSubExpr();
+      }
+    }
+  }
+  isFloatMinMax &= (valueIntArg == nullptr);
+
+  if (isFloatMinMax) {
+    emitError("Float InterlockedMin/Max on RWByteAddressBuffer is not "
+              "supported in SPIR-V. Use RWBuffer<float> or "
+              "RWStructuredBuffer<float> instead.",
+              expr->getExprLoc());
+    return nullptr;
+  }
 
   auto *zero =
       spvBuilder.getConstantInt(astContext.UnsignedIntTy, llvm::APInt(32, 0));
@@ -4236,29 +4305,64 @@ SpirvInstruction *SpirvEmitter::processRWByteAddressBufferAtomicMethods(
                                            object->getLocStart(), range);
 
   const bool isCompareExchange =
-      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareExchange;
+      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareExchange ||
+      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareExchangeFloatBitwise;
   const bool isCompareStore =
-      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareStore;
+      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareStore ||
+      opcode == hlsl::IntrinsicOp::MOP_InterlockedCompareStoreFloatBitwise;
 
   if (isCompareExchange || isCompareStore) {
     auto *comparator = doExpr(expr->getArg(1));
+    auto *valueInstr = doExpr(expr->getArg(2));
+
+    // For float bitwise variants, bitcast float operands to uint32 before the
+    // atomic compare-exchange (which only supports integer types).
+    const bool isFloatBitwise =
+        opcode ==
+            hlsl::IntrinsicOp::MOP_InterlockedCompareExchangeFloatBitwise ||
+        opcode ==
+            hlsl::IntrinsicOp::MOP_InterlockedCompareStoreFloatBitwise;
+    if (isFloatBitwise) {
+      comparator = spvBuilder.createUnaryOp(spv::Op::OpBitcast,
+                                            astContext.UnsignedIntTy, comparator,
+                                            expr->getCallee()->getExprLoc(),
+                                            range);
+      valueInstr = spvBuilder.createUnaryOp(spv::Op::OpBitcast,
+                                            astContext.UnsignedIntTy, valueInstr,
+                                            expr->getCallee()->getExprLoc(),
+                                            range);
+    }
+
     SpirvInstruction *originalVal = spvBuilder.createAtomicCompareExchange(
         astContext.UnsignedIntTy, ptr, spv::Scope::Device,
         spv::MemorySemanticsMask::MaskNone, spv::MemorySemanticsMask::MaskNone,
-        doExpr(expr->getArg(2)), comparator, expr->getCallee()->getExprLoc(),
-        range);
+        valueInstr, comparator, expr->getCallee()->getExprLoc(), range);
+
     if (isCompareExchange) {
       auto *resultAddress = expr->getArg(3);
       QualType resultType = resultAddress->getType();
-      if (resultType != astContext.UnsignedIntTy)
+      // For float bitwise, bitcast the uint result back to float for output.
+      if (isFloatBitwise) {
+        originalVal = spvBuilder.createUnaryOp(spv::Op::OpBitcast,
+                                               astContext.FloatTy, originalVal,
+                                               expr->getCallee()->getExprLoc(),
+                                               range);
+      } else if (resultType != astContext.UnsignedIntTy) {
+        // For integer compare-exchange, cast uint result to the output type.
         originalVal = castToInt(originalVal, astContext.UnsignedIntTy,
                                 resultType, expr->getArg(3)->getLocStart());
+      }
       spvBuilder.createStore(doExpr(expr->getArg(3)), originalVal,
                              expr->getArg(3)->getLocStart(), range);
     }
   } else {
-    const Expr *value = expr->getArg(1);
-    SpirvInstruction *valueInstr = doExpr(expr->getArg(1));
+    // If the frontend resolved the Min/Max call to the float overload but the
+    // argument is really an integer (via an implicit int-to-float cast), use
+    // the integer sub-expression directly. This avoids an unnecessary
+    // int->float->int conversion and lets us pick the correct signed/unsigned
+    // SPIR-V opcode for the actual argument type.
+    const Expr *value = valueIntArg ? valueIntArg : expr->getArg(1);
+    SpirvInstruction *valueInstr = doExpr(value);
 
     // Since a RWAB is represented by an array of 32-bit unsigned integers, the
     // destination pointee type will always be unsigned, and thus the SPIR-V
@@ -4271,9 +4375,29 @@ SpirvInstruction *SpirvEmitter::processRWByteAddressBufferAtomicMethods(
         castToType(valueInstr, value->getType(), astContext.UnsignedIntTy,
                    value->getExprLoc(), range);
 
+    // For RWByteAddressBuffer Min/Max, choose the SPIR-V opcode based on the
+    // actual integer signedness. The frontend may have selected the signed
+    // MOP_InterlockedMax/Min overload even when the argument is unsigned.
+    spv::Op spvOpcode = translateAtomicHlslOpcodeToSpirvOpcode(opcode);
+    if (valueIntArg) {
+      // The frontend resolved the call to the float overload, but the argument
+      // is really an integer. Infer the intended signedness from the value:
+      // negative constants should use signed atomics; non-negative constants or
+      // non-constant values default to unsigned (matching the uint buffer type).
+      bool isSigned = false;
+      llvm::APSInt intValue;
+      if (valueIntArg->EvaluateAsInt(intValue, astContext)) {
+        isSigned = intValue.isSigned() && intValue.isNegative();
+      }
+      if (opcode == hlsl::IntrinsicOp::MOP_InterlockedMax) {
+        spvOpcode = isSigned ? spv::Op::OpAtomicSMax : spv::Op::OpAtomicUMax;
+      } else if (opcode == hlsl::IntrinsicOp::MOP_InterlockedMin) {
+        spvOpcode = isSigned ? spv::Op::OpAtomicSMin : spv::Op::OpAtomicUMin;
+      }
+    }
+
     SpirvInstruction *originalVal = spvBuilder.createAtomicOp(
-        translateAtomicHlslOpcodeToSpirvOpcode(opcode),
-        astContext.UnsignedIntTy, ptr, spv::Scope::Device,
+        spvOpcode, astContext.UnsignedIntTy, ptr, spv::Scope::Device,
         spv::MemorySemanticsMask::MaskNone, valueInstr,
         expr->getCallee()->getExprLoc(), range);
     if (expr->getNumArgs() > 2) {
@@ -5731,8 +5855,11 @@ SpirvEmitter::processIntrinsicMemberCall(const CXXMemberCallExpr *expr,
   case IntrinsicOp::MOP_InterlockedMax:
   case IntrinsicOp::MOP_InterlockedMin:
   case IntrinsicOp::MOP_InterlockedExchange:
+  case IntrinsicOp::MOP_InterlockedExchangeFloat:
   case IntrinsicOp::MOP_InterlockedCompareExchange:
+  case IntrinsicOp::MOP_InterlockedCompareExchangeFloatBitwise:
   case IntrinsicOp::MOP_InterlockedCompareStore:
+  case IntrinsicOp::MOP_InterlockedCompareStoreFloatBitwise:
     retVal = processRWByteAddressBufferAtomicMethods(opcode, expr);
     break;
   case IntrinsicOp::MOP_GetSamplePosition:
@@ -9503,6 +9630,8 @@ SpirvEmitter::processIntrinsicCallExpr(const CallExpr *callExpr) {
   case hlsl::IntrinsicOp::IOP_InterlockedExchange:
   case hlsl::IntrinsicOp::IOP_InterlockedCompareStore:
   case hlsl::IntrinsicOp::IOP_InterlockedCompareExchange:
+  case hlsl::IntrinsicOp::IOP_InterlockedCompareStoreFloatBitwise:
+  case hlsl::IntrinsicOp::IOP_InterlockedCompareExchangeFloatBitwise:
     retVal = processIntrinsicInterlockedMethod(callExpr, hlslOpcode);
     break;
   case hlsl::IntrinsicOp::IOP_NonUniformResourceIndex:
@@ -10501,23 +10630,60 @@ SpirvEmitter::processIntrinsicInterlockedMethod(const CallExpr *expr,
     return nullptr;
   }
 
-  const auto doArg = [baseType, this](const CallExpr *callExpr,
-                                      uint32_t argIndex) {
+  const bool isFloat = baseType->isFloatingType();
+
+  // Request necessary extensions and capabilities for float atomics.
+  if (isFloat) {
+    const auto width = astContext.getTypeSize(baseType);
+    if (opcode == hlsl::IntrinsicOp::IOP_InterlockedMin ||
+        opcode == hlsl::IntrinsicOp::IOP_InterlockedMax) {
+      spvBuilder.requireExtension("SPV_EXT_shader_atomic_float_min_max",
+                                  srcLoc);
+      if (width == 32)
+        spvBuilder.requireCapability(spv::Capability::AtomicFloat32MinMaxEXT,
+                                     srcLoc);
+      else if (width == 64)
+        spvBuilder.requireCapability(spv::Capability::AtomicFloat64MinMaxEXT,
+                                     srcLoc);
+    } else {
+      spvBuilder.requireExtension("SPV_EXT_shader_atomic_float_add", srcLoc);
+      if (width == 32)
+        spvBuilder.requireCapability(spv::Capability::AtomicFloat32AddEXT,
+                                     srcLoc);
+      else if (width == 64)
+        spvBuilder.requireCapability(spv::Capability::AtomicFloat64AddEXT,
+                                     srcLoc);
+    }
+  }
+
+  const auto doArg = [baseType, isFloat, this](const CallExpr *callExpr,
+                                       uint32_t argIndex) {
     const Expr *valueExpr = callExpr->getArg(argIndex);
-    if (const auto *castExpr = dyn_cast<ImplicitCastExpr>(valueExpr))
-      if (castExpr->getCastKind() == CK_IntegralCast &&
+    if (const auto *castExpr = dyn_cast<ImplicitCastExpr>(valueExpr)) {
+      if (isFloat && castExpr->getCastKind() == CK_FloatingCast &&
           castExpr->getSubExpr()->getType()->getCanonicalTypeUnqualified() ==
               baseType)
         valueExpr = castExpr->getSubExpr();
+      else if (!isFloat && castExpr->getCastKind() == CK_IntegralCast &&
+               castExpr->getSubExpr()
+                       ->getType()
+                       ->getCanonicalTypeUnqualified() == baseType)
+        valueExpr = castExpr->getSubExpr();
+    }
 
     auto *argInstr = doExpr(valueExpr);
-    if (valueExpr->getType() != baseType)
-      argInstr = castToInt(argInstr, valueExpr->getType(), baseType,
-                           valueExpr->getExprLoc());
+    if (valueExpr->getType() != baseType) {
+      if (isFloat)
+        argInstr = castToFloat(argInstr, valueExpr->getType(), baseType,
+                               valueExpr->getExprLoc());
+      else
+        argInstr = castToInt(argInstr, valueExpr->getType(), baseType,
+                             valueExpr->getExprLoc());
+    }
     return argInstr;
   };
 
-  const auto writeToOutputArg = [&baseType, dest,
+  const auto writeToOutputArg = [&baseType, isFloat, dest,
                                  this](SpirvInstruction *toWrite,
                                        const CallExpr *callExpr,
                                        uint32_t outputArgIndex) {
@@ -10530,9 +10696,14 @@ SpirvEmitter::processIntrinsicInterlockedMethod(const CallExpr *expr,
     }
 
     const auto outputArgType = outputArg->getType();
-    if (baseType != outputArgType)
-      toWrite =
-          castToInt(toWrite, baseType, outputArgType, dest->getLocStart());
+    if (baseType != outputArgType) {
+      if (isFloat)
+        toWrite = castToFloat(toWrite, baseType, outputArgType,
+                              dest->getLocStart());
+      else
+        toWrite =
+            castToInt(toWrite, baseType, outputArgType, dest->getLocStart());
+    }
     spvBuilder.createStore(doExpr(outputArg), toWrite, callExpr->getExprLoc());
   };
 
@@ -10608,21 +10779,46 @@ SpirvEmitter::processIntrinsicInterlockedMethod(const CallExpr *expr,
                          : spv::Scope::Device;
 
   const bool isCompareExchange =
-      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareExchange;
+      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareExchange ||
+      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareExchangeFloatBitwise;
   const bool isCompareStore =
-      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareStore;
+      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareStore ||
+      opcode == hlsl::IntrinsicOp::IOP_InterlockedCompareStoreFloatBitwise;
 
   if (isCompareExchange || isCompareStore) {
     auto *comparator = doArg(expr, 1);
     auto *valueInstr = doArg(expr, 2);
-    auto *originalVal = spvBuilder.createAtomicCompareExchange(
+
+    // For float bitwise variants, the atomic compare-exchange must be done on
+    // uint32 (since OpAtomicCompareExchange only supports integer types).
+    // However, SPIR-V's logical addressing model forbids OpBitcast on pointers,
+    // so we cannot convert a float* pointer to uint*. These intrinsics are
+    // only supported on RWByteAddressBuffer (which is already uint32-typed).
+    const bool isFloatBitwise =
+        opcode ==
+            hlsl::IntrinsicOp::IOP_InterlockedCompareExchangeFloatBitwise ||
+        opcode ==
+            hlsl::IntrinsicOp::IOP_InterlockedCompareStoreFloatBitwise;
+
+    if (isFloatBitwise) {
+      emitError("InterlockedCompareExchangeFloatBitwise and "
+                "InterlockedCompareStoreFloatBitwise are only supported on "
+                "RWByteAddressBuffer when targeting Vulkan SPIR-V. Use "
+                "RWByteAddressBuffer methods instead of groupshared float "
+                "or RWBuffer/RWStructuredBuffer<float>.",
+                expr->getExprLoc());
+      return nullptr;
+    }
+
+    SpirvInstruction *originalVal = spvBuilder.createAtomicCompareExchange(
         baseType, ptr, scope, spv::MemorySemanticsMask::MaskNone,
         spv::MemorySemanticsMask::MaskNone, valueInstr, comparator, srcLoc);
     if (isCompareExchange)
       writeToOutputArg(originalVal, expr, 3);
   } else {
     auto *value = doArg(expr, 1);
-    spv::Op atomicOp = translateAtomicHlslOpcodeToSpirvOpcode(opcode);
+    spv::Op atomicOp =
+        translateAtomicHlslOpcodeToSpirvOpcode(opcode, isFloat);
     auto *originalVal = spvBuilder.createAtomicOp(
         atomicOp, baseType, ptr, scope, spv::MemorySemanticsMask::MaskNone,
         value, srcLoc);
@@ -16395,6 +16591,229 @@ SpirvEmitter::processCooperativeMatrixGetLength(const CallExpr *call) {
       call->getLocStart(), call->getSourceRange());
   inst->setRValue();
   return inst;
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixBitCastQCOM(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 2);
+  SpirvInstruction *srcArg = doExpr(args[0]->IgnoreParenLValueCasts());
+  srcArg = loadIfGLValue(args[0], srcArg);
+  SpirvInstruction *dstArg = doExpr(args[1]->IgnoreParenLValueCasts());
+  QualType resultType = args[1]->getType();
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      4497, resultType, {srcArg},
+      {"SPV_QCOM_cooperative_matrix_conversion"}, "",
+      {4496}, call->getExprLoc());
+  if (!intrInst) return nullptr;
+  return spvBuilder.createStore(dstArg, intrInst, call->getExprLoc(), call->getSourceRange());
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixExtractQCOM(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 2);
+  SpirvInstruction *matrixArg = doExpr(args[0]);
+  SpirvInstruction *dstArg = doExpr(args[1]->IgnoreParenLValueCasts());
+  QualType resultType = args[1]->getType();
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      4541, resultType, {matrixArg},
+      {"SPV_QCOM_cooperative_matrix_conversion"}, "",
+      {4496}, call->getExprLoc());
+  if (!intrInst) return nullptr;
+  return spvBuilder.createStore(dstArg, intrInst, call->getExprLoc(), call->getSourceRange());
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixSubArrayQCOM(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 3);
+  SpirvInstruction *srcArg = doExpr(args[0]->IgnoreParenLValueCasts());
+  srcArg = loadIfGLValue(args[0], srcArg);
+  SpirvInstruction *indexArg = doExpr(args[1]);
+  SpirvInstruction *dstArg = doExpr(args[2]->IgnoreParenLValueCasts());
+  QualType resultType = args[2]->getType();
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      4542, resultType, {srcArg, indexArg},
+      {"SPV_QCOM_cooperative_matrix_conversion"}, "",
+      {4496}, call->getExprLoc());
+  if (!intrInst) return nullptr;
+  return spvBuilder.createStore(dstArg, intrInst, call->getExprLoc(), call->getSourceRange());
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixReduceNV(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 3);
+  SpirvInstruction *matrixArg = doExpr(args[0]);
+  SpirvInstruction *reduceModeArg = doExpr(args[1]);
+  SpirvInstruction *combineOpArg = doExpr(args[2]);
+  if (auto *constArg = dyn_cast<SpirvConstant>(reduceModeArg))
+    constArg->setLiteral();
+
+  // Replace the integer constant with a proper function reference.
+  SpirvInstruction *combineFuncRef = combineOpArg;
+  QualType compTypeAST = getComponentTypeFromCallee(call);
+  if (!compTypeAST.isNull()) {
+    const SpirvType *componentType = convertASTTypeToSpirvType(compTypeAST);
+    if (componentType) {
+      SpirvFunction *combineFunc =
+          getOrCreateCombineFunction(componentType, compTypeAST);
+      if (combineFunc) {
+        combineFuncRef = new (spvContext) SpirvFunctionRef(combineFunc);
+      }
+    }
+  }
+
+  QualType resultType = call->getType();
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      5366, resultType, {matrixArg, reduceModeArg, combineFuncRef},
+      {"SPV_NV_cooperative_matrix2"}, "",
+      {5430}, call->getExprLoc());
+  if (!intrInst) return nullptr;
+  intrInst->setRValue();
+  return intrInst;
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixPerElementOpNV(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 2);
+  SpirvInstruction *matrixArg = doExpr(args[0]);
+  SpirvInstruction *funcIdArg = doExpr(args[1]);
+
+  // Replace the integer constant with a proper function reference.
+  SpirvInstruction *funcRef = funcIdArg;
+  QualType compTypeAST = getComponentTypeFromCallee(call);
+  if (!compTypeAST.isNull()) {
+    const SpirvType *componentType = convertASTTypeToSpirvType(compTypeAST);
+    if (componentType) {
+      SpirvFunction *perElemFunc =
+          getOrCreatePerElementFunction(componentType, compTypeAST);
+      if (perElemFunc) {
+        funcRef = new (spvContext) SpirvFunctionRef(perElemFunc);
+      }
+    }
+  }
+
+  QualType resultType = call->getType();
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      5369, resultType, {matrixArg, funcRef},
+      {"SPV_NV_cooperative_matrix2"}, "",
+      {5432}, call->getExprLoc());
+  if (!intrInst) return nullptr;
+  intrInst->setRValue();
+  return intrInst;
+}
+
+QualType
+SpirvEmitter::getComponentTypeFromCallee(const CallExpr *call) {
+  // Get the component type from the matrix argument's AST type.
+  // The argument type is SpirvMatrixType = SpirvOpaqueType<4456, C, ...>
+  // We extract template argument 1 (the component type C).
+  if (call->getNumArgs() < 1)
+    return QualType();
+  QualType matTypeAST = call->getArg(0)->getType();
+  // Try TemplateSpecializationType (for SpirvOpaqueType)
+  if (const auto *tst = matTypeAST->getAs<TemplateSpecializationType>()) {
+    if (tst->getNumArgs() >= 2) {
+      const clang::TemplateArgument &compArg = tst->getArg(1);
+      if (compArg.getKind() == clang::TemplateArgument::Type) {
+        return compArg.getAsType();
+      }
+    }
+  }
+  // Try RecordType (for CooperativeMatrix class)
+  if (const auto *recordType = matTypeAST->getAs<RecordType>()) {
+    const auto *specDecl =
+        dyn_cast<ClassTemplateSpecializationDecl>(recordType->getDecl());
+    if (specDecl && specDecl->getTemplateArgs().size() >= 1) {
+      const clang::TemplateArgument &compArg = specDecl->getTemplateArgs()[0];
+      if (compArg.getKind() == clang::TemplateArgument::Type) {
+        return compArg.getAsType();
+      }
+    }
+  }
+  return QualType();
+}
+
+const SpirvType *
+SpirvEmitter::convertASTTypeToSpirvType(QualType type) {
+  if (type.isNull())
+    return nullptr;
+  if (type->isFloatingType()) {
+    unsigned width = astContext.getTypeSizeInChars(type).getQuantity() * 8;
+    return spvContext.getFloatType(width);
+  }
+  if (type->isIntegerType()) {
+    unsigned width = astContext.getTypeSizeInChars(type).getQuantity() * 8;
+    if (type->isUnsignedIntegerType())
+      return spvContext.getUIntType(width);
+    else
+      return spvContext.getSIntType(width);
+  }
+  return nullptr;
+}
+
+SpirvFunction *
+SpirvEmitter::getOrCreateCombineFunction(const SpirvType *componentType,
+                                           QualType astComponentType) {
+  // The combine function signature is (componentType, componentType) ->
+  // componentType.  We create a minimal body (just an OpReturnValue with
+  // OpUndef) so the function is a definition rather than a declaration
+  // (which would require Import linkage).
+  auto *func = new (spvContext) SpirvFunction(
+      astComponentType, /*SourceLocation*/ {}, "__coopmat_combine", false,
+      false);
+
+  // Add parameters with the correct SPIR-V types.
+  func->addParameter(
+      new (spvContext) SpirvFunctionParameter(componentType, false, false, {}));
+  func->addParameter(
+      new (spvContext) SpirvFunctionParameter(componentType, false, false, {}));
+
+  // Add a basic block with a return of an undef value.
+  auto *bb = new (spvContext) SpirvBasicBlock("entry");
+  func->addBasicBlock(bb);
+  auto *undef = new (spvContext) SpirvUndef(astComponentType);
+  auto *ret = new (spvContext)
+      SpirvReturn(SourceLocation(), undef);
+  bb->addInstruction(undef);
+  bb->addInstruction(ret);
+
+  spvBuilder.getModule()->addFunctionDeclaration(func);
+  return func;
+}
+
+SpirvFunction *
+SpirvEmitter::getOrCreatePerElementFunction(const SpirvType *componentType,
+                                              QualType astComponentType) {
+  // The per-element function signature is (int32, int32, componentType) ->
+  // componentType.
+  auto *func = new (spvContext) SpirvFunction(
+      astComponentType, /*SourceLocation*/ {}, "__coopmat_perelem", false,
+      false);
+
+  const SpirvType *int32Type = spvContext.getSIntType(32);
+
+  func->addParameter(
+      new (spvContext) SpirvFunctionParameter(int32Type, false, false, {}));
+  func->addParameter(
+      new (spvContext) SpirvFunctionParameter(int32Type, false, false, {}));
+  func->addParameter(
+      new (spvContext) SpirvFunctionParameter(componentType, false, false, {}));
+
+  // Add a basic block with a return of an undef value.
+  auto *bb = new (spvContext) SpirvBasicBlock("entry");
+  func->addBasicBlock(bb);
+  auto *undef = new (spvContext) SpirvUndef(astComponentType);
+  auto *ret =
+      new (spvContext) SpirvReturn(SourceLocation(), undef);
+  bb->addInstruction(undef);
+  bb->addInstruction(ret);
+
+  spvBuilder.getModule()->addFunctionDeclaration(func);
+  return func;
 }
 
 SpirvInstruction *

@@ -908,6 +908,14 @@ bool EmitVisitor::visit(SpirvSwitch *inst) {
   return true;
 }
 
+bool EmitVisitor::visit(SpirvFunctionRef *inst) {
+  // Emit the referenced function's result ID as an operand.
+  // This wrapper is used by intrinsic instructions that need to
+  // reference a function (e.g., OpCooperativeMatrixReduceNV).
+  curInst.push_back(getOrAssignResultId<SpirvFunction>(inst->getFunction()));
+  return true;
+}
+
 bool EmitVisitor::visit(SpirvUnreachable *inst) {
   initInstruction(inst);
   finalizeInstruction(&mainBinary);
@@ -2103,11 +2111,16 @@ bool EmitVisitor::visit(SpirvIntrinsicInstruction *inst) {
   }
 
   for (const auto operand : inst->getOperands()) {
-    auto literalOperand = dyn_cast<SpirvConstant>(operand);
-    if (literalOperand && literalOperand->isLiteral()) {
-      typeHandler.emitLiteral(literalOperand, curInst);
+    // SpirvFunctionRef wraps a SpirvFunction and emits its result ID.
+    if (isa<SpirvFunctionRef>(operand)) {
+      operand->invokeVisitor(this);
     } else {
-      curInst.push_back(getOrAssignResultId<SpirvInstruction>(operand));
+      auto literalOperand = dyn_cast<SpirvConstant>(operand);
+      if (literalOperand && literalOperand->isLiteral()) {
+        typeHandler.emitLiteral(literalOperand, curInst);
+      } else {
+        curInst.push_back(getOrAssignResultId<SpirvInstruction>(operand));
+      }
     }
   }
 

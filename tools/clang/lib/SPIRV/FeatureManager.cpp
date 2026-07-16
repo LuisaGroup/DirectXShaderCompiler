@@ -231,6 +231,10 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
       .Case("SPV_KHR_quad_control", Extension::KHR_quad_control)
       .Case("SPV_EXT_descriptor_heap", Extension::EXT_descriptor_heap)
       .Case("SPV_KHR_untyped_pointers", Extension::KHR_untyped_pointers)
+      .Case("SPV_KHR_workgroup_memory_explicit_layout",
+            Extension::KHR_workgroup_memory_explicit_layout)
+      .Case("SPV_EXT_shader_atomic_float_add", Extension::EXT_shader_atomic_float_add)
+      .Case("SPV_EXT_shader_atomic_float_min_max", Extension::EXT_shader_atomic_float_min_max)
       .Default(Extension::Unknown);
 }
 
@@ -312,6 +316,12 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     return "SPV_EXT_descriptor_heap";
   case Extension::KHR_untyped_pointers:
     return "SPV_KHR_untyped_pointers";
+  case Extension::KHR_workgroup_memory_explicit_layout:
+    return "SPV_KHR_workgroup_memory_explicit_layout";
+  case Extension::EXT_shader_atomic_float_add:
+    return "SPV_EXT_shader_atomic_float_add";
+  case Extension::EXT_shader_atomic_float_min_max:
+    return "SPV_EXT_shader_atomic_float_min_max";
   default:
     break;
   }
