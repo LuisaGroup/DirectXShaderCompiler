@@ -15,6 +15,7 @@
 #ifndef LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 #define LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 
+#include <string>
 #include <vector>
 
 namespace hlsl {
@@ -140,6 +141,12 @@ public:
   bool HLSLEnableDebugNops = false; // HLSL Change
   bool HLSLEarlyInlining = true; // HLSL Change
   bool HLSLNoSink = false; // HLSL Change
+  // DXIL Aggressive Optimization options
+  bool EnableDxilAggressiveOptimize = false; // HLSL Change
+  unsigned DxilOptMaxIterations = 5; // HLSL Change
+  std::vector<std::string> DxilOptConfig; // HLSL Change
+  bool DxilOptPrintEach = false; // HLSL Change
+  bool DxilOptValidateEach = false; // HLSL Change
   void addHLSLPasses(legacy::PassManagerBase &MPM); // HLSL Change
 
 private:

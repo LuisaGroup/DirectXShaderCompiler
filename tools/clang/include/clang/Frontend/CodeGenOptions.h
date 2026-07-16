@@ -230,6 +230,14 @@ public:
   unsigned ScanLimit = 0;
   /// Optimization pass enables, disables and selects
   hlsl::options::OptimizationToggles HLSLOptimizationToggles;
+  /// DXIL Aggressive Optimization - custom pass config
+  std::vector<std::string> DxilOptConfig;
+  /// DXIL Aggressive Optimization - max iterations
+  unsigned DxilOptMaxIterations = 5;
+  /// DXIL Aggressive Optimization - print IR after each iteration
+  bool DxilOptPrintEach = false;
+  /// DXIL Aggressive Optimization - validate module after each iteration
+  bool DxilOptValidateEach = false;
   /// Debug option to print IR before every pass
   bool HLSLPrintBeforeAll = false;
   /// Debug option to print IR before specific pass

@@ -809,6 +809,21 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
     opts.OptLevel = 3;
   opts.OptDump = Args.hasFlag(OPT_Odump, OPT_INVALID, false);
 
+  // Parse DXIL aggressive optimization options.
+  for (const Arg *A : Args.filtered(OPT_Oconfig_dxil)) {
+    for (const auto v : A->getValues()) {
+      opts.DxilOptConfig.push_back(v);
+    }
+  }
+  if (Arg *A = Args.getLastArg(OPT_dxil_opt_max_iterations)) {
+    opts.DxilOptMaxIterations =
+        (unsigned)atoi(A->getValue());
+  }
+  opts.DxilOptPrintEach =
+      Args.hasFlag(OPT_dxil_opt_print_each, OPT_INVALID, false);
+  opts.DxilOptValidateEach =
+      Args.hasFlag(OPT_dxil_opt_validate_each, OPT_INVALID, false);
+
   opts.DisableValidation = Args.hasFlag(OPT_VD, OPT_INVALID, false);
 
   opts.AllResourcesBound =

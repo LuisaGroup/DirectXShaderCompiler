@@ -361,6 +361,13 @@ void EmitAssemblyHelper::CreatePasses() {
       OptToggles.IsEnabled(hlsl::options::TOGGLE_PARTIAL_LIFETIME_MARKERS);
   PMBuilder.HLSLEnableAggressiveReassociation = OptToggles.IsEnabled(
       hlsl::options::TOGGLE_ENABLE_AGGRESSIVE_REASSOCIATION);
+
+  // DXIL Aggressive Optimization options
+  PMBuilder.EnableDxilAggressiveOptimize = (OptLevel > 2);
+  PMBuilder.DxilOptConfig = CodeGenOpts.DxilOptConfig;
+  PMBuilder.DxilOptMaxIterations = CodeGenOpts.DxilOptMaxIterations;
+  PMBuilder.DxilOptPrintEach = CodeGenOpts.DxilOptPrintEach;
+  PMBuilder.DxilOptValidateEach = CodeGenOpts.DxilOptValidateEach;
   // HLSL Change - end
 
   PMBuilder.DisableUnitAtATime = !CodeGenOpts.UnitAtATime;

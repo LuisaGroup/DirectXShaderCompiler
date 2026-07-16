@@ -705,6 +705,23 @@ void PassManagerBuilder::populateModulePassManager(
   if (MergeFunctions)
     MPM.add(createMergeFunctionsPass());
 
+  // HLSL Change - Aggressive fixed-point optimization for O3.
+  if (EnableDxilAggressiveOptimize) {
+    hlsl::DxilAggressiveOptimizeOpts Opts;
+    Opts.MaxIterations = DxilOptMaxIterations;
+    Opts.PrintEach = DxilOptPrintEach;
+    Opts.ValidateEach = DxilOptValidateEach;
+    if (!DxilOptConfig.empty()) {
+      // Join the config strings with commas
+      for (size_t i = 0; i < DxilOptConfig.size(); ++i) {
+        if (i > 0)
+          Opts.CustomPasses += ",";
+        Opts.CustomPasses += DxilOptConfig[i];
+      }
+    }
+    MPM.add(createDxilAggressiveOptimizePass(Opts));
+  }
+
   // HLSL Change Begins.
   if (!HLSLHighLevel) {
     MPM.add(createDxilEraseDeadRegionPass());

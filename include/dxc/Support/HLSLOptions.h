@@ -229,6 +229,12 @@ public:
   bool VerifyDiagnostics = false;       // OPT_verify
   bool Verbose = false;                 // OPT_verbose
 
+  // DXIL Aggressive Optimization options
+  std::vector<std::string> DxilOptConfig;     // OPT_Oconfig_dxil
+  unsigned DxilOptMaxIterations = 5;           // OPT_dxil_opt_max_iterations
+  bool DxilOptPrintEach = false;               // OPT_dxil_opt_print_each
+  bool DxilOptValidateEach = false;            // OPT_dxil_opt_validate_each
+
   // Optimization pass enables, disables and selects
   OptimizationToggles
       OptToggles; // OPT_opt_enable, OPT_opt_disable, OPT_opt_select

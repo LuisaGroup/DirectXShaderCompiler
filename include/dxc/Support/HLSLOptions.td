@@ -456,7 +456,19 @@ def fvk_bind_counter_heap : MultiArg<["-"], "fvk-bind-counter-heap", 2>, MetaVar
   HelpText<"Specify Vulkan binding number and set number for the counter heap.">;
 // SPIRV Change Ends
 
-//////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// DXIL Aggressive Optimization options.
+
+def Oconfig_dxil : CommaJoined<["-"], "Oconfig-dxil=">, Group<hlsloptz_Group>, Flags<[CoreOption]>,
+  HelpText<"Specify a comma-separated list of LLVM passes to customize the DXIL aggressive optimization pipeline">;
+def dxil_opt_max_iterations : Joined<["-"], "dxil-opt-max-iterations=">, Group<hlsloptz_Group>, Flags<[CoreOption]>,
+  HelpText<"Set the maximum number of iterations for the DXIL aggressive fixed-point optimization pass (default: 5)">;
+def dxil_opt_print_each : Flag<["-"], "dxil-opt-print-each">, Group<hlsloptz_Group>, Flags<[CoreOption]>,
+  HelpText<"Print LLVM IR after each iteration of the DXIL aggressive optimization pass">;
+def dxil_opt_validate_each : Flag<["-"], "dxil-opt-validate-each">, Group<hlsloptz_Group>, Flags<[CoreOption]>,
+  HelpText<"Run the LLVM module verifier after each iteration of the DXIL aggressive optimization pass">;
+
+////////////////////////////////////////////////////////////////////////////////
 // fxc-based flags that don't match those previously defined.
 
 def target_profile : JoinedOrSeparate<["-", "/"], "T">, Flags<[CoreOption]>, Group<hlslcomp_Group>, MetaVarName<"<profile>">,

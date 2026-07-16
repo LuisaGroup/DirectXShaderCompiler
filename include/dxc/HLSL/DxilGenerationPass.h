@@ -154,4 +154,7 @@ void initializeDxilModuleInitPass(llvm::PassRegistry &);
 ModulePass *createDxilTrimTargetTypesPass();
 void initializeDxilTrimTargetTypesPass(llvm::PassRegistry &);
 
+ModulePass *createDxilAggressiveOptimizePass();
+void initializeDxilAggressiveOptimizePass(llvm::PassRegistry &);
+
 } // namespace llvm
