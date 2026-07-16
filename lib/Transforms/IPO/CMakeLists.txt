@@ -1,11 +1,15 @@
 set(HLSL_IGNORE_SOURCES ArgumentPromotion.cpp)
 add_llvm_library(LLVMipo
   BarrierNoopPass.cpp
+  CalledValuePropagation.cpp
   ConstantMerge.cpp
   DeadArgumentElimination.cpp
   ElimAvailExtern.cpp
   ExtractGV.cpp
   FunctionAttrs.cpp
+  FunctionSpecialization.cpp
+  Attributor.cpp
+  AttributorAttributes.cpp
   GlobalDCE.cpp
   GlobalOpt.cpp
   IPConstantPropagation.cpp

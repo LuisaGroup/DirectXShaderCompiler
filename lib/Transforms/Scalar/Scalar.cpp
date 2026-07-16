@@ -82,7 +82,16 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializePlaceBackedgeSafepointsImplPass(Registry);
   initializePlaceSafepointsPass(Registry);
   initializeFloat2IntPass(Registry);
+  initializeInferAddressSpacesPass(Registry);
   initializeLoopDistributePass(Registry);
+  initializeCallSiteSplittingPass(Registry);
+  initializeConstraintEliminationPass(Registry);
+  initializeGVNHoistPass(Registry);
+  initializeInferAlignmentPass(Registry);
+  initializeLoopFlattenPass(Registry);
+  initializeLowerConstantIntrinsicsPass(Registry);
+  initializeNewGVNPass(Registry);
+  initializeSimpleLoopUnswitchPass(Registry);
 }
 
 void LLVMInitializeScalarOpts(LLVMPassRegistryRef R) {

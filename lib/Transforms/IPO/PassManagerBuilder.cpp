@@ -27,6 +27,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Vectorize.h"
 #include "dxc/HLSL/DxilGenerationPass.h" // HLSL Change
+#include "dxc/HLSL/DxilAggressiveOptimize.h" // HLSL Change
 #include "dxc/HLSL/HLMatrixLowerPass.h" // HLSL Change
 #include "dxc/HLSL/ComputeViewIdState.h" // HLSL Change
 #include "llvm/Analysis/DxilValueCache.h" // HLSL Change
@@ -493,10 +494,16 @@ void PassManagerBuilder::populateModulePassManager(
       MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     // HLSL Change Begins
     if (EnableGVN) {
-      MPM.add(createGVNPass(DisableGVNLoadPRE));  // Remove redundancies
+      MPM.add(createGVNPass(DisableGVNLoadPRE));  // FIX: NewGVN miscompiles (fcmp olt->oeq); use original GVN
       if (!HLSLResMayAlias)
-        MPM.add(createDxilSimpleGVNHoistPass());
+        MPM.add(createGVNHoistPass());  // GVN-based hoisting
     }
+    // Add new optimization passes at O2+
+    // MPM.add(createConstraintEliminationPass()); // disabled: produces loops without break (DXIL validation failure)
+    MPM.add(createInferAlignmentPass());        // Improve alignment info
+    MPM.add(createInferAddressSpacesPass());    // Resource pointer inference
+    MPM.add(createLowerConstantIntrinsicsPass()); // Lower objectsize/is_constant
+    // MPM.add(createLoopFlattenPass());           // Flatten nested loops -- disabled: broken SSA
     // HLSL Change Ends
   }
 
@@ -513,6 +520,8 @@ void PassManagerBuilder::populateModulePassManager(
 
   // Use value numbering to figure out if regions are equivalent, and branch to only one.
   MPM.add(createDxilSimpleGVNEliminateRegionPass());
+  MPM.add(createCalledValuePropagationPass()); // Propagate call target info
+  addExtensionsToPM(EP_Peephole, MPM);
   // HLSL don't allow memcpy and memset.
   //MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
   // HLSL Change Ends.
@@ -567,6 +576,16 @@ void PassManagerBuilder::populateModulePassManager(
   MPM.add(createCFGSimplificationPass()); // Merge & remove BBs
   MPM.add(createInstructionCombiningPass(HLSLNoSink));  // Clean up after everything.
   addExtensionsToPM(EP_Peephole, MPM);
+
+  // HLSL Change Begins
+  // Aggressive passes at O3
+  if (OptLevel > 2) {
+    // MPM.add(createCallSiteSplittingPass());    // disabled: invalidates iterators / stale DomTree, no useful transform
+    // MPM.add(createSimpleLoopUnswitchPass());    // disabled: broken implementation (moves detached blocks, no CFG rewiring), crashes
+    MPM.add(createFunctionSpecializationPass());   // Specialize functions for const args
+    MPM.add(createAttributorPass());               // Function attribute inference
+  }
+  // HLSL Change Ends
 
   // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
   // pass manager that we are specifically trying to avoid. To prevent this

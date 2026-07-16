@@ -71,6 +71,10 @@ add_llvm_library(LLVMAnalysis
   ValueTracking.cpp
   VectorUtils.cpp
   VectorUtils2.cpp
+  CycleAnalysis.cpp
+  GlobalsModRef.cpp
+  MemorySSA.cpp
+  MemorySSAUpdater.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Analysis

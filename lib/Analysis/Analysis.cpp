@@ -89,6 +89,9 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializeTargetTransformInfoWrapperPassPass(Registry);
   initializeTypeBasedAliasAnalysisPass(Registry);
   initializeScopedNoAliasAAPass(Registry);
+  initializeCycleAnalysisPass(Registry);
+  initializeGlobalsModRefPass(Registry);
+  initializeMemorySSAWrapperPassPass(Registry);
 
   HLSL_BIND_DUMP_METHODS // HLSL Change - Force binding dump methods.
 }

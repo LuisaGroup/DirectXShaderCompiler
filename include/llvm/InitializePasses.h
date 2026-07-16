@@ -90,6 +90,7 @@ void initializeCFGOnlyPrinterPass(PassRegistry&);
 void initializeCFGOnlyViewerPass(PassRegistry&);
 void initializeCFGPrinterPass(PassRegistry&);
 void initializeCFGSimplifyPassPass(PassRegistry&);
+void initializeInferAddressSpacesPass(PassRegistry&);
 void initializeCFLAliasAnalysisPass(PassRegistry&);
 void initializeForwardControlFlowIntegrityPass(PassRegistry&);
 void initializeFlattenCFGPassPass(PassRegistry&);
@@ -274,6 +275,8 @@ void initializeDxilPreserveToSelectPass(PassRegistry&);
 void initializeDxilRemoveDeadBlocksPass(PassRegistry&);
 void initializeDxilRemoveUnstructuredLoopExitsPass(PassRegistry &);
 void initializeDxilRewriteOutputArgDebugInfoPass(PassRegistry&);
+void initializeDxilAggressiveOptimizePass(llvm::PassRegistry&);
+void initializeDxilToCleanIRPass(llvm::PassRegistry&);
 // HLSL Change Ends
 void initializeScalarEvolutionAliasAnalysisPass(PassRegistry&);
 void initializeScalarEvolutionPass(PassRegistry&);
@@ -331,6 +334,20 @@ void initializeDwarfEHPreparePass(PassRegistry&);
 void initializeFloat2IntPass(PassRegistry&);
 void initializeLoopDistributePass(PassRegistry&);
 void initializeSjLjEHPreparePass(PassRegistry&);
+// New pass initializers
+void initializeCallSiteSplittingPass(PassRegistry&);
+void initializeConstraintEliminationPass(PassRegistry&);
+void initializeGVNHoistPass(PassRegistry&);
+void initializeInferAlignmentPass(PassRegistry&);
+void initializeLoopFlattenPass(PassRegistry&);
+void initializeLowerConstantIntrinsicsPass(PassRegistry&);
+void initializeNewGVNPass(PassRegistry&);
+void initializeSimpleLoopUnswitchPass(PassRegistry&);
+void initializeCalledValuePropagationPass(PassRegistry&);
+void initializeFunctionSpecializationPass(PassRegistry&);
+void initializeAttributorPass(PassRegistry&);
+void initializeCycleAnalysisPass(PassRegistry&);
+void initializeMemorySSAWrapperPassPass(PassRegistry&);
 }
 
 #endif

@@ -209,6 +209,24 @@ ModulePass *createBarrierNoopPass();
 /// to bitsets.
 ModulePass *createLowerBitSetsPass();
 
+//===----------------------------------------------------------------------===//
+//
+// CalledValuePropagation - Propagate called values
+//
+ModulePass *createCalledValuePropagationPass();
+
+//===----------------------------------------------------------------------===//
+//
+// FunctionSpecialization - Specialize functions for constant arguments
+//
+ModulePass *createFunctionSpecializationPass();
+
+//===----------------------------------------------------------------------===//
+//
+// Attributor - Function attribute inference
+//
+Pass *createAttributorPass();
+
 } // End llvm namespace
 
 #endif

@@ -590,6 +590,60 @@ FunctionPass *createNaryReassociatePass();
 //
 FunctionPass *createLoopDistributePass();
 
+//===----------------------------------------------------------------------===//
+//
+// CallSiteSplitting - Split call-site based on known constraints
+//
+FunctionPass *createCallSiteSplittingPass();
+
+//===----------------------------------------------------------------------===//
+//
+// ConstraintElimination - Eliminate constraints based on dominating conditions
+//
+FunctionPass *createConstraintEliminationPass();
+
+//===----------------------------------------------------------------------===//
+//
+// GVNHoist - Hoist loop-invariant code out of loops using GVN
+//
+FunctionPass *createGVNHoistPass();
+
+//===----------------------------------------------------------------------===//
+//
+// InferAddressSpaces - Infer address spaces
+//
+FunctionPass *createInferAddressSpacesPass(unsigned AddressSpace = ~0u);
+
+//===----------------------------------------------------------------------===//
+//
+// InferAlignment - Infer alignment from known properties
+//
+FunctionPass *createInferAlignmentPass();
+
+//===----------------------------------------------------------------------===//
+//
+// LoopFlatten - Flatten nested loops
+//
+FunctionPass *createLoopFlattenPass();
+
+//===----------------------------------------------------------------------===//
+//
+// LowerConstantIntrinsics - Lower constant intrinsics like object-size
+//
+FunctionPass *createLowerConstantIntrinsicsPass();
+
+//===----------------------------------------------------------------------===//
+//
+// NewGVN - Global value numbering (new implementation)
+//
+FunctionPass *createNewGVNPass();
+
+//===----------------------------------------------------------------------===//
+//
+// SimpleLoopUnswitch - Unswitch loops
+//
+Pass *createSimpleLoopUnswitchPass();
+
 } // End llvm namespace
 
 #endif
