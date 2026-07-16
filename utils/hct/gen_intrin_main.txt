@@ -165,6 +165,12 @@ void [[]] InterlockedCompareStore(ref int64_only result, in u64 compare, in u64 
 void [[]] InterlockedExchange(ref int64_only result, in any_int64 value, out any_int64 original);
 void [[]] InterlockedCompareExchange(ref int64_only result, in u64 compare, in u64 value, out any_int64 original);
 // floating point interlocks
+void [[]] InterlockedAdd(ref float32_only result, in float value);
+void [[]] InterlockedAdd(ref float32_only result, in float value, out float original) : interlockedadd_immediate;
+void [[]] InterlockedMin(ref float32_only result, in float value) : interlockedmin;
+void [[]] InterlockedMin(ref float32_only result, in float value, out float original) : interlockedmin_immediate;
+void [[]] InterlockedMax(ref float32_only result, in float value) : interlockedmax;
+void [[]] InterlockedMax(ref float32_only result, in float value, out float original) : interlockedmax_immediate;
 void [[]] InterlockedExchange(ref float32_only result, in float value, out float original);
 void [[]] InterlockedCompareStoreFloatBitwise(ref float32_only result, in float compare, in float value);
 void [[]] InterlockedCompareExchangeFloatBitwise(ref float32_only result, in float compare, in float value, out float original);
@@ -1007,6 +1013,10 @@ void [[]] InterlockedCompareExchange64(in uint byteOffset, in u64 compare, in u6
 void [[]] InterlockedExchangeFloat(in uint byteOffest, in float value, out float original);
 void [[]] InterlockedCompareStoreFloatBitwise(in uint byteOffest, in float compare, in float value);
 void [[]] InterlockedCompareExchangeFloatBitwise(in uint byteOffest, in float compare, in float value, out float original);
+void [[overload=1]] InterlockedMin(in uint byteOffset, in float value) : interlockedmin;
+void [[overload=1]] InterlockedMin(in uint byteOffset, in float value, out float original) : interlockedmin_immediate;
+void [[overload=1]] InterlockedMax(in uint byteOffset, in float value) : interlockedmax;
+void [[overload=1]] InterlockedMax(in uint byteOffset, in float value, out float original) : interlockedmax_immediate;
 // 32-bit integer interlocks
 void [[]] InterlockedAdd(in uint byteOffset, in uint value);
 void [[]] InterlockedAdd(in uint byteOffset, in uint value, out uint original) : interlockedadd_immediate;

@@ -4976,13 +4976,21 @@ Value *TranslateMopAtomicBinaryOperation(
   } break;
   case IntrinsicOp::MOP_InterlockedMax:
   case IntrinsicOp::MOP_InterlockedMax64: {
-    AtomicHelper helper(CI, DXIL::OpCode::AtomicBinOp, handle);
+    Type *opType = nullptr;
+    Value *val = CI->getArgOperand(HLOperandIndex::kObjectInterlockedValueOpIndex);
+    if (val->getType()->isFloatTy())
+      opType = Type::getInt32Ty(CI->getContext());
+    AtomicHelper helper(CI, DXIL::OpCode::AtomicBinOp, handle, opType);
     TranslateAtomicBinaryOperation(helper, DXIL::AtomicBinOpCode::IMax, Builder,
                                    hlslOP);
   } break;
   case IntrinsicOp::MOP_InterlockedMin:
   case IntrinsicOp::MOP_InterlockedMin64: {
-    AtomicHelper helper(CI, DXIL::OpCode::AtomicBinOp, handle);
+    Type *opType = nullptr;
+    Value *val = CI->getArgOperand(HLOperandIndex::kObjectInterlockedValueOpIndex);
+    if (val->getType()->isFloatTy())
+      opType = Type::getInt32Ty(CI->getContext());
+    AtomicHelper helper(CI, DXIL::OpCode::AtomicBinOp, handle, opType);
     TranslateAtomicBinaryOperation(helper, DXIL::AtomicBinOpCode::IMin, Builder,
                                    hlslOP);
   } break;
@@ -5091,6 +5099,15 @@ void TranslateSharedMemOrNodeAtomicBinOp(CallInst *CI, IntrinsicOp IOP,
   PointerType *ptrType = dyn_cast<PointerType>(
       CI->getArgOperand(HLOperandIndex::kInterlockedDestOpIndex)->getType());
   bool needCast = ptrType && ptrType->getElementType()->isFloatTy();
+  // For float destination types, we need to bitcast to int32 and use integer
+  // atomic operations, since DXIL does not support float atomic operations
+  // natively. SPIR-V handles float atomics via native float opcodes.
+  if (needCast) {
+    val = Builder.CreateBitCast(val, Type::getInt32Ty(CI->getContext()));
+    addr = Builder.CreateBitCast(
+        addr, Type::getInt32PtrTy(CI->getContext(),
+                                  addr->getType()->getPointerAddressSpace()));
+  }
   switch (IOP) {
   case IntrinsicOp::IOP_InterlockedAdd:
     Op = AtomicRMWInst::BinOp::Add;
@@ -5099,12 +5116,6 @@ void TranslateSharedMemOrNodeAtomicBinOp(CallInst *CI, IntrinsicOp IOP,
     Op = AtomicRMWInst::BinOp::And;
     break;
   case IntrinsicOp::IOP_InterlockedExchange:
-    if (needCast) {
-      val = Builder.CreateBitCast(val, Type::getInt32Ty(CI->getContext()));
-      addr = Builder.CreateBitCast(
-          addr, Type::getInt32PtrTy(CI->getContext(),
-                                    addr->getType()->getPointerAddressSpace()));
-    }
     Op = AtomicRMWInst::BinOp::Xchg;
     break;
   case IntrinsicOp::IOP_InterlockedMax:
