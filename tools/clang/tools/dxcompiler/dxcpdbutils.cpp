@@ -273,8 +273,8 @@ public:
 };
 
 struct DxcPdbUtils : public IDxcPdbUtils2
-#ifdef _WIN32
-    // Skip Pix debug info on linux for dia dependence.
+#ifdef DXC_SUPPORTS_DIA
+    // Skip Pix debug info when DIA SDK is unavailable.
     ,
                      public IDxcPixDxilDebugInfoFactory
 #endif
@@ -843,7 +843,7 @@ public:
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid,
                                            void **ppvObject) override {
-#ifdef _WIN32
+#ifdef DXC_SUPPORTS_DIA
     HRESULT hr =
         DoBasicQueryInterface<IDxcPdbUtils2, IDxcPixDxilDebugInfoFactory>(
             this, iid, ppvObject);
@@ -1071,7 +1071,7 @@ public:
     return CopyBlobWide(m_Name, ppResult);
   }
 
-#ifdef _WIN32
+#ifdef DXC_SUPPORTS_DIA
   virtual STDMETHODIMP
   NewDxcPixDxilDebugInfo(IDxcPixDxilDebugInfo **ppDxilDebugInfo) override {
     if (!m_pDebugProgramBlob)

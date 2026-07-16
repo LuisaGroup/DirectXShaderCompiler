@@ -386,22 +386,6 @@ if( MSVC )
       # No MSVC equivalent available
     endif (LLVM_ENABLE_PEDANTIC)
 
-    if (CLANG_CL)
-      append("-Wall -W -Wno-unused-parameter -Wwrite-strings -Wimplicit-fallthrough" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-      append("-Wcast-qual" CMAKE_CXX_FLAGS)
-
-      # Disable unknown pragma warnings because the output is just too long with them.
-      append("-Wno-unknown-pragmas" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-
-      add_flag_if_supported("-Wno-unused-but-set-variable" UNUSED_BUT_SET_VARIABLE)
-      append("-Wno-switch" CMAKE_CXX_FLAGS)
-
-      append("-Wmissing-field-initializers" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-
-      # enable warnings explicitly.
-      append("-Wnonportable-include-path -Wunused-function" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-      append("-Wtrigraphs -Wconstant-logical-operand -Wunused-variable" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-    endif (CLANG_CL)
   endif (LLVM_ENABLE_WARNINGS)
   if (LLVM_ENABLE_WERROR)
     append("/WX" msvc_warning_flags)
@@ -410,6 +394,21 @@ if( MSVC )
   foreach(flag ${msvc_warning_flags})
     append("${flag}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   endforeach(flag)
+
+  if (CLANG_CL)
+    # clang-cl is an MSVC-compatible driver. Rely on /W4 from the MSVC warning
+    # set above rather than GCC-style -Wall/-W, because clang-cl's -Wall enables
+    # a huge number of diagnostics (C++98 compat, documentation, style, etc.)
+    # that the DXC codebase does not build cleanly with when warnings are treated
+    # as errors in Debug.
+    #
+    # A few /W4-level diagnostics are emitted differently by clang-cl than by
+    # cl.exe (or are not covered by the MSVC warning-number disables), so turn
+    # them off explicitly for clang-cl builds. These must come after /W4 so they
+    # take precedence.
+    append("-Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    append("-Wno-unknown-pragmas -Wno-cast-function-type-mismatch -Wno-switch" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  endif (CLANG_CL)
 
   # Disable sized deallocation if the flag is supported. MSVC fails to compile
   # the operator new overload in User otherwise.

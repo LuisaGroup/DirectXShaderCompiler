@@ -95,8 +95,9 @@ static HRESULT ThreadMallocDxcCreateInstance(REFCLSID rclsid, REFIID riid,
   } else if (IsEqualCLSID(rclsid, CLSID_DxcLinker)) {
     hr = CreateDxcLinker(riid, ppv);
   }
-// Note: The following targets are not yet enabled for non-Windows platforms.
-#ifdef _WIN32
+// Note: The following targets are not yet enabled for non-Windows platforms
+// or non-MSVC compilers (DIA SDK is required).
+#ifdef DXC_SUPPORTS_DIA
   else if (IsEqualCLSID(rclsid, CLSID_DxcDiaDataSource)) {
     hr = CreateDxcDiaDataSource(riid, ppv);
   }

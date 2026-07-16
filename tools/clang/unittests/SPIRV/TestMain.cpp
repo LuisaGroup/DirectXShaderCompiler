@@ -17,13 +17,123 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#if defined(_MSC_VER)
 #include <crtdbg.h>
-#endif
-#endif
+#ifndef NDEBUG
+#include <DbgHelp.h>
+#pragma comment(lib, "dbghelp.lib")
+#include <csignal>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <iomanip>
+#endif // NDEBUG
+#endif // _WIN32
 
 namespace {
 using namespace ::testing;
+
+//===----------------------------------------------------------------------===//
+// Debug infrastructure: stack traces on crash, no message boxes
+//===----------------------------------------------------------------------===//
+
+#if defined(_WIN32) && !defined(NDEBUG)
+
+/// Print a verbose stack trace with DbgHelp symbol resolution.
+void print_stack_trace() {
+  void *stack[100];
+  auto process = GetCurrentProcess();
+  static bool sym_initialized = false;
+  if (!sym_initialized) {
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+    sym_initialized = SymInitialize(process, nullptr, TRUE);
+  }
+  auto frame_count = CaptureStackBackTrace(0, 100, stack, nullptr);
+  std::cerr << "\n=== Stack trace (" << frame_count << " frames) ===\n";
+
+  // Allocate symbol info buffer
+  char symbolBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+  auto *symbol = reinterpret_cast<SYMBOL_INFO *>(symbolBuffer);
+  symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+  symbol->MaxNameLen = MAX_SYM_NAME;
+
+  IMAGEHLP_MODULE64 moduleInfo;
+  moduleInfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
+
+  for (unsigned i = 0; i < frame_count; ++i) {
+    DWORD64 address = reinterpret_cast<DWORD64>(stack[i]);
+    DWORD64 displacement = 0;
+
+    std::cerr << "  [" << std::setw(2) << i << "] ";
+
+    if (SymFromAddr(process, address, &displacement, symbol)) {
+      std::cerr << symbol->Name;
+      if (displacement)
+        std::cerr << "+0x" << std::hex << displacement << std::dec;
+
+      if (SymGetModuleInfo64(process, address, &moduleInfo)) {
+        std::cerr << "  at " << moduleInfo.ModuleName
+                  << "+0x" << std::hex << (address - moduleInfo.BaseOfImage)
+                  << std::dec;
+      }
+    } else {
+      std::cerr << "0x" << std::hex << address << std::dec;
+    }
+    std::cerr << "\n";
+  }
+  std::cerr << std::flush;
+}
+
+LONG WINAPI UnhandledExceptionFilter(EXCEPTION_POINTERS *) {
+  std::cerr << "\n!!! Unhandled structured exception !!!\n";
+  print_stack_trace();
+  ExitProcess(1);
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void OnTerminate() {
+  std::cerr << "\n!!! std::terminate called (uncaught exception) !!!\n";
+  print_stack_trace();
+  ExitProcess(1);
+}
+
+void OnSigAbort(int) {
+  std::cerr << "\n!!! SIGABRT / std::abort() called !!!\n";
+  print_stack_trace();
+  _exit(3);
+}
+
+struct StackTracerInit {
+  StackTracerInit() noexcept {
+    SetUnhandledExceptionFilter(UnhandledExceptionFilter);
+    std::set_terminate(OnTerminate);
+    std::signal(SIGABRT, OnSigAbort);
+  }
+};
+
+static StackTracerInit stack_tracer_init;
+
+#endif // _WIN32 && !NDEBUG
+
+// Unconditionally disable Windows error dialogs and redirect to stderr.
+// Not gated on _MSC_VER -- works with clang-cl too.
+#if defined(_WIN32)
+struct DisableMessageBoxInit {
+  DisableMessageBoxInit() noexcept {
+#ifndef NDEBUG
+    _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
+    _set_error_mode(_OUT_TO_STDERR);
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+  }
+};
+
+static DisableMessageBoxInit disable_message_box;
+#endif
 
 /// A GoogleTest event printer that only prints test failures.
 class FailurePrinter : public TestEventListener {

@@ -653,9 +653,10 @@ public:
   WEX::Common::String WStrFmt(const wchar_t *msg, ...) {
     va_list args;
     va_start(args, msg);
-    WEX::Common::String result = WEX::Common::String().FormatV(msg, args);
+    wchar_t buf[512];
+    vswprintf(buf, 512, msg, args);
     va_end(args);
-    return result;
+    return WEX::Common::String(buf);
   }
 
   void ReflectionTest(

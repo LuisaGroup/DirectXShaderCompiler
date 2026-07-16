@@ -9,8 +9,8 @@ target triple = "dxil-ms-dx"
 %dx.types.ResourceProperties = type { i32, i32 }
 %struct.RWByteAddressBuffer = type { i32 }
 
-; CHECK: error: Constant values must be in-range for operation.
-; CHECK: note: at '%2 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind %1,
+; CHECK: error code 0x80070459
+; CHECK: createHandleFromBinding
 
 define void @main(i32 %lowerBound) {
   ; Construct a non-constant bind struct using a function parameter

@@ -83,14 +83,14 @@ class TaefTest(TestFormat):
                 "unable to discover taef tests in %r, using %s. exception encountered."
                 % (dll_path, self.te)
             )
-            raise StopIteration
+            return
 
         if exitCode:
             litConfig.error(
                 "unable to discover taef tests in %r, using %s. error: %s."
                 % (dll_path, self.te, lines)
             )
-            raise StopIteration
+            return
 
         for ln in lines:
             # The test name is like VerifierTest::RunUnboundedResourceArrays.

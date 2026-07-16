@@ -284,6 +284,8 @@ int main(int argc, const char **argv) {
           return 1;
         }
         passFileName = argv_[argIdx];
+        ++argIdx;
+        continue;
       } else if (wcsistarts(arg, L"-o=")) {
         outFileName = argv_[argIdx] + 3;
       } else {
@@ -299,8 +301,13 @@ int main(int argc, const char **argv) {
         }
 
         // The remaining arguments are optimizer args.
-        optArgs = argv_ + argIdx;
-        optArgCount = argc - argIdx;
+        if (argIdx < argc) {
+          optArgs = argv_ + argIdx;
+          optArgCount = argc - argIdx;
+        } else {
+          optArgs = nullptr;
+          optArgCount = 0;
+        }
         break;
       }
       ++argIdx;

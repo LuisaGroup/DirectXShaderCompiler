@@ -122,6 +122,12 @@ struct SpirvCodeGenOptions {
 
   // String representation of original source
   std::string origSource;
+
+  // Use LLVM IR optimization path instead of direct AST to SPIR-V
+  // Default: false (uses original AST->SPIR-V which produces valid SPIR-V binary)
+  // Set to true via -fspv-use-llvm-ir to enable LLVM optimization passes
+  // (outputs LLVM bitcode; requires external llvm-spirv for SPIR-V conversion)
+  bool useLlvmIrPath = false;
 };
 
 } // namespace spirv
