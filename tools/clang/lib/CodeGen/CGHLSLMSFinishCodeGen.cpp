@@ -2239,7 +2239,11 @@ bool RetrieveLastElementType(Type *Ty, Type *&EltTy) {
 unsigned AlignCBufferOffset(unsigned offset, unsigned size, llvm::Type *Ty,
                             bool bRowMajor, bool bMinPrecMode,
                             bool &bCurRowIsMinPrec) {
-  DXASSERT(!(offset & 1), "otherwise we have an invalid offset.");
+  // Native 8-bit types may occupy odd byte offsets; the remainder of the
+  // alignment logic still applies.
+  unsigned ScalarSize = Ty->getScalarSizeInBits();
+  DXASSERT(ScalarSize == 8 || !(offset & 1),
+           "otherwise we have an invalid offset.");
   // resources, empty structure, or structures with only resources have
   // zero size, and need no alignment.
   if (size == 0)

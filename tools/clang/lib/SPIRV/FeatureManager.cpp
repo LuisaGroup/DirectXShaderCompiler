@@ -178,6 +178,7 @@ bool FeatureManager::requestTargetEnv(spv_target_env requestedEnv,
 Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
   return llvm::StringSwitch<Extension>(name)
       .Case("KHR", Extension::KHR)
+      .Case("SPV_KHR_8bit_storage", Extension::KHR_8bit_storage)
       .Case("SPV_KHR_16bit_storage", Extension::KHR_16bit_storage)
       .Case("SPV_KHR_device_group", Extension::KHR_device_group)
       .Case("SPV_KHR_multiview", Extension::KHR_multiview)
@@ -237,6 +238,8 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
   switch (symbol) {
   case Extension::KHR:
     return "KHR";
+  case Extension::KHR_8bit_storage:
+    return "SPV_KHR_8bit_storage";
   case Extension::KHR_16bit_storage:
     return "SPV_KHR_16bit_storage";
   case Extension::KHR_device_group:

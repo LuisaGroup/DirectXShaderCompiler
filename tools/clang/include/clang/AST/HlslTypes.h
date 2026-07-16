@@ -82,6 +82,8 @@ enum HLSLScalarType {
   HLSLScalarType_float16,
   HLSLScalarType_float32,
   HLSLScalarType_float64,
+  HLSLScalarType_int8,
+  HLSLScalarType_uint8,
   HLSLScalarType_int8_4packed,
   HLSLScalarType_uint8_4packed
 };

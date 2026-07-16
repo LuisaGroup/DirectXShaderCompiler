@@ -1180,6 +1180,14 @@ LPCSTR CompTypeToString(DXIL::ComponentType CompType) {
     return "SNormF64";
   case DXIL::ComponentType::UNormF64:
     return "UNormF64";
+  case DXIL::ComponentType::I8:
+    return "I8";
+  case DXIL::ComponentType::U8:
+    return "U8";
+  case DXIL::ComponentType::F8_E4M3FN:
+    return "F8_E4M3FN";
+  case DXIL::ComponentType::F8_E5M2:
+    return "F8_E5M2";
   default:
     return "<invalid CompType>";
   }

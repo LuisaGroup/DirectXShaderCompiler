@@ -2367,15 +2367,14 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
 
   DXASSERT(uBits != BPROP_BITS0,
            "CombineBasicTypes: uBits should not be zero at this point");
-  DXASSERT(uBits != BPROP_BITS8,
-           "CombineBasicTypes: 8-bit types not supported at this time");
+  // BPROP_BITS8 is now supported for native int8_t/uint8_t (SM 6.9+).
 
   if (bMinPrecisionResult) {
     DXASSERT(
         uBits < BPROP_BITS32,
         "CombineBasicTypes: min-precision result must be less than 32-bits");
   } else {
-    DXASSERT(uBits > BPROP_BITS12,
+    DXASSERT(uBits != BPROP_BITS10 && uBits != BPROP_BITS12,
              "CombineBasicTypes: 10 or 12 bit result must be min precision");
   }
   if (bFloatResult) {
@@ -2413,6 +2412,10 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
     switch (uBits) {
     case BPROP_BITS12:
       *pOutKind = AR_BASIC_MIN12INT;
+      break;
+    case BPROP_BITS8:
+      *pOutKind = (uResultFlags & BPROP_UNSIGNED) ? AR_BASIC_UINT8
+                                                  : AR_BASIC_INT8;
       break;
     case BPROP_BITS16:
       if (uResultFlags & BPROP_UNSIGNED)
@@ -4520,6 +4523,8 @@ public:
       case HLSLScalarType_int32:
       case HLSLScalarType_uint16:
       case HLSLScalarType_uint32:
+      case HLSLScalarType_int8:
+      case HLSLScalarType_uint8:
         m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
             << HLSLScalarTypeNames[type] << "2018";
         return false;
@@ -4535,6 +4540,27 @@ public:
         m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_min_precision)
             << HLSLScalarTypeNames[type];
         return false;
+      default:
+        break;
+      }
+    }
+    // int8_t/uint8_t require SM 6.9+ for the DXIL backend. The SPIR-V backend
+    // already allows these types without an SM gate.
+    // int8_t4_packed/uint8_t4_packed remain i32 packed types and are separate
+    // from native int8_t/uint8_t vectors.
+    if (!getSema()->getLangOpts().SPIRV) {
+      switch (type) {
+      case HLSLScalarType_int8:
+      case HLSLScalarType_uint8: {
+        const ShaderModel *SM =
+            hlsl::ShaderModel::GetByName(m_sema->getLangOpts().HLSLProfile.c_str());
+        if (!SM->IsSM69Plus()) {
+          m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
+              << HLSLScalarTypeNames[type] << "6.9";
+          return false;
+        }
+        break;
+      }
       default:
         break;
       }
@@ -4574,9 +4600,13 @@ public:
           return false;
         R.addDecl(typeDecl);
       } else if (rowCount == 0) { // vector
+        if (!DiagnoseHLSLScalarType(parsedType, R.getNameLoc()))
+          return false;
         TypedefDecl *qts = LookupVectorShorthandType(parsedType, colCount);
         R.addDecl(qts);
       } else { // matrix
+        if (!DiagnoseHLSLScalarType(parsedType, R.getNameLoc()))
+          return false;
         TypedefDecl *qts =
             LookupMatrixShorthandType(parsedType, rowCount, colCount);
         R.addDecl(qts);
@@ -4867,6 +4897,10 @@ public:
         return AR_BASIC_INT64;
       case BuiltinType::ULongLong:
         return AR_BASIC_UINT64;
+      case BuiltinType::SChar:
+        return AR_BASIC_INT8;
+      case BuiltinType::UChar:
+        return AR_BASIC_UINT8;
       case BuiltinType::Min12Int:
         return AR_BASIC_MIN12INT;
       case BuiltinType::Min16Float:
@@ -4964,9 +4998,9 @@ public:
     case AR_BASIC_LITERAL_INT:
       return HLSLScalarType_int_lit;
     case AR_BASIC_INT8:
-      return HLSLScalarType_int;
+      return HLSLScalarType_int8;
     case AR_BASIC_UINT8:
-      return HLSLScalarType_uint;
+      return HLSLScalarType_uint8;
     case AR_BASIC_INT16:
       return HLSLScalarType_int16;
     case AR_BASIC_UINT16:
@@ -5022,9 +5056,9 @@ public:
     case AR_BASIC_LITERAL_INT:
       return m_context->LitIntTy;
     case AR_BASIC_INT8:
-      return m_context->IntTy;
+      return m_context->SignedCharTy;
     case AR_BASIC_UINT8:
-      return m_context->UnsignedIntTy;
+      return m_context->UnsignedCharTy;
     case AR_BASIC_INT16:
       return m_context->ShortTy;
     case AR_BASIC_UINT16:
@@ -6652,6 +6686,8 @@ void HLSLExternalSource::AddBaseTypes() {
   m_baseTypes[HLSLScalarType_float16] = m_context->HalfTy;
   m_baseTypes[HLSLScalarType_float32] = m_context->FloatTy;
   m_baseTypes[HLSLScalarType_float64] = m_context->DoubleTy;
+  m_baseTypes[HLSLScalarType_int8] = m_context->SignedCharTy;
+  m_baseTypes[HLSLScalarType_uint8] = m_context->UnsignedCharTy;
 }
 
 void HLSLExternalSource::AddHLSLScalarTypes() {

@@ -333,6 +333,11 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
         // 'HalfFloat' always represents 32-bit floats.
         case BuiltinType::HalfFloat:
           return {4, 4};
+        case BuiltinType::SChar:
+        case BuiltinType::UChar:
+        case BuiltinType::Char_S:
+        case BuiltinType::Char_U:
+          return {1, 1};
         default:
           emitError("alignment and size calculation for type %0 unimplemented")
               << type;

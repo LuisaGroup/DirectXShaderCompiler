@@ -984,6 +984,8 @@ HLSLScalarType MakeUnsigned(HLSLScalarType T) {
     return HLSLScalarType_uint64;
   case HLSLScalarType_int16:
     return HLSLScalarType_uint16;
+  case HLSLScalarType_int8:
+    return HLSLScalarType_uint8;
   default:
     // Only signed int types are relevant.
     break;

@@ -2455,8 +2455,8 @@ EmitTypeHandler::getOrCreateConstantInt(llvm::APInt value,
 
   // Start constructing the value word / words
 
-  // For 16-bit and 32-bit cases, the value occupies 1 word in the instruction
-  if (bitwidth == 16 || bitwidth == 32) {
+  // For 8-bit, 16-bit, and 32-bit cases, the value occupies 1 word in the instruction
+  if (bitwidth == 8 || bitwidth == 16 || bitwidth == 32) {
     if (isSigned) {
       curTypeInst.push_back(static_cast<int32_t>(value.getSExtValue()));
     } else {

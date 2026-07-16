@@ -64,6 +64,7 @@ const char *HLSLScalarTypeNames[] = {
     "min16uint",      "literal float",  "literal int", "int16_t",
     "int32_t",        "int64_t",        "uint16_t",    "uint32_t",
     "uint64_t",       "float16_t",      "float32_t",   "float64_t",
+    "int8_t",         "uint8_t",
     "int8_t4_packed", "uint8_t4_packed"};
 
 static_assert(HLSLScalarTypeCount == _countof(HLSLScalarTypeNames),
@@ -181,11 +182,18 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
   default:
     break;
   }
-  // fixed width types (int16_t, uint16_t, int32_t, uint32_t, float16_t,
-  // float32_t, float64_t) are only supported in HLSL 2018
+  // fixed width types (int8_t, uint8_t, int16_t, uint16_t, int32_t,
+  // uint32_t, float16_t, float32_t, float64_t) are only supported in HLSL 2018
   if (langOptions.HLSLVersion >= hlsl::LangStd::v2018) {
     switch (typeLen) {
-    case 7: // int16_t, int32_t
+    case 6: // int8_t
+      if (typeName[0] == 'i' && typeName[1] == 'n') {
+        if (strncmp(typeName, "int8_t", 6))
+          break;
+        return HLSLScalarType_int8;
+      }
+      break;
+    case 7: // int16_t, int32_t, uint8_t
       if (typeName[0] == 'i' && typeName[1] == 'n') {
         if (!langOptions.UseMinPrecision) {
           if (typeName[3] == '1') {
@@ -199,6 +207,10 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
             break;
           return HLSLScalarType_int32;
         }
+      } else if (typeName[0] == 'u' && typeName[1] == 'i') {
+        if (strncmp(typeName, "uint8_t", 7))
+          break;
+        return HLSLScalarType_uint8;
       }
       break;
     case 8: // uint16_t, uint32_t
@@ -1596,6 +1608,14 @@ bool hlsl::TryParseMatrixShorthand(const char *typeName, size_t typeNameLen,
     // compare scalar component
     HLSLScalarType type =
         FindScalarTypeByName(typeName, typeNameLen - 3, langOptions);
+
+    // If parsing failed with standard suffix, try extended suffix
+    // (handles fixed-width types like int8_t2x3 where the row digit '2'
+    // is ambiguous with the '_t' suffix of the scalar type name)
+    if (type == HLSLScalarType_unknown) {
+      type = FindScalarTypeByName(typeName, typeNameLen - 4, langOptions);
+    }
+
     if (type != HLSLScalarType_unknown) {
       *parsedType = type;
       return true;
@@ -1651,6 +1671,14 @@ bool hlsl::TryParseAny(const char *typeName, size_t typeNameLen,
     int suffixLen = *colCount == 0 ? 0 : *rowCount == 0 ? 1 : 3;
     HLSLScalarType type =
         FindScalarTypeByName(typeName, typeNameLen - suffixLen, langOptions);
+
+    // If matrix parsing failed with standard suffix, try extended suffix
+    // (handles fixed-width types like int8_t2x3 where the row digit '2'
+    // is ambiguous with the '_t' suffix of the scalar type name)
+    if (type == HLSLScalarType_unknown && suffixLen == 3) {
+      type = FindScalarTypeByName(typeName, typeNameLen - 4, langOptions);
+    }
+
     if (type != HLSLScalarType_unknown) {
       *parsedType = type;
       return true;

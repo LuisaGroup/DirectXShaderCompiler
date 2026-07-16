@@ -131,6 +131,10 @@ bool isUserDefinedRecordType(const ASTContext &, QualType);
 /// command line options.
 bool isOrContains16BitType(QualType type, bool enable16BitTypesOption);
 
+/// Returns true if the given type or any component of it contains an 8-bit
+/// integer type (signed or unsigned char).
+bool isOrContains8BitType(QualType type);
+
 /// NOTE: This method doesn't handle Literal types correctly at the moment.
 ///
 /// Note: This method will be deprecated once resolving of literal types are

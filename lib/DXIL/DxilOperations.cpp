@@ -48,16 +48,16 @@ static const OP::OpCodeProperty CoreOps_OpCodeProps[] = {
      "tempRegLoad",
      Attribute::ReadOnly,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
     {OC::TempRegStore,
      "TempRegStore",
      OCC::TempRegStore,
      "tempRegStore",
      Attribute::None,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
     {OC::MinPrecXRegLoad,
      "MinPrecXRegLoad",
      OCC::MinPrecXRegLoad,
@@ -80,16 +80,16 @@ static const OP::OpCodeProperty CoreOps_OpCodeProps[] = {
      "loadInput",
      Attribute::ReadNone,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
     {OC::StoreOutput,
      "StoreOutput",
      OCC::StoreOutput,
      "storeOutput",
      Attribute::None,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
 
     // Unary float
     {OC::FAbs,
@@ -558,8 +558,8 @@ static const OP::OpCodeProperty CoreOps_OpCodeProps[] = {
      "cbufferLoadLegacy",
      Attribute::ReadOnly,
      1,
-     {{0xe7}},
-     {{0x0}}}, // Overloads: hfdwil
+     {{0xf7}},
+     {{0x0}}}, // Overloads: hfdwil8
 
     // Resources - sample
     {OC::Sample,
@@ -634,16 +634,16 @@ static const OP::OpCodeProperty CoreOps_OpCodeProps[] = {
      "bufferLoad",
      Attribute::ReadOnly,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
     {OC::BufferStore,
      "BufferStore",
      OCC::BufferStore,
      "bufferStore",
      Attribute::None,
      1,
-     {{0x63}},
-     {{0x0}}}, // Overloads: hfwi
+     {{0x73}},
+     {{0x0}}}, // Overloads: hfwi8
     {OC::BufferUpdateCounter,
      "BufferUpdateCounter",
      OCC::BufferUpdateCounter,
@@ -1250,16 +1250,16 @@ static const OP::OpCodeProperty CoreOps_OpCodeProps[] = {
      "rawBufferLoad",
      Attribute::ReadOnly,
      1,
-     {{0xe7}},
-     {{0x0}}}, // Overloads: hfwidl
+     {{0xf7}},
+     {{0x0}}}, // Overloads: hfwi8dl
     {OC::RawBufferStore,
      "RawBufferStore",
      OCC::RawBufferStore,
      "rawBufferStore",
      Attribute::None,
      1,
-     {{0xe7}},
-     {{0x0}}}, // Overloads: hfwidl
+     {{0xf7}},
+     {{0x0}}}, // Overloads: hfwi8dl
 
     // Raytracing object space uint System Values
     {OC::InstanceID,

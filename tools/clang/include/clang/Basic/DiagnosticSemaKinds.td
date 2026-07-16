@@ -7847,6 +7847,8 @@ def err_hlsl_unsupported_for_version_lower : Error<
    "%0 is only allowed for HLSL %1 and lower.">;
 def err_hlsl_unsupported_keyword_for_min_precision : Error<
    "%0 is only supported with -enable-16bit-types option">;
+def err_hlsl_unsupported_keyword_for_spirv : Error<
+   "%0 is only supported with -spirv (Vulkan SPIR-V backend).">;
 def warn_hlsl_derivatives_in_wrong_shader_kind: Warning<
    "Intrinsic %0 potentially used by '%1' requires derivatives - only available in pixel, compute, amplification, mesh, or broadcast node shaders.">,
     DefaultError, InGroup<HLSLAvailability>;

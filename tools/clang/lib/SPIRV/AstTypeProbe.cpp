@@ -455,6 +455,74 @@ bool isOrContains16BitType(QualType type, bool enable16BitTypesOption) {
   return 0;
 }
 
+bool isOrContains8BitType(QualType type) {
+  // Primitive types
+  {
+    QualType ty = {};
+    if (isScalarType(type, &ty)) {
+      if (const auto *builtinType = ty->getAs<BuiltinType>()) {
+        switch (builtinType->getKind()) {
+        case BuiltinType::SChar:
+        case BuiltinType::UChar:
+        case BuiltinType::Char_S:
+        case BuiltinType::Char_U:
+          return true;
+        default:
+          return false;
+        }
+      }
+    }
+  }
+
+  // Vector types
+  {
+    QualType elemType = {};
+    if (isVectorType(type, &elemType))
+      return isOrContains8BitType(elemType);
+  }
+
+  // Matrix types
+  {
+    QualType elemType = {};
+    if (isMxNMatrix(type, &elemType)) {
+      return isOrContains8BitType(elemType);
+    }
+  }
+
+  // Struct type
+  if (const auto *structType = type->getAs<RecordType>()) {
+    const auto *decl = structType->getDecl();
+
+    for (const auto *field : decl->fields()) {
+      if (isOrContains8BitType(field->getType()))
+        return true;
+    }
+
+    return false;
+  }
+
+  // Array type
+  if (const auto *arrayType = type->getAsArrayTypeUnsafe()) {
+    return isOrContains8BitType(arrayType->getElementType());
+  }
+
+  // Reference types
+  if (const auto *refType = type->getAs<ReferenceType>()) {
+    return isOrContains8BitType(refType->getPointeeType());
+  }
+
+  // Pointer types
+  if (const auto *ptrType = type->getAs<PointerType>()) {
+    return isOrContains8BitType(ptrType->getPointeeType());
+  }
+
+  if (const auto *typedefType = type->getAs<TypedefType>()) {
+    return isOrContains8BitType(typedefType->desugar());
+  }
+
+  return false;
+}
+
 uint32_t getElementSpirvBitwidth(const ASTContext &astContext, QualType type,
                                  bool is16BitTypeEnabled) {
   const auto canonicalType = type.getCanonicalType();
@@ -692,6 +760,8 @@ QualType getTypeWithCustomBitwidth(const ASTContext &ctx, QualType type,
   }
   if (type->isSignedIntegerType()) {
     switch (bitwidth) {
+    case 8:
+      return ctx.SignedCharTy;
     case 16:
       return ctx.ShortTy;
     case 32:
@@ -702,6 +772,8 @@ QualType getTypeWithCustomBitwidth(const ASTContext &ctx, QualType type,
   }
   if (type->isUnsignedIntegerType()) {
     switch (bitwidth) {
+    case 8:
+      return ctx.UnsignedCharTy;
     case 16:
       return ctx.UnsignedShortTy;
     case 32:
