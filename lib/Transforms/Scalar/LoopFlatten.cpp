@@ -145,96 +145,17 @@ bool LoopFlatten::isSimpleIV(PHINode *Phi, const SCEV *&TripCount,
 /// Attempt to flatten a nested loop (inner loop inside outer loop).
 bool LoopFlatten::flattenLoop(Loop *L, LoopInfo &LI, ScalarEvolution &SE,
                                DominatorTree &DT) {
-  // We need exactly one sub-loop.
-  if (L->getSubLoops().size() != 1)
-    return false;
+  (void)L;
+  (void)LI;
+  (void)SE;
+  (void)DT;
 
-  Loop *Inner = L->getSubLoops()[0];
-
-  // Both loops must be in simplified form.
-  if (!L->isLoopSimplifyForm() || !Inner->isLoopSimplifyForm())
-    return false;
-
-  // The inner loop must be the only exit from the outer loop's body.
-  // (Simple check: inner loop's header must be the only block in outer loop
-  //  that's not the inner loop itself, and outer loop's exit block must be
-  //  after inner loop.)
-
-  // Find induction variables.
-  PHINode *OuterIV = L->getCanonicalInductionVariable();
-  PHINode *InnerIV = Inner->getCanonicalInductionVariable();
-
-  if (!OuterIV || !InnerIV)
-    return false;
-
-  const SCEV *OuterTripCount = nullptr;
-  const SCEV *InnerTripCount = nullptr;
-  if (!isSimpleIV(OuterIV, OuterTripCount, SE, LI))
-    return false;
-
-  if (!isSimpleIV(InnerIV, InnerTripCount, SE, LI))
-    return false;
-
-  if (!OuterTripCount || !InnerTripCount)
-    return false;
-
-  // Check that the inner loop's body only uses the inner IV and not the outer
-  // IV (except for the exit condition).
-  for (Loop::block_iterator BI = Inner->block_begin(), BE = Inner->block_end();
-       BI != BE; ++BI) {
-    BasicBlock *BB = *BI;
-    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II) {
-      for (unsigned i = 0; i < II->getNumOperands(); ++i) {
-        if (II->getOperand(i) == OuterIV) {
-          // Outer IV used in inner loop - can't flatten unless it's in the
-          // exit condition comparison.
-          ICmpInst *Cmp = dyn_cast<ICmpInst>(II);
-          if (!Cmp || Cmp->getOperand(0) != OuterIV)
-            return false;
-        }
-      }
-    }
-  }
-
-  // The inner loop's latch must branch back to its header.
-  BasicBlock *InnerLatch = Inner->getLoopLatch();
-  if (!InnerLatch)
-    return false;
-
-  // The outer loop's latch should branch to the inner loop header.
-  BasicBlock *OuterLatch = L->getLoopLatch();
-  if (!OuterLatch)
-    return false;
-
-  // We can flatten: merge the two loops by:
-  // 1. Replacing the outer IV with (outerIV * innerTripCount + innerIV)
-  // 2. Removing the inner loop branching structure
-  // For simplicity, we'll just change the outer loop's trip count to
-  // (outerTripCount * innerTripCount) and remove the inner loop.
-
-  // This is a simplified flattening that works for perfect nests.
-  // Compute the new trip count.
-  const SCEV *NewTripCount = SE.getMulExpr(OuterTripCount, InnerTripCount);
-  (void)NewTripCount;
-  // Move all instructions from inner loop to outer loop body.
-  const std::vector<BasicBlock *> &InnerBlocks = Inner->getBlocks();
-
-  for (unsigned i = 0; i < InnerBlocks.size(); ++i) {
-    BasicBlock *IBB = InnerBlocks[i];
-    if (IBB == Inner->getHeader() || IBB == InnerLatch)
-      continue;
-    // Move block from inner loop to outer loop.
-    IBB->removeFromParent();
-    L->getHeader()->getParent()->getBasicBlockList().insert(
-        OuterLatch, IBB);
-  }
-
-  // Remove the inner loop structure.
-  // Replace the inner latch branch with a direct branch to outer latch exit.
-  // For simplicity, just note the change.
-  DEBUG(dbgs() << "LoopFlatten: Flattened loop nest\n");
-  ++NumFlattened;
-  return true;
+  // The previous implementation moved inner-loop basic blocks in the function
+  // list but did not rewrite branches, PHI nodes, LoopInfo, DominatorTree, or
+  // ScalarEvolution.  That produced malformed SSA/CFG and downstream invalid
+  // SPIR-V.  Until a complete loop-flattening transform is implemented, keep the
+  // pass as a conservative no-op rather than emitting broken IR.
+  return false;
 }
 
 bool LoopFlatten::runOnFunction(Function &F) {

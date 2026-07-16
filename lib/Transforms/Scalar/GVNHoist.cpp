@@ -15,7 +15,9 @@
 
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -86,10 +88,9 @@ namespace {
     }
 
   private:
-    typedef DenseMap<Instruction *, Instruction *> ValueTable;
-
     DominatorTree *DT;
     bool hoistFromBlock(BasicBlock *BB);
+    bool isHoistCandidate(Instruction *Inst, Instruction *InsertPt) const;
   };
 }
 
@@ -104,122 +105,77 @@ FunctionPass *llvm::createGVNHoistPass() {
   return new GVNHoist();
 }
 
+bool GVNHoist::isHoistCandidate(Instruction *Inst,
+                                  Instruction *InsertPt) const {
+  if (isa<TerminatorInst>(Inst) || isa<PHINode>(Inst))
+    return false;
+
+  // Only speculate pure register computations.  Loads are intentionally rejected:
+  // even a non-volatile load can observe different memory when moved above the
+  // branch that selected the original block.
+  if (Inst->mayReadOrWriteMemory() || !isSafeToSpeculativelyExecute(Inst))
+    return false;
+
+  // Every instruction operand must be available at the hoist point.  This is the
+  // missing safety check that made hoisting out of if/then blocks create IR whose
+  // operands were defined only inside one arm of the branch.
+  for (Use &U : Inst->operands())
+    if (Instruction *OpI = dyn_cast<Instruction>(U.get()))
+      if (!DT->dominates(OpI, InsertPt))
+        return false;
+
+  return true;
+}
+
 bool GVNHoist::hoistFromBlock(BasicBlock *BB) {
   bool Changed = false;
 
-  // Look for a diamond pattern: BB has two successors that merge.
-  TerminatorInst *TI = BB->getTerminator();
-  BranchInst *BI = dyn_cast<BranchInst>(TI);
+  // Look for a simple diamond: BB conditionally branches to two single-entry
+  // blocks that both branch to the same merge block.
+  BranchInst *BI = dyn_cast<BranchInst>(BB->getTerminator());
   if (!BI || !BI->isConditional())
     return false;
 
   BasicBlock *TrueBB = BI->getSuccessor(0);
   BasicBlock *FalseBB = BI->getSuccessor(1);
-
-  // Both successors should have BB as their only predecessor (simple diamond).
   if (TrueBB->getSinglePredecessor() != BB ||
       FalseBB->getSinglePredecessor() != BB)
     return false;
 
-  // Find the merge block (common successor of TrueBB and FalseBB).
-  BasicBlock *MergeBB = nullptr;
-  for (succ_iterator SI = succ_begin(TrueBB), SE = succ_end(TrueBB); SI != SE;
-       ++SI) {
-    BasicBlock *Succ = *SI;
-    if (Succ != FalseBB && Succ != BB) {
-      // Check if FalseBB also goes to this block.
-      for (succ_iterator SI2 = succ_begin(FalseBB), SE2 = succ_end(FalseBB);
-           SI2 != SE2; ++SI2) {
-        if (*SI2 == Succ) {
-          MergeBB = Succ;
-          break;
-        }
-      }
-    }
-    if (MergeBB)
-      break;
-  }
-
-  if (!MergeBB)
+  BranchInst *TrueTerm = dyn_cast<BranchInst>(TrueBB->getTerminator());
+  BranchInst *FalseTerm = dyn_cast<BranchInst>(FalseBB->getTerminator());
+  if (!TrueTerm || !FalseTerm || TrueTerm->isConditional() ||
+      FalseTerm->isConditional() ||
+      TrueTerm->getSuccessor(0) != FalseTerm->getSuccessor(0))
     return false;
 
-  // Collect instructions from TrueBB and FalseBB, find identical pairs.
-  ValueTable VN;
-
-  for (BasicBlock::iterator I = TrueBB->begin(), E = TrueBB->end(); I != E;) {
-    Instruction *Inst = I++;
-
-    // Skip terminators and phis.
-    if (isa<TerminatorInst>(Inst) || isa<PHINode>(Inst))
-      continue;
-
-    // Skip instructions with side effects.
-    if (Inst->mayHaveSideEffects() && !isa<LoadInst>(Inst))
-      continue;
-
-    // Don't hoist loads that might alias.
-    if (Inst->mayReadFromMemory())
-      continue;
-
-    VN[Inst] = Inst;
-  }
+  Instruction *InsertPt = BB->getTerminator();
+  SmallVector<Instruction *, 8> TrueInsts;
+  for (BasicBlock::iterator I = TrueBB->begin(), E = TrueBB->end(); I != E;
+       ++I)
+    if (isHoistCandidate(I, InsertPt))
+      TrueInsts.push_back(I);
 
   for (BasicBlock::iterator I = FalseBB->begin(), E = FalseBB->end(); I != E;) {
-    Instruction *Inst = I++;
-
-    if (isa<TerminatorInst>(Inst) || isa<PHINode>(Inst))
-      continue;
-    if (Inst->mayHaveSideEffects() && !isa<LoadInst>(Inst))
-      continue;
-    if (Inst->mayReadFromMemory())
+    Instruction *FalseInst = I++;
+    if (!isHoistCandidate(FalseInst, InsertPt))
       continue;
 
-    // Check if there's an identical instruction in TrueBB.
-    ValueTable::iterator It = VN.find(Inst);
-    if (It != VN.end() && It->second != Inst) {
-      Instruction *TrueInst = It->second;
-
-      // Verify both instructions have the same type.
-      if (TrueInst->getType() != Inst->getType())
+    for (Instruction *TrueInst : TrueInsts) {
+      if (TrueInst == FalseInst || !TrueInst->getParent())
+        continue;
+      if (!TrueInst->isIdenticalToWhenDefined(FalseInst))
+        continue;
+      if (!isHoistCandidate(TrueInst, InsertPt))
         continue;
 
-      // Make sure the hoisted instruction dominates all uses.
-      bool DominatesUses = true;
-      for (Value::use_iterator UI = TrueInst->use_begin(),
-            UE = TrueInst->use_end(); UI != UE; ++UI) {
-        Instruction *User = dyn_cast<Instruction>(*UI);
-        if (User && User->getParent() != BB) {
-          if (!DT->dominates(BB, User->getParent())) {
-            DominatesUses = false;
-            break;
-          }
-        }
-      }
-      if (!DominatesUses)
-        continue;
-
-      for (Value::use_iterator UI = Inst->use_begin(),
-            UE = Inst->use_end(); UI != UE; ++UI) {
-        Instruction *User = dyn_cast<Instruction>(*UI);
-        if (User && User->getParent() != BB) {
-          if (!DT->dominates(BB, User->getParent())) {
-            DominatesUses = false;
-            break;
-          }
-        }
-      }
-      if (!DominatesUses)
-        continue;
-
-      // Hoist TrueInst to BB, before the terminator.
       TrueInst->removeFromParent();
-      TrueInst->insertBefore(BB->getTerminator());
+      TrueInst->insertBefore(InsertPt);
+      FalseInst->replaceAllUsesWith(TrueInst);
+      FalseInst->eraseFromParent();
       ++NumHoisted;
       Changed = true;
-
-      // Replace uses of Inst with TrueInst.
-      Inst->replaceAllUsesWith(TrueInst);
-      Inst->eraseFromParent();
+      break;
     }
   }
 

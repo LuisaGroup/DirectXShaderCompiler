@@ -52,6 +52,7 @@ namespace {
   private:
     bool specializeCallSite(CallSite CS, Function *F);
     bool hasConstantArgs(CallSite CS, SmallVectorImpl<Constant *> &ConstArgs);
+    bool isSupportedConstant(Constant *C) const;
     std::string getSpecializedName(Function *F,
                                     const SmallVectorImpl<Constant *> &ConstArgs);
   };
@@ -68,7 +69,18 @@ ModulePass *llvm::createFunctionSpecializationPass() {
   return new FunctionSpecialization();
 }
 
-/// Check if a call site has constant arguments, and populates ConstArgs.
+bool FunctionSpecialization::isSupportedConstant(Constant *C) const {
+  // Do not specialize on arbitrary global/function/blockaddress constants.  They
+  // can introduce extra module-level references into the clone and were a source
+  // of dangling references in downstream code generation.  Integer/null/undef
+  // constants have unambiguous specialized names in this lightweight pass.
+  return isa<ConstantInt>(C) || isa<ConstantPointerNull>(C) ||
+         isa<UndefValue>(C);
+}
+
+/// Check if a call site has supported constant arguments, and populates
+/// ConstArgs.  Unsupported constants make the call site ineligible rather than
+/// being silently folded into a specialization with an ambiguous name.
 bool FunctionSpecialization::hasConstantArgs(
     CallSite CS, SmallVectorImpl<Constant *> &ConstArgs) {
   bool HasConstant = false;
@@ -76,6 +88,8 @@ bool FunctionSpecialization::hasConstantArgs(
   for (unsigned i = 0; i < CS.getNumArgOperands(); ++i) {
     Value *Arg = CS.getArgOperand(i);
     if (Constant *C = dyn_cast<Constant>(Arg)) {
+      if (!isSupportedConstant(C))
+        return false;
       ConstArgs.push_back(C);
       if (!isa<UndefValue>(C))
         HasConstant = true;
@@ -96,6 +110,10 @@ std::string FunctionSpecialization::getSpecializedName(
       Name += "." + std::to_string(i);
       if (ConstantInt *CI = dyn_cast<ConstantInt>(ConstArgs[i])) {
         Name += "." + std::to_string(CI->getZExtValue());
+      } else if (isa<ConstantPointerNull>(ConstArgs[i])) {
+        Name += ".null";
+      } else if (isa<UndefValue>(ConstArgs[i])) {
+        Name += ".undef";
       }
     }
   }
@@ -108,8 +126,9 @@ bool FunctionSpecialization::specializeCallSite(CallSite CS, Function *F) {
   if (F->getName().find(".specialized") != StringRef::npos)
     return false;
 
-  // Don't specialize varargs functions.
-  if (F->isVarArg())
+  // Don't specialize varargs functions or functions whose address is observed
+  // outside direct calls; cloning those can leave stale indirect-call targets.
+  if (F->isVarArg() || F->hasAddressTaken())
     return false;
 
   SmallVector<Constant *, 8> ConstArgs;
@@ -172,7 +191,13 @@ bool FunctionSpecialization::specializeCallSite(CallSite CS, Function *F) {
     // Create a new call instruction.
     CallSite NewCS;
     if (CS.isCall()) {
-      CallInst *NewCall = CallInst::Create(SpecF, NewArgs, "", CS.getInstruction());
+      CallInst *OldCall = cast<CallInst>(CS.getInstruction());
+      CallInst *NewCall = CallInst::Create(SpecF, NewArgs, "", OldCall);
+      NewCall->setCallingConv(OldCall->getCallingConv());
+      NewCall->setAttributes(OldCall->getAttributes());
+      NewCall->setDebugLoc(OldCall->getDebugLoc());
+      if (OldCall->isTailCall())
+        NewCall->setTailCall();
       NewCS = CallSite(NewCall);
     } else {
       InvokeInst *OldInv = cast<InvokeInst>(CS.getInstruction());
@@ -180,6 +205,9 @@ bool FunctionSpecialization::specializeCallSite(CallSite CS, Function *F) {
                                                OldInv->getNormalDest(),
                                                OldInv->getUnwindDest(),
                                                NewArgs, "", OldInv);
+      NewInv->setCallingConv(OldInv->getCallingConv());
+      NewInv->setAttributes(OldInv->getAttributes());
+      NewInv->setDebugLoc(OldInv->getDebugLoc());
       NewCS = CallSite(NewInv);
     }
 

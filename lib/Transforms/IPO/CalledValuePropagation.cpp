@@ -76,9 +76,7 @@ bool CalledValuePropagation::analyzeFunction(Function &F) {
       if (Function *Callee = CS.getCalledFunction()) {
         // Direct call: add to the set of called functions.
         CalledFunctions.insert(Callee);
-        // If Callee is a declaration, mark it as used.
-        if (Callee->isDeclaration() && !Callee->hasFnAttribute(Attribute::NoInline))
-          Changed = true;
+        // Merely observing a declaration is not an IR change.
       } else {
         // Indirect call: try to propagate called values.
         Changed |= propagateCallSite(CS);
@@ -93,53 +91,43 @@ bool CalledValuePropagation::analyzeFunction(Function &F) {
 bool CalledValuePropagation::propagateCallSite(CallSite CS) {
   Value *Callee = CS.getCalledValue();
 
-  // If the callee is a bitcast of a function, fold to direct call.
-  if (BitCastInst *BCI = dyn_cast<BitCastInst>(Callee)) {
-    if (Function *F = dyn_cast<Function>(BCI->getOperand(0))) {
-      CS.setCalledFunction(F);
-      ++NumIndirectCalls;
-      return true;
-    }
-  }
+  auto TrySetDirectCallee = [&](Function *F) -> bool {
+    if (!F || CS.getFunctionType() != F->getFunctionType())
+      return false;
+    CS.setCalledFunction(F);
+    ++NumIndirectCalls;
+    return true;
+  };
+
+  // If the callee is a bitcast of a function, fold to a direct call only when
+  // the call site's function type already matches the target function.
+  if (BitCastInst *BCI = dyn_cast<BitCastInst>(Callee))
+    return TrySetDirectCallee(dyn_cast<Function>(BCI->getOperand(0)));
 
   // If the callee is a constant expression bitcast of a function.
-  if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Callee)) {
-    if (CE->getOpcode() == Instruction::BitCast) {
-      if (Function *F = dyn_cast<Function>(CE->getOperand(0))) {
-        CS.setCalledFunction(F);
-        ++NumIndirectCalls;
-        return true;
-      }
-    }
-  }
+  if (ConstantExpr *CE = dyn_cast<ConstantExpr>(Callee))
+    if (CE->getOpcode() == Instruction::BitCast)
+      return TrySetDirectCallee(dyn_cast<Function>(CE->getOperand(0)));
 
-  // If the callee is a PHI node where all incoming values are the same
-  // function, fold to direct call.
+  // If the callee is a PHI node where all incoming values are the same function,
+  // fold to a direct call.
   if (PHINode *PN = dyn_cast<PHINode>(Callee)) {
     Function *CommonFunc = nullptr;
-    bool AllSame = true;
     for (unsigned i = 0; i < PN->getNumIncomingValues(); ++i) {
       Function *F = dyn_cast<Function>(PN->getIncomingValue(i));
-      if (!F) { AllSame = false; break; }
-      if (CommonFunc && F != CommonFunc) { AllSame = false; break; }
+      if (!F || (CommonFunc && F != CommonFunc))
+        return false;
       CommonFunc = F;
     }
-    if (AllSame && CommonFunc) {
-      CS.setCalledFunction(CommonFunc);
-      ++NumIndirectCalls;
-      return true;
-    }
+    return TrySetDirectCallee(CommonFunc);
   }
 
   // If the callee is a SelectInst where both sides are the same function.
   if (SelectInst *SI = dyn_cast<SelectInst>(Callee)) {
     Function *F1 = dyn_cast<Function>(SI->getTrueValue());
     Function *F2 = dyn_cast<Function>(SI->getFalseValue());
-    if (F1 && F1 == F2) {
-      CS.setCalledFunction(F1);
-      ++NumIndirectCalls;
-      return true;
-    }
+    if (F1 && F1 == F2)
+      return TrySetDirectCallee(F1);
   }
 
   return false;
@@ -147,6 +135,7 @@ bool CalledValuePropagation::propagateCallSite(CallSite CS) {
 
 bool CalledValuePropagation::runOnModule(Module &M) {
   bool Changed = false;
+  CalledFunctions.clear();
 
   // Collect all called functions.
   for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {

@@ -17083,6 +17083,14 @@ bool SpirvEmitter::spirvToolsOptimize(std::vector<uint32_t> *mod,
     // Add performance passes.
     optimizer.RegisterPerformancePasses(spirvOptions.preserveInterface);
 
+    // The LLVM IR optimization passes named in older experiments here
+    // (loop-reroll, loop-flatten, GVN hoist, called-value-propagation,
+    // call-site-splitting, function-specialization, load-combine, etc.) do not
+    // have factories in the checked-in SPIRV-Tools optimizer API.  Registering
+    // them here either fails to compile or, when implemented as SPIR-V rewrites,
+    // produced invalid modules.  Keep this stage limited to real SPIRV-Tools
+    // passes whose factories are declared in spirv-tools/optimizer.hpp.
+    optimizer.RegisterPass(spvtools::CreateLoopUnswitchPass());
     // Add propagation of volatile semantics passes.
     optimizer.RegisterPass(spvtools::CreateSpreadVolatileSemanticsPass());
 
@@ -17098,7 +17106,24 @@ bool SpirvEmitter::spirvToolsOptimize(std::vector<uint32_t> *mod,
       return false;
   }
 
-  return optimizer.Run(mod->data(), mod->size(), mod, options);
+  // ---- Fixed-point iteration loop ----
+  // Run the optimizer repeatedly until the binary content stabilizes or the
+  // maximum number of iterations is reached.  Always copy the optimized module
+  // back; an optimization can change IDs or instruction operands without
+  // changing the word count.
+  std::vector<uint32_t> optimized;
+  for (unsigned iter = 0; iter < kSpirvOptMaxIterations; ++iter) {
+    if (!optimizer.Run(mod->data(), mod->size(), &optimized, options))
+      return false;
+
+    const bool converged = optimized == *mod;
+    mod->swap(optimized);
+    optimized.clear();
+    if (converged)
+      break;
+  }
+
+  return true;
 }
 
 bool SpirvEmitter::spirvToolsLegalize(std::vector<uint32_t> *mod,

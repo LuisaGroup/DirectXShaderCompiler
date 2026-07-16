@@ -56,7 +56,7 @@ class LoadCombine : public BasicBlockPass {
 
 public:
   LoadCombine() : BasicBlockPass(ID), C(nullptr), AA(nullptr) {
-    initializeSROAPass(*PassRegistry::getPassRegistry());
+    initializeLoadCombinePass(*PassRegistry::getPassRegistry());
   }
   
   using llvm::Pass::doInitialization;
@@ -145,11 +145,17 @@ bool LoadCombine::aggregateLoads(SmallVectorImpl<LoadPOPPair> &Loads) {
     if (L.Load->getAlignment() > BaseLoad->getAlignment())
       continue;
     if (L.POP.Offset > PrevOffset + PrevSize) {
-      // No other load will be combinable
+      // Start a new contiguous run at the current load after finishing the old
+      // one.  The old code dropped the current load, preventing later safe
+      // combinations in the same block.
       if (combineLoads(AggregateLoads))
         Combined = true;
       AggregateLoads.clear();
-      PrevOffset = -1;
+      BaseLoad = L.Load;
+      PrevOffset = L.POP.Offset;
+      PrevSize = L.Load->getModule()->getDataLayout().getTypeStoreSize(
+          L.Load->getType());
+      AggregateLoads.push_back(L);
       continue;
     }
     if (L.POP.Offset != PrevOffset + PrevSize)
@@ -193,6 +199,8 @@ bool LoadCombine::combineLoads(SmallVectorImpl<LoadPOPPair> &Loads) {
 
   unsigned AddressSpace =
       FirstLP.POP.Pointer->getType()->getPointerAddressSpace();
+  if (AddressSpace != 0)
+    return false;
 
   Builder->SetInsertPoint(FirstLP.Load);
   Value *Ptr = Builder->CreateConstGEP1_64(

@@ -70,28 +70,17 @@ FunctionPass *llvm::createCallSiteSplittingPass() {
 
 bool CallSiteSplitting::splitCallSite(CallSite CS, ICmpInst *Cond,
                                        bool KnownVal) {
-  // We can only split if we know the condition's value.
-  Instruction *CallI = CS.getInstruction();
-  BasicBlock *BB = CallI->getParent();
+  (void)CS;
+  (void)Cond;
+  (void)KnownVal;
 
-  // Create a new basic block for the true/false path.
-  BasicBlock *NewBB = SplitBlock(BB, CallI, nullptr, nullptr);
-  if (!NewBB)
-    return false;
-
-  // Set the condition on the branch going to NewBB.
-  TerminatorInst *TI = BB->getTerminator();
-  if (BranchInst *Br = dyn_cast<BranchInst>(TI)) {
-    if (Br->isConditional()) {
-      // We know the value of the condition; simplify the branch.
-      Value *CondVal = KnownVal ? ConstantInt::getTrue(Cond->getContext())
-                                : ConstantInt::getFalse(Cond->getContext());
-      Br->setCondition(CondVal);
-    }
-  }
-
-  ++NumCallSitesSplit;
-  return true;
+  // The old code split the block containing the call, then rewrote the newly
+  // created unconditional branch as if it were the dominating conditional
+  // branch.  It also advertised preserves-CFG and invalidated the caller's block
+  // and instruction iterators.  That combination produced stale analysis and
+  // malformed downstream output.  Leave the pass conservative until it can clone
+  // the call sites on the predecessor edges and update analyses correctly.
+  return false;
 }
 
 bool CallSiteSplitting::processBranch(BranchInst *BI, CallSite CS,
