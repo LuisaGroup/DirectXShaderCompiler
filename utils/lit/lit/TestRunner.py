@@ -584,7 +584,7 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             if b is None:
                 continue
             if kIsWindows:
-                b = b.replace("\\\\","\\\\\\\\")
+                b = b.replace("\\","\\\\")
             ln = re.sub(a, b, ln)
 
         # Strip the trailing newline and any extra whitespace.

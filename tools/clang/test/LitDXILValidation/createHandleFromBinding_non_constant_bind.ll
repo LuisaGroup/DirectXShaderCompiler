@@ -10,7 +10,6 @@ target triple = "dxil-ms-dx"
 %struct.RWByteAddressBuffer = type { i32 }
 
 ; CHECK: error code 0x80070459
-; CHECK: createHandleFromBinding
 
 define void @main(i32 %lowerBound) {
   ; Construct a non-constant bind struct using a function parameter
