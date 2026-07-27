@@ -15,6 +15,29 @@
 #ifndef LLVM_SUPPORT_WIN_ADAPTER_H
 #define LLVM_SUPPORT_WIN_ADAPTER_H
 
+// Signal that Windows adapter types are already defined, so DirectX-Headers
+// stubs (basetsd.h etc.) should skip their own definitions.
+#define DXC_WIN_ADAPTER_DEFINED 1
+#define DXC_UINT8_DEFINED 1
+#define DXC_UINT32_DEFINED 1
+#define DXC_UINT64_DEFINED 1
+#define DXC_HRESULT_DEFINED 1
+#define DXC_LONG_DEFINED 1
+#define DXC_ULONG_DEFINED 1
+#define DXC_LONGLONG_DEFINED 1
+#define DXC_ULONGLONG_DEFINED 1
+#define DXC_LONG_PTR_DEFINED 1
+#define DXC_ULONG_PTR_DEFINED 1
+#define DXC_BOOL_DEFINED 1
+#define DXC_BOOLEAN_DEFINED 1
+#define DXC_DWORD_DEFINED 1
+#define DXC_WORD_DEFINED 1
+#define DXC_GUID_DEFINED 1
+#define DXC_LARGE_INTEGER_DEFINED 1
+#define DXC_ULARGE_INTEGER_DEFINED 1
+#define DXC_STATSTG_DEFINED 1
+#define DXC_ENUM_FLAG_OPERATORS_DEFINED 1
+
 #ifndef _WIN32
 
 #ifdef __cplusplus
