@@ -524,7 +524,65 @@ def main(argv=None):
             "Also accepts numeric years 2019/2022 or 'latest'."
         ),
     )
+    parser.add_argument(
+        "--wsl",
+        action="store_true",
+        default=False,
+        help="Build inside WSL (Windows Subsystem for Linux) from Windows.",
+    )
+    parser.add_argument(
+        "--wsl-distro",
+        default=None,
+        help="WSL distribution name (default: default WSL distro).",
+    )
     args = parser.parse_args(argv)
+
+    # --- WSL redirect: if --wsl is used on Windows, forward to WSL ---
+    if args.wsl and platform.system() == "Windows":
+        # Convert Windows path to WSL /mnt/<drive>/... path
+        repo_root_str = str(Path(__file__).resolve().parent)
+        if len(repo_root_str) >= 2 and repo_root_str[1] == ":":
+            drive_letter = repo_root_str[0].lower()
+            wsl_path = "/mnt/" + drive_letter + repo_root_str[2:].replace("\\", "/")
+        else:
+            wsl_path = repo_root_str.replace("\\", "/")
+
+        # Reconstruct the full Python invocation inside WSL.
+        # Strip --wsl and --wsl-distro from the forwarded args.
+        forwarded = ["python3", wsl_path + "/build.py"]
+        skip_next = False
+        build_dir_explicit = False
+        for a in argv[1:] if argv else sys.argv[1:]:
+            if skip_next:
+                skip_next = False
+                continue
+            if a == "--wsl":
+                continue
+            if a.startswith("--wsl-distro"):
+                if "=" in a:
+                    continue  # --wsl-distro=NAME
+                skip_next = True
+                continue
+            if a == "--build-dir":
+                build_dir_explicit = True
+            elif a.startswith("--build-dir="):
+                build_dir_explicit = True
+            forwarded.append(a)
+
+        # Use a separate default build directory for WSL builds to avoid
+        # CMake cache conflicts with Windows builds on the same filesystem.
+        if not build_dir_explicit:
+            forwarded.append("--build-dir")
+            forwarded.append("build-wsl")
+
+        wsl_cmd = ["wsl"]
+        if args.wsl_distro:
+            wsl_cmd.extend(["-d", args.wsl_distro])
+        wsl_cmd.extend(["-e"] + forwarded)
+
+        print(f"Forwarding build to WSL ({args.wsl_distro or 'default'}): {' '.join(wsl_cmd)}")
+        subprocess.run(wsl_cmd, check=True)
+        return 0
 
     repo_root = Path(__file__).resolve().parent
     build_dir = (repo_root / args.build_dir).resolve()
@@ -542,6 +600,24 @@ def main(argv=None):
     # If the build directory already has a CMake cache, skip configure
     # and go straight to incremental compile.
     cache_file = build_dir / "CMakeCache.txt"
+
+    # Detect stale Windows CMake cache when running on Linux/WSL.
+    # CMake caches are platform-specific; running a Windows-originated
+    # cache under Linux will fail with path mismatches and wrong tools.
+    if cache_file.exists() and platform.system() == "Linux":
+        try:
+            cache_text = cache_file.read_text(encoding="utf-8", errors="replace")
+            if "d:/" in cache_text.lower() or "ninja.exe" in cache_text.lower():
+                print(
+                    "WARNING: Detected stale Windows CMake cache in build directory "
+                    f"({cache_file}). Removing and reconfiguring for Linux/WSL.",
+                    flush=True,
+                )
+                shutil.rmtree(build_dir)
+                build_dir.mkdir(parents=True, exist_ok=True)
+        except (IOError, OSError) as e:
+            print(f"WARNING: Could not read CMake cache: {e}", file=sys.stderr)
+
     needs_configure = not cache_file.exists() or args.rebuild
     if not args.clean and not args.rebuild and cache_file.exists():
         print(
@@ -560,12 +636,33 @@ def main(argv=None):
         )
         return 1
 
-    if shutil.which("ninja") is None:
+    if shutil.which("cmake") is None:
         print(
-            "ERROR: ninja was not found on PATH. Install Ninja and add it to PATH.",
+            "ERROR: cmake was not found on PATH. Install CMake:\n"
+            "  Windows: https://cmake.org/download/\n"
+            "  Ubuntu: sudo apt install cmake\n"
+            "  Fedora: sudo dnf install cmake",
             file=sys.stderr,
         )
         return 1
+
+    if shutil.which("ninja") is None:
+        print(
+            "ERROR: ninja was not found on PATH. Install Ninja and add it to PATH.\n"
+            "  Windows: https://github.com/ninja-build/ninja/releases\n"
+            "  Ubuntu: sudo apt install ninja-build\n"
+            "  Fedora: sudo dnf install ninja-build",
+            file=sys.stderr,
+        )
+        return 1
+
+    if platform.system() == "Linux":
+        print(
+            "Linux/WSL build: make sure the following packages are installed:\n"
+            "  sudo apt install build-essential cmake ninja-build   (Ubuntu)\n"
+            "  sudo dnf groupinstall 'Development Tools'            (Fedora)",
+            flush=True,
+        )
 
     if platform.system() == "Windows":
         # The Ninja generator on Windows does not set up the MSVC/Windows SDK
@@ -620,7 +717,27 @@ def main(argv=None):
         # path is passed explicitly.
         _ensure_on_path(str(cl_path.parent))
     else:
-        cl_path = None
+        # On Linux (including WSL native), detect the system C/C++ compiler.
+        c_compiler = None
+        cxx_compiler = None
+        for cc, cxx in [("gcc", "g++"), ("clang", "clang++")]:
+            cc_found = shutil.which(cc)
+            cxx_found = shutil.which(cxx)
+            if cc_found and cxx_found:
+                c_compiler = Path(cc_found).resolve()
+                cxx_compiler = Path(cxx_found).resolve()
+                print(f"Using Linux C compiler: {c_compiler}")
+                print(f"Using Linux C++ compiler: {cxx_compiler}")
+                break
+        if c_compiler is None or cxx_compiler is None:
+            print(
+                "ERROR: No C/C++ compiler found. Install gcc or clang:\n"
+                "  sudo apt install build-essential   (Debian/Ubuntu)\n"
+                "  sudo dnf groupinstall 'Development Tools'  (Fedora)\n"
+                "  sudo pacman -S base-devel          (Arch)",
+                file=sys.stderr,
+            )
+            return 1
 
     configure_cmd = [
         "cmake",
@@ -635,9 +752,14 @@ def main(argv=None):
         "-DCLANG_INCLUDE_TESTS=OFF",
         "-DUSE_NUGET_WARP=FALSE",
     ]
-    if cl_path is not None:
+    if platform.system() == "Windows" and cl_path is not None:
         configure_cmd.append(f"-DCMAKE_C_COMPILER={cl_path.as_posix()}")
         configure_cmd.append(f"-DCMAKE_CXX_COMPILER={cl_path.as_posix()}")
+    elif platform.system() == "Linux":
+        if c_compiler is not None:
+            configure_cmd.append(f"-DCMAKE_C_COMPILER={c_compiler.as_posix()}")
+        if cxx_compiler is not None:
+            configure_cmd.append(f"-DCMAKE_CXX_COMPILER={cxx_compiler.as_posix()}")
     if not args.enable_spirv_codegen:
         configure_cmd.append("-DENABLE_SPIRV_CODEGEN=OFF")
     if args.spirv_build_tests:
@@ -729,16 +851,28 @@ def main(argv=None):
             build_cmd.extend(["-j", str(args.jobs)])
         run(build_cmd, cwd=str(repo_root))
 
-    # Ninja is a single-config generator, so binaries land under <build>/bin.
+    # Ninja is a single-config generator.
+    # On Windows, all binaries (exe, dll) land under <build>/bin.
+    # On Linux, executables go to <build>/bin, shared libraries to <build>/lib.
     bin_dir = build_dir / "bin"
+    lib_dir = build_dir / "lib"
     print("\n=== Verifying generated binaries ===")
-    target_binaries = {
-        "dxc": bin_dir / "dxc.exe",
-        "dxv": bin_dir / "dxv.exe",
-        "dxcompiler": bin_dir / "dxcompiler.dll",
-        "dxilconv": bin_dir / "dxilconv.dll",
-        "dxildll": bin_dir / "dxil.dll",
-    }
+    if platform.system() == "Windows":
+        target_binaries = {
+            "dxc": bin_dir / "dxc.exe",
+            "dxv": bin_dir / "dxv.exe",
+            "dxcompiler": bin_dir / "dxcompiler.dll",
+            "dxilconv": bin_dir / "dxilconv.dll",
+            "dxildll": bin_dir / "dxil.dll",
+        }
+    else:
+        target_binaries = {
+            "dxc": bin_dir / "dxc",
+            "dxv": bin_dir / "dxv",
+            "dxcompiler": lib_dir / "libdxcompiler.so",
+            "dxilconv": lib_dir / "libdxilconv.so",
+            "dxildll": lib_dir / "libdxil.so",
+        }
 
     missing = []
     for target in targets:

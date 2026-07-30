@@ -36,7 +36,8 @@ if (${ENABLE_SPIRV_CODEGEN})
   if (NOT DEFINED SPIRV-Headers_SOURCE_DIR)
     message(FATAL_ERROR "SPIRV-Headers was not found - required for SPIR-V codegen")
   else()
-    set(SPIRV_HEADER_INCLUDE_DIR ${SPIRV-Headers_SOURCE_DIR}/include PARENT_SCOPE)
+    set(SPIRV_HEADER_INCLUDE_DIR ${SPIRV-Headers_SOURCE_DIR}/include)
+    set(SPIRV_HEADER_INCLUDE_DIR ${SPIRV_HEADER_INCLUDE_DIR} PARENT_SCOPE)
   endif()
 
   if (NOT TARGET SPIRV-Tools)
@@ -45,6 +46,12 @@ if (${ENABLE_SPIRV_CODEGEN})
       # This add_compile_options() will only affect the current directory and its subdirectories.
       if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         add_compile_options(-Wno-implicit-fallthrough)
+        # clang-cl enables additional /W2 diagnostics (e.g. missing field
+        # initializers) that the SPIRV-Tools sources don't build cleanly with
+        # under /WX. Suppress them so clang-cl can build this external project.
+        if(MSVC)
+          add_compile_options(-Wno-missing-field-initializers)
+        endif()
       endif()
       # We only need the library from SPIRV-Tools.
       set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "Skip building SPIRV-Tools executables")
