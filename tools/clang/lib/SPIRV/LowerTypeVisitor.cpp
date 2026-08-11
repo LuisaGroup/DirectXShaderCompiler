@@ -986,7 +986,7 @@ LowerTypeVisitor::lowerResourceType(QualType type, SpirvLayoutRule rule,
     return spvContext.getAccelerationStructureTypeNV();
   }
 
-  if (name == "RayQuery")
+  if (hlsl::IsHLSLRayQueryType(type))
     return spvContext.getRayQueryTypeKHR();
 
   if (name == "StructuredBuffer" || name == "RWStructuredBuffer" ||

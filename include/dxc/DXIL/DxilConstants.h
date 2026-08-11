@@ -199,6 +199,10 @@ enum class ComponentType : uint32_t {
   F8_E5M2 = 22,
   // END
 
+  // BEGIN NEW FOR SM 6.10
+  BFloat16 = 23,
+  // END
+
   LastEntry
 };
 
@@ -214,7 +218,7 @@ enum class MatrixScope : uint32_t {
   ThreadGroup = 2,
 };
 
-enum class LinalgMatrixLayout : uint32_t {
+enum class MatrixLayout : uint32_t {
   RowMajor = 0,
   ColumnMajor = 1,
   MulOptimal = 2,

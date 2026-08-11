@@ -665,6 +665,8 @@ llvm::StringRef ComponentTypeToString(DXIL::ComponentType CT) {
     return "F8_E4M3FN";
   case DXIL::ComponentType::F8_E5M2:
     return "F8_E5M2";
+  case DXIL::ComponentType::BFloat16:
+    return "BFloat16";
   default:
     return "Unknown ComponentType";
   }
@@ -694,6 +696,32 @@ llvm::StringRef MatrixUseToString(DXIL::MatrixUse MU) {
   default:
     return "Unknown MatrixUse";
   }
+}
+
+llvm::StringRef MatrixLayoutToString(DXIL::MatrixLayout ML) {
+  switch (ML) {
+  case DXIL::MatrixLayout::ColumnMajor:
+    return "ColumnMajor";
+  case DXIL::MatrixLayout::RowMajor:
+    return "RowMajor";
+  case DXIL::MatrixLayout::MulOptimal:
+    return "MulOptimal";
+  case DXIL::MatrixLayout::MulOptimalTranspose:
+    return "MulOptimalTranspose";
+  case DXIL::MatrixLayout::OuterProductOptimal:
+    return "OuterProductOptimal";
+  case DXIL::MatrixLayout::OuterProductOptimalTranspose:
+    return "OuterProductOptimalTranspose";
+  default:
+    return "Unknown MatrixUse";
+  }
+}
+
+std::string TypeToString(llvm::Type *Ty) {
+  std::string S;
+  llvm::raw_string_ostream OS(S);
+  Ty->print(OS);
+  return OS.str();
 }
 
 } // namespace hlsl
