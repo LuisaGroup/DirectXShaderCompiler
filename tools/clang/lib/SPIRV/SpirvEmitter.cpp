@@ -3423,11 +3423,20 @@ SpirvInstruction *SpirvEmitter::processCall(const CallExpr *callExpr) {
       const bool isNoInterp = param->hasAttr<HLSLNoInterpolationAttr>() ||
                               (argInst && argInst->isNoninterpolated());
 
-      auto *tempVar = spvBuilder.addFnVar(varType, arg->getLocStart(), varName,
-                                          isPrecise, isNoInterp);
-
-      vars.push_back(tempVar);
-      isTempVar.push_back(true);
+        auto *tempVar = spvBuilder.addFnVar(varType, arg->getLocStart(), varName,
+                                            isPrecise, isNoInterp);
+        // A by-value resource argument creates a Function-scope variable whose
+        // pointee type is itself a pointer to the resource (a pointer-to-
+        // pointer). Such variables are illegal in Logical addressing unless
+        // the VariablePointersStorageBuffer capability is declared, so we must
+        // request legalization to inline the callee and eliminate the
+        // temporary variable (e.g. when the resource is only consumed by a
+        // [[vk::ext_reference]] intrinsic, no other code path would have
+        // requested legalization).
+        if (!needsLegalization && isResourceType(paramType))
+          needsLegalization = true;
+        vars.push_back(tempVar);
+        isTempVar.push_back(true);
       args.push_back(argInst);
 
       // Update counter variable associated with function parameters
@@ -16370,14 +16379,78 @@ SpirvEmitter::processSpvIntrinsicCallExpr(const CallExpr *expr) {
     const auto *param = funcDecl->getParamDecl(i);
     const Expr *arg = args[i]->IgnoreParenLValueCasts();
     SpirvInstruction *argInst = doExpr(arg);
-    if (param->hasAttr<VKReferenceExtAttr>()) {
-      if (argInst->isRValue()) {
-        emitError("argument for a parameter with vk::ext_reference attribute "
-                  "must be a reference",
+      if (param->hasAttr<VKReferenceExtAttr>()) {
+        if (argInst->isRValue()) {
+          emitError("argument for a parameter with vk::ext_reference attribute "
+                    "must be a reference",
+                    arg->getExprLoc());
+          return nullptr;
+        }
+        // If the reference argument is an HLSL resource passed by value, the
+        // argument is a Function-scope temporary variable holding a pointer to
+        // the resource (a pointer-to-pointer). Instructions such as
+        // OpCooperativeVectorReduceSumAccumulateNV require the operand to be a
+        // pointer with Workgroup or StorageBuffer storage class, so load the
+        // actual resource pointer out of the temporary. Legalization (enabled
+        // for by-value resource arguments in doCallExpr) will then inline the
+        // callee and eliminate the temporary variable entirely.
+        if (isResourceType(param->getType()) &&
+            argInst->getStorageClass() == spv::StorageClass::Function) {
+          argInst = spvBuilder.createLoad(param->getType(), argInst,
+                                          arg->getExprLoc(),
+                                          arg->getSourceRange());
+        if (isAKindOfStructuredOrByteBuffer(param->getType())) {
+          // The loaded value is the resource pointer itself; tag it with the
+          // StorageBuffer storage class so that subsequent access chains get
+          // the correct pointer storage class.
+          argInst->setStorageClass(spv::StorageClass::StorageBuffer);
+        }
+        }
+        // Cooperative vector memory instructions (OpCooperativeVectorLoadNV,
+        // OpCooperativeVectorStoreNV,
+        // OpCooperativeVectorOuterProductAccumulateNV and
+        // OpCooperativeVectorReduceSumAccumulateNV) require their pointer
+        // operand to point to an array type. An HLSL buffer resource lowers
+        // to a pointer to the buffer block struct, so take an access chain
+        // to the struct's data member to obtain a pointer to the (runtime)
+        // array.
+        {
+          uint32_t extOp = 0;
+          for (const auto *attr : funcDecl->getAttrs()) {
+            if (const auto *instAttr = dyn_cast<VKInstructionExtAttr>(attr)) {
+              extOp = instAttr->getOpcode();
+              break;
+            }
+          }
+          switch (static_cast<spv::Op>(extOp)) {
+          case spv::Op::OpCooperativeVectorLoadNV:
+          case spv::Op::OpCooperativeVectorStoreNV:
+          case spv::Op::OpCooperativeVectorOuterProductAccumulateNV:
+          case spv::Op::OpCooperativeVectorReduceSumAccumulateNV: {
+            if (isAKindOfStructuredOrByteBuffer(param->getType())) {
+              LowerTypeVisitor lowerTypeVisitor(astContext, spvContext,
+                                                spirvOptions, spvBuilder);
+              const auto *bufType = lowerTypeVisitor.lowerType(
+                  param->getType(), spirvOptions.sBufferLayoutRule, llvm::None,
                   arg->getExprLoc());
-        return nullptr;
-      }
-      spvArgs.push_back(argInst);
+              const auto *structType = dyn_cast<StructType>(bufType);
+              if (structType && !structType->getFields().empty() &&
+                  isa<RuntimeArrayType>(structType->getFields()[0].type)) {
+                const auto *arrayPtrType = spvContext.getPointerType(
+                    structType->getFields()[0].type, argInst->getStorageClass());
+                auto *zero = spvBuilder.getConstantInt(astContext.UnsignedIntTy,
+                                                       llvm::APInt(32, 0));
+                argInst = spvBuilder.createAccessChain(arrayPtrType, argInst, {zero},
+                                                       arg->getExprLoc());
+              }
+            }
+            break;
+          }
+          default:
+            break;
+          }
+        }
+spvArgs.push_back(argInst);
     } else if (param->hasAttr<VKLiteralExtAttr>()) {
       auto constArg = dyn_cast<SpirvConstant>(argInst);
       if (constArg == nullptr) {
