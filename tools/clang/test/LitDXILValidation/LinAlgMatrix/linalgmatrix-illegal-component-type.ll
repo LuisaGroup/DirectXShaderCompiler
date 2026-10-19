@@ -13,10 +13,10 @@ define void @main() {
   %1 = call %dx.types.Handle @dx.op.createHandleFromBinding(i32 217, %dx.types.ResBind zeroinitializer, i32 0, i1 false)  ; CreateHandleFromBinding(bind,index,nonUniformIndex)
   %2 = call %dx.types.Handle @dx.op.annotateHandle(i32 216, %dx.types.Handle %1, %dx.types.ResourceProperties { i32 11, i32 0 })  ; AnnotateHandle(res,props)  resource: ByteAddressBuffer
 
-  ; CHECK: Function: main: error: Component Type 'Invalid' not allowed in LinAlg Matrix.
+  ; CHECK: Function: main: error: Component type 'Invalid' from return matrix not allowed in LinAlg Matrix operations.
   ; CHECK-NEXT: note: at {{.*}} @dx.op.linAlgMatrixLoadFromDescriptor.mC0M16N16U0S0
   ; Matrix<Invalid, 16, 16, A, Thread>
-  %3 = call %dx.types.LinAlgMatrixC0M16N16U0S0 @dx.op.linAlgMatrixLoadFromDescriptor.mC0M16N16U0S0(i32 -2147483634, %dx.types.Handle %2, i32 0, i32 0, i32 0, i32 128)  ; LinAlgMatrixLoadFromDescriptor(handle,offset,stride,layout,align)
+  %3 = call %dx.types.LinAlgMatrixC0M16N16U0S0 @dx.op.linAlgMatrixLoadFromDescriptor.mC0M16N16U0S0(i32 325, %dx.types.Handle %2, i32 0, i32 0, i32 0, i32 128)  ; LinAlgMatrixLoadFromDescriptor(handle,offset,stride,layout,align)
 
   ; CHECK-NEXT: Validation failed.
 
@@ -51,5 +51,5 @@ attributes #1 = { nounwind readnone }
 !5 = !{!6}
 !6 = !{i32 0, %struct.ByteAddressBuffer* undef, !"", i32 0, i32 0, i32 1, i32 11, i32 0, null}
 !7 = !{void ()* @main, !"main", null, !4, !8}
-!8 = !{i32 0, i64 8388624, i32 4, !9}
+!8 = !{i32 0, i64 2199031644176, i32 4, !9}
 !9 = !{i32 1, i32 1, i32 1}

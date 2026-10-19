@@ -484,6 +484,25 @@ static void AddRecordSubscriptAccess(clang::ASTContext &Ctx,
   AddRecordAccessMethod(Ctx, RD, ReturnTy, false, true, true);
 }
 
+static AvailabilityAttr *
+ConstructAvailabilityAttribute(clang::ASTContext &context,
+                               VersionTuple Introduced,
+                               VersionTuple Deprecated = VersionTuple(),
+                               VersionTuple Obsoleted = VersionTuple()) {
+  AvailabilityAttr *AAttr = AvailabilityAttr::CreateImplicit(
+      context, &context.Idents.get(""), Introduced, Deprecated, Obsoleted,
+      false, "");
+  return AAttr;
+}
+
+// Work graph node record objects: available SM6.8, deprecated SM6.9,
+// obsoleted SM6.10.
+static AvailabilityAttr *
+ConstructNodeRecordAvailabilityAttribute(clang::ASTContext &context) {
+  return ConstructAvailabilityAttribute(
+      context, VersionTuple(6, 8), VersionTuple(6, 9), VersionTuple(6, 10));
+}
+
 /// <summary>Adds up-front support for HLSL *NodeOutputRecords template
 /// types.</summary>
 void hlsl::AddHLSLNodeOutputRecordTemplate(
@@ -508,6 +527,8 @@ void hlsl::AddHLSLNodeOutputRecordTemplate(
 
   typeDeclBuilder.getRecordDecl()->addAttr(
       HLSLNodeObjectAttr::CreateImplicit(context, Type));
+  typeDeclBuilder.getRecordDecl()->addAttr(
+      ConstructNodeRecordAvailabilityAttribute(context));
 
   QualType elementType = context.getTemplateTypeParmType(
       0, 0, ParameterPackFalse, outputTemplateParamDecl);
@@ -556,14 +577,6 @@ hlsl::DeclareRecordTypeWithHandle(ASTContext &context, StringRef name,
   if (isCompleteType)
     return typeDeclBuilder.completeDefinition();
   return typeDeclBuilder.getRecordDecl();
-}
-
-AvailabilityAttr *ConstructAvailabilityAttribute(clang::ASTContext &context,
-                                                 VersionTuple Introduced) {
-  AvailabilityAttr *AAttr = AvailabilityAttr::CreateImplicit(
-      context, &context.Idents.get(""), clang::VersionTuple(6, 9),
-      clang::VersionTuple(), clang::VersionTuple(), false, "");
-  return AAttr;
 }
 
 // creates a global static constant unsigned integer with value.
@@ -1333,6 +1346,7 @@ CXXRecordDecl *hlsl::DeclareResourceType(ASTContext &context, bool bSampler) {
   CXXRecordDecl *recordDecl = typeDeclBuilder.getRecordDecl();
   recordDecl->addAttr(
       HLSLDynamicResourceAttr::CreateImplicit(context, bSampler));
+  recordDecl->addAttr(HLSLNonAutoDeducibleAttr::CreateImplicit(context));
 
   QualType indexType = context.UnsignedIntTy;
   QualType resultType = context.getRecordType(recordDecl);
@@ -1367,6 +1381,8 @@ CXXRecordDecl *hlsl::DeclareNodeOrRecordType(
 
   Builder.getRecordDecl()->addAttr(
       HLSLNodeObjectAttr::CreateImplicit(Ctx, Type));
+  Builder.getRecordDecl()->addAttr(
+      ConstructNodeRecordAvailabilityAttribute(Ctx));
 
   if (IsRecordTypeTemplate) {
     QualType ParamTy = QualType(TyParamDecl->getTypeForDecl(), 0);
@@ -1500,6 +1516,8 @@ CXXRecordDecl *hlsl::DeclareNodeOutputArray(clang::ASTContext &Ctx,
 
   Builder.getRecordDecl()->addAttr(
       HLSLNodeObjectAttr::CreateImplicit(Ctx, Type));
+  Builder.getRecordDecl()->addAttr(
+      ConstructNodeRecordAvailabilityAttribute(Ctx));
 
   QualType ResultType;
   if (IsRecordTypeTemplate) {

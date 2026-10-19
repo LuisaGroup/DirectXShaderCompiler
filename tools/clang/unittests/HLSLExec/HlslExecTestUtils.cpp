@@ -11,26 +11,8 @@
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <filesystem>
+#include <mutex>
 #include <optional>
-
-// D3D12_FEATURE_D3D12_OPTIONS_PREVIEW and its data struct are not yet in
-// the released Windows SDK. Define locally so the test can query variable
-// group shared memory capabilities from the Agility SDK runtime.
-// TODO(#8661): Remove me when GroupSharedLimit is available in a released
-// Windows SDK.
-#if defined(D3D12_PREVIEW_SDK_VERSION) && D3D12_PREVIEW_SDK_VERSION < 720
-
-#ifndef D3D12_FEATURE_D3D12_OPTIONS_PREVIEW
-#define D3D12_FEATURE_D3D12_OPTIONS_PREVIEW ((D3D12_FEATURE)72)
-#endif
-
-typedef struct D3D12_FEATURE_DATA_D3D12_OPTIONS_PREVIEW {
-  UINT MaxGroupSharedMemoryPerGroupCS;
-  UINT MaxGroupSharedMemoryPerGroupAS;
-  UINT MaxGroupSharedMemoryPerGroupMS;
-} D3D12_FEATURE_DATA_D3D12_OPTIONS_PREVIEW;
-
-#endif
 
 constexpr UINT KnownMultiplicationFlags = 0xf;
 constexpr UINT MatrixMultiplicationFlags =
@@ -425,6 +407,118 @@ static bool createDevice(
   return true;
 }
 
+// Linker-provided symbol at the base of the module containing this code, which
+// is also its HMODULE. Identifies the module without depending on the name of
+// the binary these sources are built into.
+// See https://devblogs.microsoft.com/oldnewthing/20041025-00/?p=37483.
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+// Directory of the module containing this code.
+static const std::wstring &getContainingModuleDirectory() {
+  static const std::wstring Dir = [] {
+    HMODULE Module = reinterpret_cast<HMODULE>(&__ImageBase);
+
+    // GetModuleFileNameW truncates rather than failing, so grow until it fits.
+    std::wstring Path(MAX_PATH, L'\0');
+    for (;;) {
+      const DWORD Len =
+          GetModuleFileNameW(Module, &Path[0], static_cast<DWORD>(Path.size()));
+      if (Len == 0)
+        return std::wstring();
+      if (Len < Path.size()) {
+        Path.resize(Len);
+        break;
+      }
+      Path.resize(Path.size() * 2);
+    }
+    return std::filesystem::path(Path).parent_path().wstring();
+  }();
+  return Dir;
+}
+
+// Every call site loads from the same directory, so log the first resolution
+// only. Tests may run in parallel, so this has to be thread-safe.
+static void logResolvedDataDirOnce(const wchar_t *Origin,
+                                   const std::filesystem::path &Path) {
+  static std::once_flag Logged;
+  std::call_once(Logged, [&] {
+    LogCommentFmt(L"Loading execution test data from %s: %s", Origin,
+                  Path.parent_path().c_str());
+  });
+}
+
+// Resolves a data file shipped with the execution tests, in this order:
+//
+//   1. the HlslDataDir runtime parameter, if supplied. Authoritative: we fail
+//      rather than fall through, so a typo is reported instead of hidden.
+//   2. the directory containing this module, so a binary deployed with its
+//      data files finds them.
+//   3. the source directory recorded by CMake, so a build tree picks up edits
+//      to the data files without rebuilding.
+static std::wstring resolveHlslDataFile(LPCWSTR RelativePath) {
+  WEX::Common::String ParamValue;
+  std::wstring OverrideDir;
+  if (SUCCEEDED(WEX::TestExecution::RuntimeParameters::TryGetValue(
+          HLSLDATAFILEPARAM, ParamValue)))
+    OverrideDir = reinterpret_cast<const wchar_t *>(ParamValue.GetBuffer());
+
+  // Treat an empty value as absent and fall through to the other locations.
+  if (!OverrideDir.empty()) {
+    std::filesystem::path Candidate =
+        std::filesystem::path(OverrideDir) / RelativePath;
+    if (!std::filesystem::exists(Candidate))
+      LOG_ERROR_FMT_THROW(
+          L"Unable to find %s in the directory given by the %s parameter.\n"
+          L"  Tried: %s\n"
+          L"%s is authoritative, so no other location was searched. Omit it "
+          L"to search the test binary's directory and the source directory.",
+          RelativePath, HLSLDATAFILEPARAM, Candidate.c_str(),
+          HLSLDATAFILEPARAM);
+    logResolvedDataDirOnce(
+        FormatToWString(L"the %s parameter", HLSLDATAFILEPARAM).c_str(),
+        Candidate);
+    return Candidate.wstring();
+  }
+
+  const std::wstring ModuleDir = getContainingModuleDirectory();
+  std::filesystem::path ModuleCandidate;
+  if (!ModuleDir.empty()) {
+    ModuleCandidate = std::filesystem::path(ModuleDir) / RelativePath;
+    if (std::filesystem::exists(ModuleCandidate)) {
+      logResolvedDataDirOnce(L"the directory containing the test binary",
+                             ModuleCandidate);
+      return ModuleCandidate.wstring();
+    }
+  }
+
+  // Empty in _HLK_CONF builds; probing it would just look in the current
+  // directory.
+  const std::wstring SourceDir = DEFAULT_EXEC_TEST_DIR;
+  std::filesystem::path SourceCandidate;
+  if (!SourceDir.empty()) {
+    SourceCandidate = std::filesystem::path(SourceDir) / RelativePath;
+    if (std::filesystem::exists(SourceCandidate)) {
+      logResolvedDataDirOnce(L"the build-configured source directory",
+                             SourceCandidate);
+      return SourceCandidate.wstring();
+    }
+  }
+
+  LOG_ERROR_FMT_THROW(
+      L"Unable to find the test data file %s in any known location.\n"
+      L"  Next to the test binary:      %s\n"
+      L"  Build-configured source path: %s\n"
+      L"Deploy %s next to the test binary, or pass "
+      L"/p:\"%s=<directory containing %s>\" to specify its location.",
+      RelativePath,
+      ModuleCandidate.empty() ? L"<could not determine the binary's directory>"
+                              : ModuleCandidate.c_str(),
+      SourceCandidate.empty() ? L"<not configured for this build>"
+                              : SourceCandidate.c_str(),
+      RelativePath, HLSLDATAFILEPARAM, RelativePath);
+  return std::wstring();
+}
+
 void readHlslDataIntoNewStream(LPCWSTR RelativePath, IStream **Stream,
                                dxc::SpecificDllLoader &Support) {
   VERIFY_SUCCEEDED(
@@ -432,8 +526,7 @@ void readHlslDataIntoNewStream(LPCWSTR RelativePath, IStream **Stream,
   CComPtr<IDxcLibrary> Library;
   CComPtr<IDxcBlobEncoding> Blob;
   CComPtr<IStream> StreamCom;
-  std::wstring Path = GetPathToHlslDataFile(RelativePath, HLSLDATAFILEPARAM,
-                                            DEFAULT_EXEC_TEST_DIR);
+  std::wstring Path = resolveHlslDataFile(RelativePath);
   VERIFY_SUCCEEDED(Support.CreateInstance(CLSID_DxcLibrary, &Library));
   VERIFY_SUCCEEDED(Library->CreateBlobFromFile(Path.c_str(), nullptr, &Blob));
   VERIFY_SUCCEEDED(Library->CreateStreamFromBlobReadOnly(Blob, &StreamCom));
@@ -709,6 +802,19 @@ bool D3D12SDKSelector::createDevice(ID3D12Device **D3DDevice,
                         D3D12CreateDevice);
 }
 
+bool isWarp(ID3D12Device *D3DDevice) {
+  CComPtr<IDXGIFactory4> DXGIFactory;
+  VERIFY_SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&DXGIFactory)));
+
+  CComPtr<IDXGIAdapter1> DXGIAdapter;
+  VERIFY_SUCCEEDED(DXGIFactory->EnumAdapterByLuid(D3DDevice->GetAdapterLuid(),
+                                                  IID_PPV_ARGS(&DXGIAdapter)));
+
+  DXGI_ADAPTER_DESC1 AdapterDesc;
+  VERIFY_SUCCEEDED(DXGIAdapter->GetDesc1(&AdapterDesc));
+  return (AdapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+}
+
 bool doesDeviceSupportInt64(ID3D12Device *pDevice) {
   D3D12_FEATURE_DATA_D3D12_OPTIONS1 O;
   if (FAILED(pDevice->CheckFeatureSupport(
@@ -890,27 +996,8 @@ bool ThreadGroupMatrixMultiplySupport::supported() const {
 }
 
 bool ThreadGroupMatrixMultiplySupport::valid() const {
-  if (!isValidMultiplicationFlags(static_cast<UINT>(SupportFlags),
-                                  MatrixMultiplicationFlags))
-    return false;
-  if (!hasFlag(SupportFlags,
-               linalg_abi::
-                   D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED))
-    return true;
-  return MinThreadGroupSize != 0 && MaxThreadGroupSize >= MinThreadGroupSize &&
-         MaxThreadGroupSize % MinThreadGroupSize == 0 &&
-         (PreferredThreadGroupSize == 0 ||
-          (PreferredThreadGroupSize >= MinThreadGroupSize &&
-           PreferredThreadGroupSize <= MaxThreadGroupSize &&
-           PreferredThreadGroupSize % MinThreadGroupSize == 0));
-}
-
-bool ThreadGroupMatrixMultiplySupport::supportsThreadGroupSize(
-    UINT ThreadGroupSize) const {
-  return supported() && MinThreadGroupSize != 0 &&
-         ThreadGroupSize >= MinThreadGroupSize &&
-         ThreadGroupSize <= MaxThreadGroupSize &&
-         ThreadGroupSize % MinThreadGroupSize == 0;
+  return isValidMultiplicationFlags(static_cast<UINT>(SupportFlags),
+                                    MatrixMultiplicationFlags);
 }
 
 bool ThreadVectorMatrixMultiplySupport::supported() const {
@@ -1030,21 +1117,22 @@ HRESULT queryMatrixConstruction(ID3D12Device *Device,
       linalg_abi::D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_MATRIX_CONSTRUCTION);
   RuntimeSupport.MatrixConstruction.ComponentType =
       static_cast<UINT>(Query.ComponentType);
+  RuntimeSupport.MatrixConstruction.Use = Query.Use;
+  RuntimeSupport.MatrixConstruction.Scope = Query.Scope;
   RuntimeSupport.MatrixConstruction.WaveSize = Query.WaveSize;
-  RuntimeSupport.MatrixConstruction.Shape = {
-      Query.Shape.M,
-      Query.Shape.K,
-      Query.Shape.N,
-  };
+  RuntimeSupport.MatrixConstruction.ThreadGroupSize = Query.ThreadGroupSize;
+  RuntimeSupport.MatrixConstruction.Shape = {Query.Shape.M, Query.Shape.N};
 
   const HRESULT HR = Device->CheckFeatureSupport(
       linalg_abi::D3D12_FEATURE_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT,
       &RuntimeSupport, sizeof(RuntimeSupport));
   if (FAILED(HR)) {
-    LogCommentFmt(L"MatrixConstruction query failed: type=%s, wave=%u, "
-                  L"shape=(%u,%u,%u), hr=0x%08x",
-                  dataTypeName(Query.ComponentType), Query.WaveSize,
-                  Query.Shape.M, Query.Shape.K, Query.Shape.N, HR);
+    LogCommentFmt(
+        L"MatrixConstruction query failed: type=%s, use=%u, scope=%u, "
+        L"wave=%u, group=%u, shape=(%u,%u), hr=0x%08x",
+        dataTypeName(Query.ComponentType), static_cast<UINT>(Query.Use),
+        static_cast<UINT>(Query.Scope), Query.WaveSize, Query.ThreadGroupSize,
+        Query.Shape.M, Query.Shape.N, HR);
     return HR;
   }
 
@@ -1057,11 +1145,12 @@ HRESULT queryMatrixConstruction(ID3D12Device *Device,
     return E_UNEXPECTED;
   }
 
-  LogCommentFmt(L"MatrixConstruction query: type=%s, wave=%u, "
-                L"shape=(%u,%u,%u), supported=%u",
-                dataTypeName(Query.ComponentType), Query.WaveSize,
-                Query.Shape.M, Query.Shape.K, Query.Shape.N,
-                Support.supported());
+  LogCommentFmt(
+      L"MatrixConstruction query: type=%s, use=%u, scope=%u, wave=%u, "
+      L"group=%u, shape=(%u,%u), supported=%u",
+      dataTypeName(Query.ComponentType), static_cast<UINT>(Query.Use),
+      static_cast<UINT>(Query.Scope), Query.WaveSize, Query.ThreadGroupSize,
+      Query.Shape.M, Query.Shape.N, Support.supported());
   return S_OK;
 }
 
@@ -1136,6 +1225,8 @@ queryThreadGroupMatrixMultiply(ID3D12Device *Device,
       Query.Shape.K,
       Query.Shape.N,
   };
+  RuntimeSupport.ThreadGroupMatrixMultiply.ThreadGroupSize =
+      Query.ThreadGroupSize;
 
   const HRESULT HR = Device->CheckFeatureSupport(
       linalg_abi::D3D12_FEATURE_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT,
@@ -1143,12 +1234,12 @@ queryThreadGroupMatrixMultiply(ID3D12Device *Device,
   if (FAILED(HR)) {
     LogCommentFmt(
         L"ThreadGroupMatrixMultiply query failed: wave=%u, A=%s, B=%s, "
-        L"Acc=%s, shape=(%u,%u,%u), hr=0x%08x",
+        L"Acc=%s, shape=(%u,%u,%u), threads=%u, hr=0x%08x",
         Query.WaveInputs.WaveSize,
         dataTypeName(Query.WaveInputs.MatrixAComponentType),
         dataTypeName(Query.WaveInputs.MatrixBComponentType),
         dataTypeName(Query.WaveInputs.AccumulatorComponentType), Query.Shape.M,
-        Query.Shape.K, Query.Shape.N, HR);
+        Query.Shape.K, Query.Shape.N, Query.ThreadGroupSize, HR);
     return HR;
   }
 
@@ -1159,44 +1250,16 @@ queryThreadGroupMatrixMultiply(ID3D12Device *Device,
     return E_UNEXPECTED;
   }
 
-  const bool Supported =
-      (Flags &
-       static_cast<UINT>(
-           linalg_abi::
-               D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED)) !=
-      0;
-  const UINT MinSize =
-      RuntimeSupport.ThreadGroupMatrixMultiply.MinThreadGroupSize;
-  const UINT MaxSize =
-      RuntimeSupport.ThreadGroupMatrixMultiply.MaxThreadGroupSize;
-  const UINT PreferredSize =
-      RuntimeSupport.ThreadGroupMatrixMultiply.PreferredThreadGroupSize;
-  if (Supported &&
-      (MinSize == 0 || MaxSize < MinSize || MaxSize % MinSize != 0 ||
-       (PreferredSize != 0 &&
-        (PreferredSize < MinSize || PreferredSize > MaxSize ||
-         PreferredSize % MinSize != 0)))) {
-    LogCommentFmt(
-        L"ThreadGroupMatrixMultiply query returned malformed group sizes: "
-        L"min=%u, max=%u, preferred=%u",
-        MinSize, MaxSize, PreferredSize);
-    return E_UNEXPECTED;
-  }
-
   Support.SupportFlags = static_cast<
       linalg_abi::D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAGS>(Flags);
-  Support.MinThreadGroupSize = MinSize;
-  Support.MaxThreadGroupSize = MaxSize;
-  Support.PreferredThreadGroupSize = PreferredSize;
   LogCommentFmt(
       L"ThreadGroupMatrixMultiply query: wave=%u, A=%s, B=%s, Acc=%s, "
-      L"shape=(%u,%u,%u), flags=0x%x, minGroup=%u, maxGroup=%u, "
-      L"preferredGroup=%u",
+      L"shape=(%u,%u,%u), threads=%u, flags=0x%x",
       Query.WaveInputs.WaveSize,
       dataTypeName(Query.WaveInputs.MatrixAComponentType),
       dataTypeName(Query.WaveInputs.MatrixBComponentType),
       dataTypeName(Query.WaveInputs.AccumulatorComponentType), Query.Shape.M,
-      Query.Shape.K, Query.Shape.N, Flags, MinSize, MaxSize, PreferredSize);
+      Query.Shape.K, Query.Shape.N, Query.ThreadGroupSize, Flags);
   return S_OK;
 }
 
@@ -1345,28 +1408,28 @@ HRESULT queryAtomicAccumulateStore(ID3D12Device *Device,
 
 // TODO(#8661): Remove me when GroupSharedLimit is available in a released
 // Windows SDK.
-#if defined(D3D12_PREVIEW_SDK_VERSION)
+#if defined(HLSLEXEC_GROUPSHARED_LIMITS)
 UINT getMaxGroupSharedMemoryCS(ID3D12Device *Device) {
-  D3D12_FEATURE_DATA_D3D12_OPTIONS_PREVIEW O = {};
-  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(
-      D3D12_FEATURE_D3D12_OPTIONS_PREVIEW, &O, sizeof(O)));
+  HlslExecGroupsharedLimits O = {};
+  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(HlslExecGroupsharedLimitsFeature,
+                                               &O, sizeof(O)));
   return O.MaxGroupSharedMemoryPerGroupCS;
 }
 
 UINT getMaxGroupSharedMemoryAS(ID3D12Device *Device) {
-  D3D12_FEATURE_DATA_D3D12_OPTIONS_PREVIEW O = {};
-  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(
-      D3D12_FEATURE_D3D12_OPTIONS_PREVIEW, &O, sizeof(O)));
+  HlslExecGroupsharedLimits O = {};
+  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(HlslExecGroupsharedLimitsFeature,
+                                               &O, sizeof(O)));
   return O.MaxGroupSharedMemoryPerGroupAS;
 }
 
 UINT getMaxGroupSharedMemoryMS(ID3D12Device *Device) {
-  D3D12_FEATURE_DATA_D3D12_OPTIONS_PREVIEW O = {};
-  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(
-      D3D12_FEATURE_D3D12_OPTIONS_PREVIEW, &O, sizeof(O)));
+  HlslExecGroupsharedLimits O = {};
+  VERIFY_SUCCEEDED(Device->CheckFeatureSupport(HlslExecGroupsharedLimitsFeature,
+                                               &O, sizeof(O)));
   return O.MaxGroupSharedMemoryPerGroupMS;
 }
-#endif // defined(D3D12_PREVIEW_SDK_VERSION)
+#endif // defined(HLSLEXEC_GROUPSHARED_LIMITS)
 
 std::unique_ptr<st::ShaderOp> createComputeOp(const char *Source,
                                               const char *Target,
@@ -1450,18 +1513,69 @@ void addRootView(st::ShaderOp *Op, UINT Index, const char *ResName) {
   Op->RootValues.push_back(RV);
 }
 
+static st::ShaderOpDescriptorHeap *getOrAddCbvSrvUavHeap(st::ShaderOp *Op,
+                                                         const char *HeapName) {
+  if (st::ShaderOpDescriptorHeap *Existing =
+          Op->GetDescriptorHeapByName(HeapName))
+    return Existing;
+
+  st::ShaderOpDescriptorHeap H = {};
+  H.Name = Op->Strings.insert(HeapName);
+  H.Desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  // SetDescriptorHeaps skips heaps that are not shader visible, which would
+  // leave the table bound to nothing.
+  H.Desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  // Left at zero so CreateDescriptorHeaps sizes it from the descriptors added.
+  H.Desc.NumDescriptors = 0;
+  Op->DescriptorHeaps.push_back(H);
+  return &Op->DescriptorHeaps.back();
+}
+
+void addHeapRawUAV(st::ShaderOp *Op, const char *HeapName, const char *ResName,
+                   UINT64 ViewBytes) {
+  // A raw view counts 32-bit words, so a byte size that is not a whole number
+  // of words cannot be represented and would silently round down.
+  VERIFY_IS_TRUE(ViewBytes % 4 == 0,
+                 "raw UAV view size must be a multiple of 4 bytes");
+  // NumElements is 32 bits, so a larger view cannot be described at all and
+  // narrowing would silently bind a shorter one.
+  VERIFY_IS_TRUE(ViewBytes / 4 <= UINT_MAX,
+                 "raw UAV view size exceeds what NumElements can describe");
+
+  st::ShaderOpDescriptor D = {};
+  D.Name = Op->Strings.insert(ResName);
+  D.ResName = Op->Strings.insert(ResName);
+  D.Kind = Op->Strings.insert("UAV");
+  D.UavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+  D.UavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  D.UavDesc.Buffer.FirstElement = 0;
+  D.UavDesc.Buffer.NumElements = static_cast<UINT>(ViewBytes / 4);
+  D.UavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+
+  getOrAddCbvSrvUavHeap(Op, HeapName)->Descriptors.push_back(D);
+}
+
+void addRootTable(st::ShaderOp *Op, UINT Index, const char *HeapName) {
+  st::ShaderOpRootValue RV = {};
+  RV.ResName = nullptr;
+  RV.HeapName = Op->Strings.insert(HeapName);
+  RV.Index = Index;
+  Op->RootValues.push_back(RV);
+}
+
 std::shared_ptr<st::ShaderOpTestResult>
 runShaderOp(ID3D12Device *Device, dxc::SpecificDllLoader &DxcSupport,
             std::unique_ptr<st::ShaderOp> Op,
             st::ShaderOpTest::TInitCallbackFn InitCallback,
-            st::ShaderOpTest::TCommandCallbackFn PostDispatchCallback) {
+            st::ShaderOpTest::TCommandCallbackFn PostDispatchCallback,
+            st::ShaderOpTest::TCommandCallbackFn PreDispatchCallback) {
   auto OpSet = std::make_shared<st::ShaderOpSet>();
   OpSet->ShaderOps.push_back(std::move(Op));
 
   return st::RunShaderOpTestAfterParse(
       Device, DxcSupport, nullptr, std::move(InitCallback),
       /*pShaderCallback=*/nullptr, std::move(PostDispatchCallback),
-      std::move(OpSet));
+      std::move(OpSet), std::move(PreDispatchCallback));
 }
 
 void compileShader(dxc::SpecificDllLoader &DxcSupport, const char *Source,
@@ -1528,14 +1642,14 @@ void compileShader(dxc::SpecificDllLoader &DxcSupport, const char *Source,
   }
 }
 
-#if defined(DIRECT3D_LINEAR_ALGEBRA)
+#if defined(HLSLEXEC_LINALG_HOST_API)
 UINT getLinAlgMatrixByteSize(ID3D12Device *Device, UINT NumRows,
                              UINT NumColumns,
                              D3D12_LINEAR_ALGEBRA_DATATYPE DataType,
                              D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT Layout,
                              UINT Stride) {
-  CComPtr<ID3D12DevicePreview> DevicePreview;
-  VERIFY_SUCCEEDED(Device->QueryInterface(IID_PPV_ARGS(&DevicePreview)));
+  CComPtr<IHlslExecLinAlgDevice> LinAlgDevice;
+  VERIFY_SUCCEEDED(Device->QueryInterface(IID_PPV_ARGS(&LinAlgDevice)));
 
   D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_DEST_INFO Info = {};
   Info.DestSize = 0;
@@ -1544,7 +1658,10 @@ UINT getLinAlgMatrixByteSize(ID3D12Device *Device, UINT NumRows,
   Info.NumRows = NumRows;
   Info.NumColumns = NumColumns;
   Info.DestDataType = DataType;
-  DevicePreview->GetLinearAlgebraMatrixConversionDestinationInfo(&Info);
+  LinAlgDevice->GetLinearAlgebraMatrixConversionDestinationInfo(&Info);
+  VERIFY_IS_TRUE(Info.DestSize != 0,
+                 "Device reported no destination size for the requested "
+                 "linear algebra matrix layout");
   return Info.DestSize;
 }
 
@@ -1554,8 +1671,8 @@ void recordLinAlgMatrixConversion(
     D3D12_LINEAR_ALGEBRA_DATATYPE DataType,
     D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT SrcLayout, UINT SrcStride,
     D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT DestLayout, UINT DestStride) {
-  CComPtr<ID3D12GraphicsCommandListPreview> PreviewList;
-  VERIFY_SUCCEEDED(List->QueryInterface(IID_PPV_ARGS(&PreviewList)));
+  CComPtr<IHlslExecLinAlgCommandList> LinAlgList;
+  VERIFY_SUCCEEDED(List->QueryInterface(IID_PPV_ARGS(&LinAlgList)));
 
   // Per the linear-algebra spec, ConvertLinearAlgebraMatrix (legacy barriers)
   // requires the source buffer in NON_PIXEL_SHADER_RESOURCE and the destination
@@ -1584,6 +1701,6 @@ void recordLinAlgMatrixConversion(
   Info.SrcInfo.SrcStride = SrcStride;
   Info.DataDesc.DestVA = DestBuffer->GetGPUVirtualAddress();
   Info.DataDesc.SrcVA = SrcBuffer->GetGPUVirtualAddress();
-  PreviewList->ConvertLinearAlgebraMatrix(&Info, 1);
+  LinAlgList->ConvertLinearAlgebraMatrix(&Info, 1);
 }
-#endif // defined(DIRECT3D_LINEAR_ALGEBRA)
+#endif // defined(HLSLEXEC_LINALG_HOST_API)
