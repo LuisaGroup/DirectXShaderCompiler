@@ -90,7 +90,9 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializeTypeBasedAliasAnalysisPass(Registry);
   initializeScopedNoAliasAAPass(Registry);
   initializeCycleAnalysisPass(Registry);
-  initializeGlobalsModRefPass(Registry);
+  // initializeGlobalsModRefPass is registered by initializeIPA (LLVM 3.7's
+  // GlobalsModRef lives in lib/Analysis/IPA); registering it here as well
+  // would register the same pass twice.
   initializeMemorySSAWrapperPassPass(Registry);
 
   HLSL_BIND_DUMP_METHODS // HLSL Change - Force binding dump methods.

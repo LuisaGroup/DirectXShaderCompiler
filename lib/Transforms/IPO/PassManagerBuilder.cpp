@@ -497,8 +497,10 @@ void PassManagerBuilder::populateModulePassManager(
     // HLSL Change Begins
     if (EnableGVN) {
       MPM.add(createGVNPass(DisableGVNLoadPRE));  // FIX: NewGVN miscompiles (fcmp olt->oeq); use original GVN
-      if (!HLSLResMayAlias)
-        MPM.add(createGVNHoistPass());  // GVN-based hoisting
+      if (!HLSLResMayAlias) {
+ MPM.add(createDxilSimpleGVNHoistPass()); // HLSL-aware hoisting/CSE of dx.op calls (restore)
+         MPM.add(createGVNHoistPass());  // GVN-based hoisting
+        }
     }
     // Add new optimization passes at O2+
     // MPM.add(createConstraintEliminationPass()); // disabled: produces loops without break (DXIL validation failure)
@@ -709,10 +711,12 @@ void PassManagerBuilder::populateModulePassManager(
 
   // HLSL Change - Aggressive fixed-point optimization for O3.
   if (EnableDxilAggressiveOptimize) {
-    hlsl::DxilAggressiveOptimizeOpts Opts;
-    Opts.MaxIterations = DxilOptMaxIterations;
-    Opts.PrintEach = DxilOptPrintEach;
-    Opts.ValidateEach = DxilOptValidateEach;
+      hlsl::DxilAggressiveOptimizeOpts Opts;
+      Opts.MaxIterations = DxilOptMaxIterations;
+      Opts.PrintEach = DxilOptPrintEach;
+      Opts.ValidateEach = DxilOptValidateEach;
+      Opts.EnableAggressiveReassociation = HLSLEnableAggressiveReassociation;
+      Opts.NoSink = HLSLNoSink;
     if (!DxilOptConfig.empty()) {
       // Join the config strings with commas
       for (size_t i = 0; i < DxilOptConfig.size(); ++i) {

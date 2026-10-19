@@ -9,7 +9,7 @@
 typedef vk::SpirvOpaqueType</* OpTypeArray */ 28, Texture2D, vk::integral_constant<uint, 4> > ArrayTex2D;
 
 // CHECK: %spirvIntrinsicType_0 = OpTypeInt 8 0
-using uint8_t [[vk::ext_capability(/* Int8 */ 39)]] = vk::SpirvType</* OpTypeInt */ 21, 8, 8, vk::Literal<vk::integral_constant<uint, 8> >, vk::Literal<vk::integral_constant<bool, false> > >;
+using uint8_t_spv [[vk::ext_capability(/* Int8 */ 39)]] = vk::SpirvType</* OpTypeInt */ 21, 8, 8, vk::Literal<vk::integral_constant<uint, 8> >, vk::Literal<vk::integral_constant<bool, false> > >;
 
 // CHECK: %_arr_spirvIntrinsicType_0_uint_4 = OpTypeArray %spirvIntrinsicType_0 %uint_4
 
@@ -19,12 +19,12 @@ void main() {
   ArrayTex2D image;
 
   // CHECK: %byte = OpVariable %_ptr_Function_spirvIntrinsicType_0
-  uint8_t byte;
+  uint8_t_spv byte;
 
   // Check that uses of the same type use the same SPIR-V type definition.
   // CHECK: %byte1 = OpVariable %_ptr_Function_spirvIntrinsicType_0
-  uint8_t byte1;
+  uint8_t_spv byte1;
 
   // CHECK: %bytes = OpVariable %_ptr_Function__arr_spirvIntrinsicType_0_uint_4
-  uint8_t bytes[4];
+  uint8_t_spv bytes[4];
 }

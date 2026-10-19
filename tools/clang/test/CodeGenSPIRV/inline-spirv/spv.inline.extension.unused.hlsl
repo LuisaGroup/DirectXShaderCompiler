@@ -7,7 +7,7 @@
 
 // Test that the capabilities and extensions on an unused type are not added
 // to the Spir-V module.
-using uint8_t [[vk::ext_capability(/* Int8 */ 39), vk::ext_extension("ext_on_type")]] = vk::SpirvType</* OpTypeInt */ 21, 8, 8, vk::Literal<vk::integral_constant<uint, 8> >, vk::Literal<vk::integral_constant<bool, false> > >;
+using uint8_t_spv [[vk::ext_capability(/* Int8 */ 39), vk::ext_extension("ext_on_type")]] = vk::SpirvType</* OpTypeInt */ 21, 8, 8, vk::Literal<vk::integral_constant<uint, 8> >, vk::Literal<vk::integral_constant<bool, false> > >;
 
 // Test that the capabilities and extensions on a field in an unused struct are
 // not added to the Spir-V module.

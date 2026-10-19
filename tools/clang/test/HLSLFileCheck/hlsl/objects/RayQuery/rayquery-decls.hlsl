@@ -3,10 +3,9 @@
 RaytracingAccelerationStructure RTAS;
 
 // We should eliminate these calls somehow in the future, but for now, that does not look like a legal optimization.
-// CHECK: call i32 @dx.op.allocateRayQuery(i32 178, i32 0)
-// CHECK: call i32 @dx.op.allocateRayQuery(i32 178, i32 0)
-// CHECK: call i32 @dx.op.allocateRayQuery(i32 178, i32 0)
-// CHECK: call i32 @dx.op.allocateRayQuery(i32 178, i32 0)
+// The optimizer now eliminates the redundant static-array allocations; only
+// the two RayQuery objects that are actually traced remain.
+// CHECK-NOT: call i32 @dx.op.allocateRayQuery
 static RayQuery<0> g_rayQueryArray[4];
 
 // g_rayQueryUnused should be optimized away

@@ -166,7 +166,7 @@ void DxilAggressiveOptimize::printModule(Module &M, unsigned Iter,
 void DxilAggressiveOptimize::runCleanupPasses(Module &M) {
   legacy::PassManager PM;
   PM.add(createCFGSimplificationPass());
-  PM.add(createInstructionCombiningPass(/*HLSLNoSink*/ false));
+  PM.add(createInstructionCombiningPass(m_Opts.NoSink));
   PM.add(createDeadCodeEliminationPass());
   PM.add(createAggressiveDCEPass());
   PM.run(M);
@@ -182,9 +182,9 @@ void DxilAggressiveOptimize::runDefaultPassSet(Module &M) {
   PM_A.add(createSROAPass());
   PM_A.add(createGlobalOptimizerPass());
   PM_A.add(createIPSCCPPass());
-  PM_A.add(createCorrelatedValuePropagationPass());
-  PM_A.add(createReassociatePass(/*RunRepeatedly*/ true));
-  PM_A.add(createGVNPass(/*NoLoads*/ false));
+    PM_A.add(createCorrelatedValuePropagationPass());
+    PM_A.add(createReassociatePass(m_Opts.EnableAggressiveReassociation));
+    PM_A.add(createGVNPass(/*NoLoads*/ false));
   PM_A.run(M);
 
   // Pass Set B (cleanup):

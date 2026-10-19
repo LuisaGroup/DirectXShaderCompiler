@@ -23,9 +23,11 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
 using namespace llvm;
 
 #define DEBUG_TYPE "infer-alignment"
@@ -85,9 +87,22 @@ unsigned InferAlignment::getKnownAlignment(Value *V, const DataLayout &DL) {
     return DL.getABITypeAlignment(Ty);
   }
 
-  // GetElementPtrInst - alignment comes from base pointer
-  if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(V)) {
-    return getKnownAlignment(GEP->getPointerOperand(), DL);
+  // GetElementPtr - alignment is the base alignment weakened by the
+  // constant byte offset of the GEP.
+  if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
+    unsigned BaseAlign = getKnownAlignment(GEP->getPointerOperand(), DL);
+    APInt Offset(DL.getPointerSizeInBits(), 0);
+    if (GEP->accumulateConstantOffset(DL, Offset)) {
+      uint64_t Off = Offset.getZExtValue();
+      if (Off == 0)
+        return BaseAlign;
+      // Largest power-of-two divisor of the offset.
+      unsigned OffAlign = (unsigned)(Off & (~Off + 1));
+      return std::min(BaseAlign, OffAlign);
+    }
+    // Dynamic indices: only the result element type's ABI alignment is known.
+    return std::min(BaseAlign, (unsigned)DL.getABITypeAlignment(
+                        GEP->getType()->getPointerElementType()));
   }
 
   // Argument
@@ -121,8 +136,6 @@ unsigned InferAlignment::getKnownAlignment(Value *V, const DataLayout &DL) {
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(V)) {
     if (CE->getOpcode() == Instruction::IntToPtr)
       return 1;
-    if (CE->getOpcode() == Instruction::GetElementPtr)
-      return getKnownAlignment(CE->getOperand(0), DL);
   }
 
   // For all other values, try LLVM's built-in getKnownAlignment.

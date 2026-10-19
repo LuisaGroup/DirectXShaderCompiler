@@ -7720,6 +7720,22 @@ class db_dxil(object):
                 },
             ],
         )
+        # Passes imported from newer LLVM by the aggressive optimization
+        # work (see lib/Transforms/Scalar/GVNHoist.cpp et al.). They must
+        # be registered here so SetupRegistryPassForHLSL initializes them
+        # for tools like dxopt that look passes up by name.
+        add_pass("gvn-hoist", "GVNHoist", "GVN hoisting of identical instructions", [])
+        add_pass("newgvn", "NewGVN", "Global Value Numbering (new)", [])
+        add_pass("infer-alignment", "InferAlignment", "Infer alignment", [])
+        add_pass("infer-address-spaces", "InferAddressSpaces", "Infer address spaces", [])
+        add_pass("lower-constant-intrinsics", "LowerConstantIntrinsics", "Lower constant intrinsics", [])
+        add_pass("callsite-splitting", "CallSiteSplitting", "Call-site splitting", [])
+        add_pass("simple-loop-unswitch", "SimpleLoopUnswitch", "Simple loop unswitching", [])
+        add_pass("constraint-elimination", "ConstraintElimination", "Constraint elimination", [])
+        add_pass("loop-flatten", "LoopFlatten", "Loop flattening", [])
+        add_pass("called-value-propagation", "CalledValuePropagation", "Called-value propagation", [])
+        add_pass("function-specialization", "FunctionSpecialization", "Function specialization", [])
+        add_pass("attributor", "Attributor", "System for attributing functions", [])
         add_pass("sccp", "SCCP", "Sparse Conditional Constant Propagation", [])
         add_pass("bdce", "BDCE", "Bit-Tracking Dead Code Elimination", [])
         add_pass("dse", "DSE", "Dead Store Elimination", [])

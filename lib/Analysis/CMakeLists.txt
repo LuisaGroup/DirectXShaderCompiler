@@ -72,7 +72,6 @@ add_llvm_library(LLVMAnalysis
   VectorUtils.cpp
   VectorUtils2.cpp
   CycleAnalysis.cpp
-  GlobalsModRef.cpp
   MemorySSA.cpp
   MemorySSAUpdater.cpp
 

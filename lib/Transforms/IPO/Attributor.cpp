@@ -81,6 +81,10 @@ bool Attributor::doesNotAccessMemory(Function &F,
 
   for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; ++BB) {
     for (BasicBlock::iterator I = BB->begin(), IE = BB->end(); I != IE; ++I) {
+        // Debug info intrinsics (e.g. llvm.dbg.value calls) do not access
+        // memory; skip them so analysis results do not depend on /Zi.
+        if (isa<DbgInfoIntrinsic>(I))
+          continue;
       if (isa<LoadInst>(I) || isa<StoreInst>(I))
         return false;
       if (isa<AtomicCmpXchgInst>(I) || isa<AtomicRMWInst>(I))
@@ -116,6 +120,10 @@ bool Attributor::onlyReadsMemory(Function &F,
 
   for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE; ++BB) {
     for (BasicBlock::iterator I = BB->begin(), IE = BB->end(); I != IE; ++I) {
+        // Debug info intrinsics (e.g. llvm.dbg.value calls) do not access
+        // memory; skip them so analysis results do not depend on /Zi.
+        if (isa<DbgInfoIntrinsic>(I))
+          continue;
       if (isa<StoreInst>(I))
         return false;
       if (isa<AtomicCmpXchgInst>(I) || isa<AtomicRMWInst>(I))

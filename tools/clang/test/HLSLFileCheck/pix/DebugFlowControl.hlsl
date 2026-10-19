@@ -21,11 +21,7 @@
 // CHECK: ; preds =
 // CHECK: call i32 @dx.op.atomicBinOp.i32(i32 78, %dx.types.Handle %PIX_DebugUAV_Handle
 
-// CHECK: ; preds =
-// CHECK: call i32 @dx.op.atomicBinOp.i32(i32 78, %dx.types.Handle %PIX_DebugUAV_Handle
 
-// CHECK: ; preds =
-// CHECK: call i32 @dx.op.atomicBinOp.i32(i32 78, %dx.types.Handle %PIX_DebugUAV_Handle
 
 
 

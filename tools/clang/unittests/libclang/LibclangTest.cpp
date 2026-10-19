@@ -1,4 +1,4 @@
-//===- unittests/libclang/LibclangTest.cpp --- libclang tests -------------===//
+﻿//===- unittests/libclang/LibclangTest.cpp --- libclang tests -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //

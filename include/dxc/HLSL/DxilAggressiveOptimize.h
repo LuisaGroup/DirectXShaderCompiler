@@ -34,9 +34,15 @@ struct DxilAggressiveOptimizeOpts {
   /// Print IR after each iteration (for debugging).
   bool PrintEach = false;
 
-  /// Run verifyModule() / verifyFunction() after each iteration.
-  bool ValidateEach = false;
-};
+    /// Run verifyModule() / verifyFunction() after each iteration.
+    bool ValidateEach = false;
+    /// Honor the aggressive-reassociation opt toggle in the default pass set
+    /// (default: true, matching the standalone reassociate pass behavior).
+    bool EnableAggressiveReassociation = true;
+    /// Honor the sink opt toggle in the cleanup pass set (default: false,
+    /// matching the standalone instcombine passes, which honor -opt-disable sink).
+    bool NoSink = false;
+  };
 
 } // namespace hlsl
 

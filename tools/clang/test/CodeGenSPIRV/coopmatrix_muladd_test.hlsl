@@ -30,7 +30,9 @@ uint stride;
   // TODO: Is default initialization meaningful?
   IntMatAc r;
 
-  // CHECK: [[r2:%[0-9]+]] = OpCooperativeMatrixMulAddKHR [[typeAc]] [[a]] [[b]] [[r]] MatrixASignedComponentsKHR|MatrixBSignedComponentsKHR|MatrixCSignedComponentsKHR|MatrixResultSignedComponentsKHR
+      // The default-initialized accumulator may be a distinct OpUndef of the same
+    // type as other temporaries, so don't tie the operand to [[r]] exactly.
+    // CHECK: [[r2:%[0-9]+]] = OpCooperativeMatrixMulAddKHR [[typeAc]] [[a]] [[b]] {{%[0-9]+}} MatrixASignedComponentsKHR|MatrixBSignedComponentsKHR|MatrixCSignedComponentsKHR|MatrixResultSignedComponentsKHR
   r = cooperativeMatrixMultiplyAdd(a, b, r);
 
   // CHECK: [[r:%[0-9]+]] = OpCooperativeMatrixMulAddKHR [[typeAc]] [[a]] [[b]] [[r2]] MatrixASignedComponentsKHR|MatrixBSignedComponentsKHR|MatrixCSignedComponentsKHR|MatrixResultSignedComponentsKHR|SaturatingAccumulationKHR

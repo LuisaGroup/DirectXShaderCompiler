@@ -16,12 +16,14 @@
 // COMMON_FACTOR: fmul fast float [[FACTOR]],
 // COMMON_FACTOR: fmul fast float [[FACTOR]],
 
-// NO_COMMON_FACTOR: [[EXPRESSION_0:%.*]] = fmul fast float [[FACTOR_SRC1]],
-// NO_COMMON_FACTOR:                        fmul fast float [[EXPRESSION_0]], [[FACTOR_SRC0]]
-// NO_COMMON_FACTOR: [[EXPRESSION_1:%.*]] = fmul fast float [[FACTOR_SRC1]],
-// NO_COMMON_FACTOR:                        fmul fast float [[EXPRESSION_1]], [[FACTOR_SRC0]] 
-// NO_COMMON_FACTOR: [[EXPRESSION_2:%.*]] = fmul fast float [[FACTOR_SRC1]],
-// NO_COMMON_FACTOR:                        fmul fast float [[EXPRESSION_2]], [[FACTOR_SRC0]]
+// The operand order of the fast fmuls is canonicalized differently by the
+// fixed-point optimizer's cleanup passes; both orders are equivalent.
+// NO_COMMON_FACTOR: [[EXPRESSION_0:%.*]] = fmul fast float {{%.*}}, [[FACTOR_SRC1]]
+// NO_COMMON_FACTOR: fmul fast float [[EXPRESSION_0]], [[FACTOR_SRC0]]
+// NO_COMMON_FACTOR: [[EXPRESSION_1:%.*]] = fmul fast float {{%.*}}, [[FACTOR_SRC1]]
+// NO_COMMON_FACTOR: fmul fast float [[EXPRESSION_1]], [[FACTOR_SRC0]]
+// NO_COMMON_FACTOR: [[EXPRESSION_2:%.*]] = fmul fast float {{%.*}}, [[FACTOR_SRC1]]
+// NO_COMMON_FACTOR: fmul fast float [[EXPRESSION_2]], [[FACTOR_SRC0]]
 
 
 cbuffer TemporalAAData : register ( b10 )

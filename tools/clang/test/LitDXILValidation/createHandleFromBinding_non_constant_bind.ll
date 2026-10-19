@@ -9,7 +9,9 @@ target triple = "dxil-ms-dx"
 %dx.types.ResourceProperties = type { i32, i32 }
 %struct.RWByteAddressBuffer = type { i32 }
 
-; CHECK: error code 0x80070459
+; The validator rejects the non-constant bind. Windows reports the bare error
+; code (the exception has no message); other platforms include the message.
+; CHECK: {{error code 0x80070459|Constant values must be in-range for operation}}
 
 define void @main(i32 %lowerBound) {
   ; Construct a non-constant bind struct using a function parameter

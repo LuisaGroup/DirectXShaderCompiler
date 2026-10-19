@@ -686,6 +686,15 @@ if(EXISTS "${LLVM_MAIN_SRC_DIR}/external")
 endif()
 include_directories(AFTER ${DIRECTX_HEADER_INCLUDE_DIR}/directx ${DIRECTX_HEADER_INCLUDE_DIR}/wsl/stubs)
 
+# Enable DIA-based debug info support (DxcDiaDataSource) on Windows builds
+# using MSVC. The DIA SDK ships with Visual Studio and is already required
+# for the MSVC build of LLVMDxilDia and dxcompiler (see their CMakeLists).
+if (MSVC)
+  # Note: use the =1 form; MSVC parses -DXC_SUPPORTS_DIA as defining
+  # XC_SUPPORTS_DIA (the leading D is consumed as the option letter).
+  add_definitions(-DDXC_SUPPORTS_DIA=1)
+endif()
+
 # HLSL - Change End
 
 add_subdirectory(lib)
