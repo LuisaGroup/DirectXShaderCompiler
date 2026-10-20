@@ -1033,6 +1033,26 @@ static const SCEV *BinomialCoefficient(const SCEV *It, unsigned K,
   // We need at least W + T bits for the multiplication step
   unsigned CalculationBits = W + T;
 
+  // HLSL Change Begin: DXIL only supports 1/8/16/32/64-bit integer types.
+  // W+T is not a legal width whenever T >= 1 (e.g. 33 bits for a 32-bit K=2
+  // coefficient), and materializing it - for example when IndVarSimplify
+  // expands a closed-form loop exit value - fails DXIL validation with
+  // "Int type 'i33' has an invalid width". Round the calculation width up
+  // to the next legal width: the extra high bits cannot affect the low W
+  // bits that survive the final truncate, so the result is unchanged.
+  if (CalculationBits > 64) {
+    // No DXIL-legal width is wide enough; keep the original width.
+  } else if (CalculationBits > 32) {
+    CalculationBits = 64;
+  } else if (CalculationBits > 16) {
+    CalculationBits = 32;
+  } else if (CalculationBits > 8) {
+    CalculationBits = 16;
+  } else if (CalculationBits > 1) {
+    CalculationBits = 8;
+  }
+  // HLSL Change End
+
   // Calculate 2^T, at width T+W.
   APInt DivFactor = APInt::getOneBitSet(CalculationBits, T);
 
