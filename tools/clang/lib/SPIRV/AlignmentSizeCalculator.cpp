@@ -329,6 +329,9 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
         case BuiltinType::Short:
         case BuiltinType::UShort:
         case BuiltinType::Half:
+          // HLSL Change - bfloat16_t is always 16-bit regardless of the
+          // -enable-16bit-types option.
+          case BuiltinType::BFloat16:
           return {2, 2};
         // 'HalfFloat' always represents 32-bit floats.
         case BuiltinType::HalfFloat:

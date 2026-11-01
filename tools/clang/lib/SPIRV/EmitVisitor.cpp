@@ -2377,10 +2377,13 @@ uint32_t EmitTypeHandler::getOrCreateConstantFloat(SpirvConstantFloat *inst) {
   // value to the width of the type. Error out if the conversion is lossy.
   if (valueBitwidth != typeBitwidth) {
     bool losesInfo = false;
+    // BFloat16KHR keeps its own semantics: it has the binary32 exponent range,
+    // not IEEE half.
     const llvm::fltSemantics &targetSemantics =
-        typeBitwidth == 16   ? llvm::APFloat::IEEEhalf
-        : typeBitwidth == 32 ? llvm::APFloat::IEEEsingle
-                             : llvm::APFloat::IEEEdouble;
+        floatType->isBFloat16() ? llvm::APFloat::BFloat16
+        : typeBitwidth == 16   ? llvm::APFloat::IEEEhalf
+        : typeBitwidth == 32   ? llvm::APFloat::IEEEsingle
+                               : llvm::APFloat::IEEEdouble;
     const auto status = valueToUse.convert(
         targetSemantics, llvm::APFloat::roundingMode::rmTowardZero, &losesInfo);
     if (status != llvm::APFloat::opStatus::opOK &&
@@ -2651,6 +2654,11 @@ uint32_t EmitTypeHandler::emitType(const SpirvType *type) {
     initTypeInstruction(spv::Op::OpTypeFloat);
     curTypeInst.push_back(id);
     curTypeInst.push_back(floatType->getBitwidth());
+      // HLSL Change - emit the floating point encoding operand (e.g.
+      // BFloat16KHR for bfloat16_t) when one is attached to the type.
+      if (floatType->getFpEncoding() != spv::FPEncoding::Max)
+        curTypeInst.push_back(
+            static_cast<uint32_t>(floatType->getFpEncoding()));
     finalizeTypeInstruction();
   }
   // Vector types

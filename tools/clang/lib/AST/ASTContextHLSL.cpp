@@ -64,8 +64,8 @@ const char *HLSLScalarTypeNames[] = {
     "min16uint",      "literal float",  "literal int", "int16_t",
     "int32_t",        "int64_t",        "uint16_t",    "uint32_t",
     "uint64_t",       "float16_t",      "float32_t",   "float64_t",
-    "int8_t",         "uint8_t",
-    "int8_t4_packed", "uint8_t4_packed"};
+    "int8_t",         "uint8_t",        "int8_t4_packed",
+    "uint8_t4_packed", "bfloat16_t"};
 
 static_assert(HLSLScalarTypeCount == _countof(HLSLScalarTypeNames),
               "otherwise scalar constants are not aligned");
@@ -151,8 +151,12 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
       return HLSLScalarType_uint_min16;
     }
     break;
-  case 10: // min10float, min16float
-    if (typeName[0] == 'm' && typeName[1] == 'i') {
+  case 10: // min10float, min16float, bfloat16_t
+    if (typeName[0] == 'b') {
+      if (langOptions.HLSLVersion >= hlsl::LangStd::v2018 &&
+          !strncmp(typeName, "bfloat16_t", 10))
+        return HLSLScalarType_bfloat16;
+    } else if (typeName[0] == 'm' && typeName[1] == 'i') {
       if (typeName[4] == '0') {
         if (strncmp(typeName, "min10float", 10))
           break;
@@ -183,7 +187,7 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
     break;
   }
   // fixed width types (int8_t, uint8_t, int16_t, uint16_t, int32_t,
-  // uint32_t, float16_t, float32_t, float64_t) are only supported in HLSL 2018
+  // uint32_t, float16_t, float32_t, float64_t, bfloat16_t) require HLSL 2018
   if (langOptions.HLSLVersion >= hlsl::LangStd::v2018) {
     switch (typeLen) {
     case 6: // int8_t

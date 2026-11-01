@@ -58,6 +58,7 @@ namespace llvm {
   };
 
   const fltSemantics APFloat::IEEEhalf = { 15, -14, 11, 16 };
+  const fltSemantics APFloat::BFloat16 = { 127, -126, 8, 16 };
   const fltSemantics APFloat::IEEEsingle = { 127, -126, 24, 32 };
   const fltSemantics APFloat::IEEEdouble = { 1023, -1022, 53, 64 };
   const fltSemantics APFloat::IEEEquad = { 16383, -16382, 113, 128 };
@@ -3083,6 +3084,35 @@ APFloat::convertHalfAPFloatToAPInt() const
                     (mysignificand & 0x3ff)));
 }
 
+APInt
+APFloat::convertBFloat16APFloatToAPInt() const
+{
+  assert(semantics == (const llvm::fltSemantics*)&BFloat16);
+  assert(partCount()==1);
+
+  uint32_t myexponent, mysignificand;
+
+  if (isFiniteNonZero()) {
+    myexponent = exponent+127; //bias
+    mysignificand = (uint32_t)*significandParts();
+    if (myexponent == 1 && !(mysignificand & 0x80))
+      myexponent = 0;   // denormal
+  } else if (category==fcZero) {
+    myexponent = 0;
+    mysignificand = 0;
+  } else if (category==fcInfinity) {
+    myexponent = 0xff;
+    mysignificand = 0;
+  } else {
+    assert(category == fcNaN && "Unknown category!");
+    myexponent = 0xff;
+    mysignificand = (uint32_t)*significandParts();
+  }
+
+  return APInt(16, (((sign&1) << 15) | ((myexponent&0xff) << 7) |
+                    (mysignificand & 0x7f)));
+}
+
 // This function creates an APInt that is just a bit map of the floating
 // point constant as it would appear in memory.  It is not a conversion,
 // and treating the result as a normal integer is unlikely to be useful.
@@ -3092,6 +3122,9 @@ APFloat::bitcastToAPInt() const
 {
   if (semantics == (const llvm::fltSemantics*)&IEEEhalf)
     return convertHalfAPFloatToAPInt();
+
+  if (semantics == (const llvm::fltSemantics*)&BFloat16)
+    return convertBFloat16APFloatToAPInt();
 
   if (semantics == (const llvm::fltSemantics*)&IEEEsingle)
     return convertFloatAPFloatToAPInt();
@@ -3334,6 +3367,39 @@ APFloat::initFromHalfAPInt(const APInt & api)
   }
 }
 
+void
+APFloat::initFromBFloat16APInt(const APInt & api)
+{
+  assert(api.getBitWidth()==16);
+  uint32_t i = (uint32_t)*api.getRawData();
+  uint32_t myexponent = (i >> 7) & 0xff;
+  uint32_t mysignificand = i & 0x7f;
+
+  initialize(&APFloat::BFloat16);
+  assert(partCount()==1);
+
+  sign = i >> 15;
+  if (myexponent==0 && mysignificand==0) {
+    // exponent, significand meaningless
+    category = fcZero;
+  } else if (myexponent==0xff && mysignificand==0) {
+    // exponent, significand meaningless
+    category = fcInfinity;
+  } else if (myexponent==0xff && mysignificand!=0) {
+    // sign, exponent, significand meaningless
+    category = fcNaN;
+    *significandParts() = mysignificand;
+  } else {
+    category = fcNormal;
+    exponent = myexponent - 127;  //bias
+    *significandParts() = mysignificand;
+    if (myexponent==0) // denormal
+      exponent = -126;
+    else
+      *significandParts() |= 0x80; // integer bit
+  }
+}
+
 /// Treat api as containing the bits of a floating point number.  Currently
 /// we infer the floating point type from the size of the APInt.  The
 /// isIEEE argument distinguishes between PPC128 and IEEE128 (not meaningful
@@ -3343,6 +3409,8 @@ APFloat::initFromAPInt(const fltSemantics* Sem, const APInt& api)
 {
   if (Sem == &IEEEhalf)
     return initFromHalfAPInt(api);
+  if (Sem == &BFloat16)
+    return initFromBFloat16APInt(api);
   if (Sem == &IEEEsingle)
     return initFromFloatAPInt(api);
   if (Sem == &IEEEdouble)

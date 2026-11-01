@@ -102,6 +102,9 @@ std::string getAstTypeName(QualType type) {
         case BuiltinType::Half:
         case BuiltinType::HalfFloat:
           return "half";
+        // HLSL Change - bfloat16_t (SPV_KHR_bfloat16).
+        case BuiltinType::BFloat16:
+          return "bfloat16";
         case BuiltinType::Min12Int:
           return "min12int";
         case BuiltinType::Min16Int:
@@ -375,6 +378,9 @@ bool isOrContains16BitType(QualType type, bool enable16BitTypesOption) {
         case BuiltinType::Short:
         case BuiltinType::UShort:
         case BuiltinType::Half:
+        // HLSL Change - bfloat16_t is always 16-bit regardless of the
+        // -enable-16bit-types option.
+        case BuiltinType::BFloat16:
           return true;
         default:
           return false;
@@ -436,6 +442,70 @@ bool isOrContains16BitType(QualType type, bool enable16BitTypesOption) {
   llvm_unreachable("checking 16-bit type unimplemented");
   return 0;
 }
+
+// HLSL Change Begin - detect bfloat16_t (SPV_KHR_bfloat16) anywhere inside a
+// type. Used to reject shader stage input/output variables, which are not
+// allowed to use the BFloat16KHR encoding.
+bool isOrContainsBFloat16Type(QualType type) {
+  // Primitive types
+  {
+    QualType ty = {};
+    if (isScalarType(type, &ty)) {
+      if (const auto *builtinType = ty->getAs<BuiltinType>()) {
+        return builtinType->getKind() == BuiltinType::BFloat16;
+      }
+    }
+  }
+
+  // Vector types
+  {
+    QualType elemType = {};
+    if (isVectorType(type, &elemType))
+      return isOrContainsBFloat16Type(elemType);
+  }
+
+  // Matrix types
+  {
+    QualType elemType = {};
+    if (isMxNMatrix(type, &elemType)) {
+      return isOrContainsBFloat16Type(elemType);
+    }
+  }
+
+  // Struct type
+  if (const auto *structType = type->getAs<RecordType>()) {
+    const auto *decl = structType->getDecl();
+
+    for (const auto *field : decl->fields()) {
+      if (isOrContainsBFloat16Type(field->getType()))
+        return true;
+    }
+
+    return false;
+  }
+
+  // Array type
+  if (const auto *arrayType = type->getAsArrayTypeUnsafe()) {
+    return isOrContainsBFloat16Type(arrayType->getElementType());
+  }
+
+  // Reference types
+  if (const auto *refType = type->getAs<ReferenceType>()) {
+    return isOrContainsBFloat16Type(refType->getPointeeType());
+  }
+
+  // Pointer types
+  if (const auto *ptrType = type->getAs<PointerType>()) {
+    return isOrContainsBFloat16Type(ptrType->getPointeeType());
+  }
+
+  if (const auto *typedefType = type->getAs<TypedefType>()) {
+    return isOrContainsBFloat16Type(typedefType->desugar());
+  }
+
+  return false;
+}
+// HLSL Change End.
 
 bool isOrContains8BitType(QualType type) {
   // Primitive types
@@ -575,6 +645,9 @@ uint32_t getElementSpirvBitwidth(const ASTContext &astContext, QualType type,
     case BuiltinType::Half:
     case BuiltinType::Short:
     case BuiltinType::UShort:
+      // HLSL Change - bfloat16_t is always 16-bit regardless of the
+      // -enable-16bit-types option.
+      case BuiltinType::BFloat16:
       return 16;
     // HalfFloat builtin type is just an alias for Float builtin type and is
     // always 32-bit. The HLSL 'half' keyword is translated to 'HalfFloat' enum
@@ -730,6 +803,18 @@ QualType getTypeWithCustomBitwidth(const ASTContext &ctx, QualType type,
   // Scalar cases.
   assert(!type->isBooleanType());
   assert(type->isIntegerType() || type->isFloatingType());
+  // HLSL Change - bfloat16_t keeps its identity for 16-bit and widens like
+  // other floating point types.
+  if (type->isSpecificBuiltinType(BuiltinType::BFloat16)) {
+    switch (bitwidth) {
+    case 16:
+      return ctx.BFloat16Ty;
+    case 32:
+      return ctx.FloatTy;
+    case 64:
+      return ctx.DoubleTy;
+    }
+  }
   if (type->isFloatingType()) {
     switch (bitwidth) {
     case 16:

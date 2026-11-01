@@ -10317,15 +10317,25 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
       astContext, fromType, spirvOptions.enable16BitTypes);
   const auto toBitwidth = getElementSpirvBitwidth(
       astContext, toType, spirvOptions.enable16BitTypes);
-  if (fromBitwidth == toBitwidth) {
+  // BFloat16 and IEEE float16 have the same storage width but different
+  // encodings, so explicit conversions between them still require OpFConvert.
+  const bool isBFloat16Conversion =
+      isFloatOrVecOfFloatType(fromType) &&
+      (isOrContainsBFloat16Type(fromType) ||
+       isOrContainsBFloat16Type(toType));
+  if (fromBitwidth == toBitwidth && !isBFloat16Conversion) {
     if (resultType)
       *resultType = fromType;
     return fromVal;
   }
 
-  // We want the 'fromType' with the 'toBitwidth'.
-  const QualType targetType =
-      getTypeWithCustomBitwidth(astContext, fromType, toBitwidth);
+  // We want the 'fromType' with the 'toBitwidth'. Use the destination type
+  // directly for BF16 conversions so neither BF16 nor FP16 is reconstructed
+  // as the other 16-bit floating point format.
+  QualType targetType =
+      isBFloat16Conversion
+          ? toType
+          : getTypeWithCustomBitwidth(astContext, fromType, toBitwidth);
   if (resultType)
     *resultType = targetType;
 

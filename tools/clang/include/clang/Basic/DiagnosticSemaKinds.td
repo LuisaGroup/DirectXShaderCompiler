@@ -7620,6 +7620,10 @@ def err_hlsl_unsupported_incomplete_array: Error<
   "array dimensions of struct/class members must be explicit">;
 def err_hlsl_unsupported_bool_lvalue_op : Error<
   "operator cannot be used with a bool lvalue">;
+def err_hlsl_unsupported_bfloat16_op : Error<
+  "operator is not supported for bfloat16_t; SPV_KHR_bfloat16 defines no "
+  "arithmetic or comparison operations - convert operands to float or "
+  "double explicitly">;
 def err_hlsl_unsupported_lvalue_cast_op : Error<
   "cannot truncate lvalue vector/matrix">;
 def err_hlsl_unsupported_buffer_packoffset : Error<

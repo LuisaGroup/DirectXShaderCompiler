@@ -72,6 +72,8 @@ enum class Extension {
   KHR_workgroup_memory_explicit_layout,
   EXT_shader_atomic_float_add,
   EXT_shader_atomic_float_min_max,
+  // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
+  KHR_bfloat16,
   Unknown,
 };
 

@@ -310,7 +310,11 @@ SpirvDebugType *DebugTypeVisitor::lowerToDebugType(const SpirvType *spirvType) {
     // TODO: Use enums rather than uint32_t.
     uint32_t encoding = 3u;
     std::string debugName = "";
-    if (size == 32) {
+    // HLSL Change - bfloat16_t (SPV_KHR_bfloat16) keeps its own debug name so
+    // it is not confused with float16_t.
+    if (floatType->isBFloat16()) {
+      debugName = "bfloat16_t";
+    } else if (size == 32) {
       debugName = "float";
     } else {
       std::ostringstream stream;

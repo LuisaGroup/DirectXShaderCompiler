@@ -2044,6 +2044,7 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
   case BuiltinType::OCLSampler: Out << "11ocl_sampler"; break;
   case BuiltinType::OCLEvent: Out << "9ocl_event"; break;
     // HLSL Change starts
+  case BuiltinType::BFloat16: Out << "bfloat16_t"; break;
   case BuiltinType::Min12Int: Out << "min12_int"; break;
   case BuiltinType::LitInt: Out << "lit_int"; break;
   case BuiltinType::LitFloat: Out << "lit_float"; break;

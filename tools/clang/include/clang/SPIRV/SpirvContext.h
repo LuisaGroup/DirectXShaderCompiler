@@ -263,6 +263,9 @@ public:
   const IntegerType *getSIntType(uint32_t bitwidth);
   const IntegerType *getUIntType(uint32_t bitwidth);
   const FloatType *getFloatType(uint32_t bitwidth);
+  // HLSL Change - the BFloat16KHR encoded 16-bit float from SPV_KHR_bfloat16.
+  // Kept separate from getFloatType(16), which returns the plain 16-bit float.
+  const FloatType *getBFloat16Type();
 
   const VectorType *getVectorType(const SpirvType *elemType, uint32_t count);
   // Note: In the case of non-floating-point matrices, this method returns an
@@ -514,6 +517,9 @@ private:
   std::array<const IntegerType *, 7> sintTypes;
   std::array<const IntegerType *, 7> uintTypes;
   std::array<const FloatType *, 7> floatTypes;
+  // HLSL Change - the BFloat16KHR encoded 16-bit float (SPV_KHR_bfloat16).
+  // Cannot be stored in floatTypes, which is indexed by bitwidth only.
+  const FloatType *bfloat16Type;
 
   // The VectorType at index i has the length of i. For example, vector of
   // size 4 would be at index 4. Valid SPIR-V vector sizes are 2,3,4.

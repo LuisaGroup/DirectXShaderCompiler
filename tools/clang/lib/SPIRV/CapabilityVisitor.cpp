@@ -88,6 +88,16 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
   }
   // Float-related capabilities
   else if (const auto *floatType = dyn_cast<FloatType>(type)) {
+      // HLSL Change - the BFloat16KHR encoding (bfloat16_t) is gated by its
+      // own extension and capability. It must not request the Float16
+      // capability or the 16-bit stage I/O capabilities: the KHR extension
+      // forbids BFloat16KHR in Input/Output storage classes, and DXC rejects
+      // bfloat16_t shader stage I/O earlier in DeclResultIdMapper.
+      if (floatType->isBFloat16()) {
+        addExtension(Extension::KHR_bfloat16, "bfloat16_t type", loc);
+        addCapability(spv::Capability::BFloat16TypeKHR);
+        return;
+      }
     switch (floatType->getBitwidth()) {
     case 16: {
       // Usage of a 16-bit float type.

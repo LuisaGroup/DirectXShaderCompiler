@@ -18,7 +18,8 @@ namespace spirv {
 
 SpirvContext::SpirvContext()
     : allocator(), voidType(nullptr), boolType(nullptr), sintTypes({}),
-      uintTypes({}), floatTypes({}), samplerType(nullptr),
+      uintTypes({}), floatTypes({}), bfloat16Type(nullptr),
+        samplerType(nullptr),
       curShaderModelKind(ShaderModelKind::Invalid), majorVersion(0),
       minorVersion(0), currentLexicalScope(nullptr) {
   voidType = new (this) VoidType;
@@ -46,6 +47,8 @@ SpirvContext::~SpirvContext() {
   for (auto *floatType : floatTypes)
     if (floatType) // floatTypes may contain nullptr
       floatType->~FloatType();
+  if (bfloat16Type)
+    bfloat16Type->~FloatType();
 
   for (auto &pair : vecTypes)
     for (auto *vecType : pair.second)
@@ -143,6 +146,13 @@ const FloatType *SpirvContext::getFloatType(uint32_t bitwidth) {
     type = new (this) FloatType(bitwidth);
   }
   return type;
+}
+
+const FloatType *SpirvContext::getBFloat16Type() {
+  if (bfloat16Type == nullptr) {
+    bfloat16Type = new (this) FloatType(16, spv::FPEncoding::BFloat16KHR);
+  }
+  return bfloat16Type;
 }
 
 const VectorType *SpirvContext::getVectorType(const SpirvType *elemType,

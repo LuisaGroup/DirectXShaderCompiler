@@ -3800,6 +3800,20 @@ bool DeclResultIdMapper::createStageVars(StageVarDataBundle &stageVarData,
                                          bool asInput, SpirvInstruction **value,
                                          bool noWriteBack) {
   assert(value);
+  // HLSL Change Begin - SPV_KHR_bfloat16 forbids the BFloat16KHR encoding in
+  // Input/Output storage classes, so reject bfloat16_t (including vectors,
+  // matrices, structs and arrays containing it) in shader stage interfaces
+  // instead of emitting invalid SPIR-V (or requesting the 16-bit stage I/O
+  // capabilities meant for ordinary float16_t).
+  if (isOrContainsBFloat16Type(stageVarData.type)) {
+    emitError(
+        "bfloat16_t is not supported in shader stage input/output: "
+        "SPV_KHR_bfloat16 does not allow the BFloat16KHR type in Input/Output "
+        "storage classes",
+        stageVarData.decl->getLocation());
+    return false;
+  }
+  // HLSL Change End.
   // invocationId should only be used for handling HS per-vertex output.
   if (stageVarData.invocationId.hasValue()) {
     assert(spvContext.isHS() && stageVarData.arraySize != 0 && !asInput);
@@ -5020,6 +5034,13 @@ bool DeclResultIdMapper::tryToCreateConstantVar(const ValueDecl *decl) {
     break;
   case BuiltinType::Half: // float16_t
     constVal = spvBuilder.getConstantFloat(astContext.HalfTy, val->getFloat());
+    break;
+    // HLSL Change - bfloat16_t (SPV_KHR_bfloat16). The APFloat value already
+    // carries BFloat16 semantics, so the bit pattern encoded for the constant
+    // is the BFloat16KHR one.
+  case BuiltinType::BFloat16: // bfloat16_t
+    constVal =
+        spvBuilder.getConstantFloat(astContext.BFloat16Ty, val->getFloat());
     break;
   case BuiltinType::Float:     // float32_t
   case BuiltinType::HalfFloat: // float16_t without -enable-16bit-types

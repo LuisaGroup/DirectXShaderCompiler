@@ -61,7 +61,8 @@ unsigned ASTContext::NumImplicitDestructors;
 unsigned ASTContext::NumImplicitDestructorsDeclared;
 
 enum FloatingRank {
-  LitFloatRank, Min10FloatRank, Min16FloatRank, HalfRank, HalfFloatRank, FloatRank, DoubleRank, LongDoubleRank // HLSL Change - adds LitFloatRank, Min10FloatRank, HalfFloat, and Min16FloatRank
+  LitFloatRank, Min10FloatRank, Min16FloatRank, BFloat16Rank, HalfRank,
+  HalfFloatRank, FloatRank, DoubleRank, LongDoubleRank // HLSL Change
 };
 
 RawComment *ASTContext::getRawCommentForDeclNoCache(const Decl *D) const {
@@ -1104,6 +1105,7 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
     InitBuiltinType(Min16FloatTy, BuiltinType::Min16Float);
     InitBuiltinType(Min10FloatTy, BuiltinType::Min10Float);
     InitBuiltinType(HalfFloatTy, BuiltinType::HalfFloat);
+    InitBuiltinType(BFloat16Ty, BuiltinType::BFloat16);
     InitBuiltinType(LitIntTy, BuiltinType::LitInt);
     InitBuiltinType(LitFloatTy, BuiltinType::LitFloat);
     InitBuiltinType(Int8_4PackedTy, BuiltinType::Int8_4Packed);
@@ -1343,6 +1345,7 @@ const llvm::fltSemantics &ASTContext::getFloatTypeSemantics(QualType T) const {
   case BuiltinType::Min16Float:
   // HLSL Change Ends
   case BuiltinType::Half:       return Target->getHalfFormat();
+    case BuiltinType::BFloat16: return llvm::APFloat::BFloat16; // HLSL Change
   case BuiltinType::HalfFloat: // HLSL Change
   case BuiltinType::Float:      return Target->getFloatFormat();
   case BuiltinType::Double:     return Target->getDoubleFormat();
@@ -1662,6 +1665,10 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     case BuiltinType::Half:
       Width = Target->getHalfWidth();
       Align = Target->getHalfAlign();
+      break;
+    case BuiltinType::BFloat16: // HLSL Change
+      Width = 16;
+      Align = 16;
       break;
     case BuiltinType::HalfFloat: // HLSL Change
     case BuiltinType::Float:
@@ -4698,6 +4705,7 @@ static FloatingRank getFloatingRank(QualType T) {
   assert(T->getAs<BuiltinType>() && "getFloatingRank(): not a floating type");
   switch (T->getAs<BuiltinType>()->getKind()) {
   default: llvm_unreachable("getFloatingRank(): not a floating type");
+  case BuiltinType::BFloat16:   return BFloat16Rank; // HLSL Change
   case BuiltinType::Half:       return HalfRank;
   case BuiltinType::Float:      return FloatRank;
   case BuiltinType::Double:     return DoubleRank;
@@ -4724,6 +4732,7 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
     case DoubleRank:     return DoubleComplexTy;
     case LongDoubleRank: return LongDoubleComplexTy;
     // HLSL Changes begin
+    case BFloat16Rank:
     case HalfRank:
     case LitFloatRank:
     case Min10FloatRank:
@@ -4738,6 +4747,7 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
   switch (EltRank) {
   case LitFloatRank:   return LitFloatTy;   // HLSL Change
   case Min10FloatRank: return Min10FloatTy; // HLSL Change
+  case BFloat16Rank:   return BFloat16Ty;   // HLSL Change
   case HalfRank:       return HalfTy;
   case FloatRank:      return FloatTy;
   case DoubleRank:     return DoubleTy;
@@ -5571,6 +5581,7 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
 #include "clang/AST/BuiltinTypes.def"
       llvm_unreachable("invalid builtin type for @encode");
     // HLSL Change Start
+    case BuiltinType::BFloat16:
     case BuiltinType::Min12Int:
     case BuiltinType::Min10Float:
     case BuiltinType::Min16Float:

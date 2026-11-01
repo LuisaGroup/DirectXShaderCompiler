@@ -85,13 +85,14 @@ enum HLSLScalarType {
   HLSLScalarType_int8,
   HLSLScalarType_uint8,
   HLSLScalarType_int8_4packed,
-  HLSLScalarType_uint8_4packed
+  HLSLScalarType_uint8_4packed,
+  HLSLScalarType_bfloat16
 };
 
 HLSLScalarType MakeUnsigned(HLSLScalarType T);
 
 static const HLSLScalarType HLSLScalarType_minvalid = HLSLScalarType_bool;
-static const HLSLScalarType HLSLScalarType_max = HLSLScalarType_uint8_4packed;
+static const HLSLScalarType HLSLScalarType_max = HLSLScalarType_bfloat16;
 static const size_t HLSLScalarTypeCount =
     static_cast<size_t>(HLSLScalarType_max) + 1;
 

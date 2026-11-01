@@ -849,6 +849,7 @@ public:
   CanQualType Min12IntTy, Min10FloatTy;
   CanQualType LitIntTy, LitFloatTy;
   CanQualType HalfFloatTy, Min16FloatTy, Min16IntTy, Min16UIntTy;
+  CanQualType BFloat16Ty;
   CanQualType HLSLStringTy;
   CanQualType Int8_4PackedTy, UInt8_4PackedTy;
   CanQualType LinAlgMatrixTy;

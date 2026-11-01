@@ -135,6 +135,10 @@ bool isOrContains16BitType(QualType type, bool enable16BitTypesOption);
 /// integer type (signed or unsigned char).
 bool isOrContains8BitType(QualType type);
 
+/// HLSL Change - Returns true if the given type is or contains a bfloat16_t
+/// (SPV_KHR_bfloat16) type.
+bool isOrContainsBFloat16Type(QualType type);
+
 /// NOTE: This method doesn't handle Literal types correctly at the moment.
 ///
 /// Note: This method will be deprecated once resolving of literal types are

@@ -144,9 +144,27 @@ private:
 
 class FloatType : public NumericalType {
 public:
-  FloatType(uint32_t numBits) : NumericalType(TK_Float, numBits) {}
+  // HLSL Change Begin - floating point encodings (e.g. BFloat16KHR from
+  // SPV_KHR_bfloat16) are attached to OpTypeFloat. Plain floats use
+  // spv::FPEncoding::Max, which is not emitted.
+  FloatType(uint32_t numBits)
+      : NumericalType(TK_Float, numBits), fpEncoding(spv::FPEncoding::Max) {}
+  FloatType(uint32_t numBits, spv::FPEncoding encoding)
+      : NumericalType(TK_Float, numBits), fpEncoding(encoding) {}
+  // HLSL Change End.
 
   static bool classof(const SpirvType *t) { return t->getKind() == TK_Float; }
+
+  // HLSL Change Begin
+  spv::FPEncoding getFpEncoding() const { return fpEncoding; }
+  bool isBFloat16() const {
+    return fpEncoding == spv::FPEncoding::BFloat16KHR;
+  }
+  // HLSL Change End.
+
+private:
+  // HLSL Change
+  spv::FPEncoding fpEncoding;
 };
 
 class VectorType : public SpirvType {

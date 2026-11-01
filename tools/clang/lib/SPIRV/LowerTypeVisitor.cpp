@@ -467,6 +467,11 @@ const SpirvType *LowerTypeVisitor::lowerType(QualType type,
           // translated to Half if -enable-16bit-types is true.
         case BuiltinType::Half:
           return spvContext.getFloatType(16);
+          // HLSL Change - bfloat16_t is always a 16-bit float with the
+          // BFloat16KHR encoding (SPV_KHR_bfloat16), regardless of the
+          // -enable-16bit-types option.
+          case BuiltinType::BFloat16:
+            return spvContext.getBFloat16Type();
         case BuiltinType::Short: // int16_t
           return spvContext.getSIntType(16);
         case BuiltinType::UShort: // uint16_t

@@ -129,6 +129,7 @@ public:
   /// @{
 
   static const fltSemantics IEEEhalf;
+  static const fltSemantics BFloat16;
   static const fltSemantics IEEEsingle;
   static const fltSemantics IEEEdouble;
   static const fltSemantics IEEEquad;
@@ -607,6 +608,7 @@ private:
   /// @}
 
   APInt convertHalfAPFloatToAPInt() const;
+  APInt convertBFloat16APFloatToAPInt() const;
   APInt convertFloatAPFloatToAPInt() const;
   APInt convertDoubleAPFloatToAPInt() const;
   APInt convertQuadrupleAPFloatToAPInt() const;
@@ -614,6 +616,7 @@ private:
   APInt convertPPCDoubleDoubleAPFloatToAPInt() const;
   void initFromAPInt(const fltSemantics *Sem, const APInt &api);
   void initFromHalfAPInt(const APInt &api);
+  void initFromBFloat16APInt(const APInt &api);
   void initFromFloatAPInt(const APInt &api);
   void initFromDoubleAPInt(const APInt &api);
   void initFromQuadrupleAPInt(const APInt &api);

@@ -80,6 +80,7 @@ enum ArBasicKind {
   AR_BASIC_INT8_4PACKED,
   AR_BASIC_UINT8_4PACKED,
   AR_BASIC_ENUM,
+  AR_BASIC_BFLOAT16,
 
   AR_BASIC_COUNT,
 
@@ -454,7 +455,9 @@ const UINT g_uBasicKindProps[] = {
         BPROP_BITS32, // AR_BASIC_UINT8_4PACKED
 
     BPROP_ENUM | BPROP_NUMERIC | BPROP_INTEGER, // AR_BASIC_ENUM
-    BPROP_OTHER,                                // AR_BASIC_COUNT
+    BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS16, // AR_BASIC_BFLOAT16
+    BPROP_OTHER,    // AR_BASIC_COUNT
 
     //
     // Pseudo-entries for intrinsic tables and such.
@@ -1807,6 +1810,7 @@ static const char *g_ArBasicTypeNames[] = {
     "int8_t4_packed",
     "uint8_t4_packed",
     "enum",
+    "bfloat16_t",
 
     "<count>",
     "<none>",
@@ -2324,6 +2328,41 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
     *pOutKind = LeftKind;
     return true;
   }
+
+  // HLSL Change Begin - bfloat16_t must never be silently reclassified as
+  // float16_t or another type. It does not combine with float16_t or
+  // min-precision floats (report a mismatch instead), widens to float32 or
+  // float64, and absorbs literals and integer kinds the way float16_t does.
+  const bool bLeftIsBFloat16 = LeftKind == AR_BASIC_BFLOAT16;
+  const bool bRightIsBFloat16 = RightKind == AR_BASIC_BFLOAT16;
+  if (bLeftIsBFloat16 != bRightIsBFloat16) {
+    ArBasicKind other = bLeftIsBFloat16 ? RightKind : LeftKind;
+    switch (other) {
+    case AR_BASIC_FLOAT16:
+    case AR_BASIC_MIN10FLOAT:
+    case AR_BASIC_MIN16FLOAT:
+      // Mixing bfloat16_t with other 16-bit floats is a type mismatch.
+      return false;
+    case AR_BASIC_FLOAT32:
+    case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
+      *pOutKind = AR_BASIC_FLOAT32;
+      return true;
+    case AR_BASIC_FLOAT64:
+      *pOutKind = AR_BASIC_FLOAT64;
+      return true;
+    case AR_BASIC_LITERAL_FLOAT:
+    case AR_BASIC_LITERAL_INT:
+      *pOutKind = AR_BASIC_BFLOAT16;
+      return true;
+    default:
+      if (IS_BASIC_AINT(other)) {
+        *pOutKind = AR_BASIC_BFLOAT16;
+        return true;
+      }
+      return false;
+    }
+  }
+  // HLSL Change End.
 
   // More complicated combination requires that the kinds be basic
   if (LeftKind >= AR_BASIC_COUNT || RightKind >= AR_BASIC_COUNT) {
@@ -4567,6 +4606,7 @@ public:
       case HLSLScalarType_uint32:
       case HLSLScalarType_int8:
       case HLSLScalarType_uint8:
+      case HLSLScalarType_bfloat16:
         m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
             << HLSLScalarTypeNames[type] << "2018";
         return false;
@@ -4585,6 +4625,12 @@ public:
       default:
         break;
       }
+    }
+    if (!getSema()->getLangOpts().SPIRV &&
+        type == HLSLScalarType_bfloat16) {
+      m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_spirv)
+          << HLSLScalarTypeNames[type];
+      return false;
     }
     // int8_t/uint8_t require SM 6.9+ for the DXIL backend. The SPIR-V backend
     // already allows these types without an SM gate.
@@ -4901,6 +4947,8 @@ public:
         return AR_BASIC_FLOAT32;
       case BuiltinType::Half:
         return AR_BASIC_FLOAT16;
+      case BuiltinType::BFloat16:
+        return AR_BASIC_BFLOAT16;
       case BuiltinType::HalfFloat:
         return AR_BASIC_FLOAT32_PARTIAL_PRECISION;
       case BuiltinType::Int:
@@ -5011,6 +5059,8 @@ public:
       return HLSLScalarType_float_lit;
     case AR_BASIC_FLOAT16:
       return HLSLScalarType_half;
+    case AR_BASIC_BFLOAT16:
+      return HLSLScalarType_bfloat16;
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return HLSLScalarType_float;
     case AR_BASIC_FLOAT32:
@@ -5069,6 +5119,8 @@ public:
       return m_context->LitFloatTy;
     case AR_BASIC_FLOAT16:
       return m_context->HalfTy;
+    case AR_BASIC_BFLOAT16:
+      return m_context->BFloat16Ty;
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return m_context->HalfFloatTy;
     case AR_BASIC_FLOAT32:
@@ -6653,20 +6705,22 @@ public:
     bool IsEqualLength() const { return LeftCount == RightCount; }
   };
 
-  static ComparisonResult CompareIterators(HLSLExternalSource &source,
-                                           SourceLocation loc,
-                                           FlattenedTypeIterator &leftIter,
-                                           FlattenedTypeIterator &rightIter);
+  static ComparisonResult
+  CompareIterators(HLSLExternalSource &source, SourceLocation loc,
+                   FlattenedTypeIterator &leftIter,
+                   FlattenedTypeIterator &rightIter,
+                   bool explicitConversion = false);
   static ComparisonResult CompareTypes(HLSLExternalSource &source,
                                        SourceLocation leftLoc,
                                        SourceLocation rightLoc, QualType left,
                                        QualType right);
   // Compares the arguments to initialize the left type, modifying them if
   // necessary.
-  static ComparisonResult CompareTypesForInit(HLSLExternalSource &source,
-                                              QualType left, MultiExprArg args,
-                                              SourceLocation leftLoc,
-                                              SourceLocation rightLoc);
+  static ComparisonResult
+  CompareTypesForInit(HLSLExternalSource &source, QualType left,
+                      MultiExprArg args, SourceLocation leftLoc,
+                      SourceLocation rightLoc,
+                      bool explicitConversion = false);
 };
 
 static QualType GetFirstElementTypeFromDecl(const Decl *decl) {
@@ -6711,6 +6765,7 @@ void HLSLExternalSource::AddBaseTypes() {
   m_baseTypes[HLSLScalarType_uint32] = m_context->UnsignedIntTy;
   m_baseTypes[HLSLScalarType_uint64] = m_context->UnsignedLongLongTy;
   m_baseTypes[HLSLScalarType_float16] = m_context->HalfTy;
+  m_baseTypes[HLSLScalarType_bfloat16] = m_context->BFloat16Ty;
   m_baseTypes[HLSLScalarType_float32] = m_context->FloatTy;
   m_baseTypes[HLSLScalarType_float64] = m_context->DoubleTy;
   m_baseTypes[HLSLScalarType_int8] = m_context->SignedCharTy;
@@ -8267,6 +8322,15 @@ bool HLSLExternalSource::IsPromotion(ArBasicKind leftKind,
       return false; // No other type is a promotion.
     }
     break;
+  case AR_BASIC_BFLOAT16:
+    switch (leftKind) {
+    case AR_BASIC_FLOAT32:
+    case AR_BASIC_FLOAT64:
+      return true;
+    default:
+      return false; // No other type is a promotion.
+    }
+    break;
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
     switch (leftKind) {
     case AR_BASIC_FLOAT32:
@@ -8500,6 +8564,7 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
     case AR_BASIC_FLOAT16:
+    case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
     case AR_BASIC_FLOAT64:
@@ -8510,6 +8575,7 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
     break;
 
   case AR_BASIC_FLOAT16:
+  case AR_BASIC_BFLOAT16:
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
       return false;
@@ -8600,6 +8666,7 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
     case AR_BASIC_FLOAT16:
+    case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
     case AR_BASIC_FLOAT64:
@@ -8610,6 +8677,7 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
     break;
 
   case AR_BASIC_FLOAT16:
+  case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT64:
@@ -8915,9 +8983,17 @@ void HLSLExternalSource::InitializeInitSequenceForHLSL(
     // of incomplete array types to adjust the value - we do calculate this as
     // part of type analysis. Until this is done, s_arr_i_f arr_struct_none[] =
     // { }; succeeds when it should instead fail.
+    // HLSL Change Begin - a single-argument direct initialization of the form
+    // T(expr) is a functional cast, so element conversions follow explicit
+    // cast rules (this is what allows explicit constructors such as
+    // bfloat16_t(f) while implicit conversions to bfloat16_t stay restricted).
     FlattenedTypeIterator::ComparisonResult comparisonResult =
         FlattenedTypeIterator::CompareTypesForInit(
-            *this, destType, Args, Kind.getLocation(), Kind.getLocation());
+            *this, destType, Args, Kind.getLocation(), Kind.getLocation(),
+            Kind.getKind() == InitializationKind::IK_Direct && !isCast &&
+                Args.size() == 1 &&
+                Args.front()->getStmtClass() != Stmt::InitListExprClass);
+    // HLSL Change End.
     if (comparisonResult.IsConvertibleAndEqualLength() ||
         (isCast && comparisonResult.IsConvertibleAndLeftLonger())) {
       initSequence->AddListInitializationStep(destType);
@@ -10206,6 +10282,32 @@ static bool ConvertDimensions(ArTypeInfo TargetInfo, ArTypeInfo SourceInfo,
   return true;
 }
 
+/// <summary>Applies the SPV_KHR_bfloat16 conversion model to a component
+/// conversion.</summary>
+/// bfloat16_t implicitly widens to float32/float64 (including vector and
+/// matrix forms) and, like other HLSL floating point types, accepts implicit
+/// conversions from numeric literals. All other conversions involving
+/// bfloat16_t - narrowing to it, converting to or from float16_t or
+/// min-precision floats, and converting to or from integer types - require
+/// an explicit cast. No conversion to or from bool is supported at all.
+static bool ValidateBFloat16Conversion(ArBasicKind targetKind,
+                                       ArBasicKind sourceKind,
+                                       bool explicitConversion) {
+  if (targetKind != AR_BASIC_BFLOAT16 && sourceKind != AR_BASIC_BFLOAT16)
+    return true;
+  if (IS_BASIC_BOOL(targetKind) || IS_BASIC_BOOL(sourceKind))
+    return false;
+  if (targetKind == AR_BASIC_BFLOAT16)
+    return explicitConversion ||
+           sourceKind == AR_BASIC_LITERAL_FLOAT ||
+           sourceKind == AR_BASIC_LITERAL_INT;
+  // sourceKind == AR_BASIC_BFLOAT16
+  if (targetKind == AR_BASIC_FLOAT32 || targetKind == AR_BASIC_FLOAT64 ||
+      targetKind == AR_BASIC_FLOAT32_PARTIAL_PRECISION)
+    return true;
+  return explicitConversion;
+}
+
 static bool ConvertComponent(ArTypeInfo TargetInfo, ArTypeInfo SourceInfo,
                              ImplicitConversionKind &ComponentConversion,
                              TYPE_CONVERSION_REMARKS &Remarks) {
@@ -10508,6 +10610,15 @@ bool HLSLExternalSource::CanConvert(SourceLocation loc, Expr *sourceExpr,
   // Convert component type
   if (!ConvertComponent(TargetInfo, SourceInfo, ComponentConversion, Remarks))
     return false;
+
+  // HLSL Change Begin - enforce the SPV_KHR_bfloat16 conversion model:
+  // bfloat16_t only converts implicitly to float32/float64 (and from numeric
+  // literals); other conversions require an explicit cast, and conversions
+  // to or from bool are not supported.
+  if (!ValidateBFloat16Conversion(TargetInfo.EltKind, SourceInfo.EltKind,
+                                  explicitConversion))
+    return false;
+  // HLSL Change End.
 
 lSuccess:
   if (standard) {
@@ -10908,6 +11019,19 @@ void HLSLExternalSource::CheckBinOpForHLSL(SourceLocation OpLoc,
     }
   }
 
+  // HLSL Change Begin - SPV_KHR_bfloat16 defines no arithmetic, comparison,
+  // or bitwise operations for bfloat16_t, so any operation whose computation
+  // would be performed in bfloat16_t is rejected; operands must be explicitly
+  // converted to float or double first. Simple assignment and comma were
+  // handled above and remain valid, as are operations whose combined element
+  // kind widens bfloat16_t to float32/float64.
+  if (resultElementKind == AR_BASIC_BFLOAT16) {
+    m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_bfloat16_op);
+    ResultTy = QualType();
+    return;
+  }
+  // HLSL Change End.
+
   bool bFailedFirstRHSCast = false;
 
   // Perform necessary conversion sequences for LHS and RHS
@@ -11048,6 +11172,18 @@ QualType HLSLExternalSource::CheckUnaryOpForHLSL(SourceLocation OpLoc,
     return m_context->DependentTy;
 
   ArBasicKind elementKind = GetTypeElementKind(expr->getType());
+
+  // HLSL Change Begin - SPV_KHR_bfloat16 defines no arithmetic for
+  // bfloat16_t, so unary arithmetic operators are not supported on it.
+  // UO_LNot on bfloat16_t is rejected separately because conversions to bool
+  // are not supported.
+  if (elementKind == AR_BASIC_BFLOAT16 &&
+      (Opc == UO_Plus || Opc == UO_Minus || Opc == UO_PreInc ||
+       Opc == UO_PostInc || Opc == UO_PreDec || Opc == UO_PostDec)) {
+    m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_bfloat16_op);
+    return QualType();
+  }
+  // HLSL Change End.
 
   if (UnaryOperatorKindRequiresModifiableValue(Opc)) {
     if (elementKind == AR_BASIC_ENUM) {
@@ -11688,6 +11824,7 @@ static void GetFloatLimits(ArBasicKind basicKind, double *minValue,
     return;
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT32:
+  case AR_BASIC_BFLOAT16: // Same exponent range as float32.
     *minValue = -(FLT_MIN);
     *maxValue = FLT_MAX;
     return;
@@ -12022,6 +12159,7 @@ void hlsl::DiagnoseRegisterType(clang::Sema *self, clang::SourceLocation loc,
   case AR_BASIC_BOOL:
   case AR_BASIC_LITERAL_FLOAT:
   case AR_BASIC_FLOAT16:
+  case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT32:
   case AR_BASIC_FLOAT64:
@@ -13936,7 +14074,8 @@ bool FlattenedTypeIterator::pushTrackerForType(
 
 FlattenedTypeIterator::ComparisonResult FlattenedTypeIterator::CompareIterators(
     HLSLExternalSource &source, SourceLocation loc,
-    FlattenedTypeIterator &leftIter, FlattenedTypeIterator &rightIter) {
+    FlattenedTypeIterator &leftIter, FlattenedTypeIterator &rightIter,
+    bool explicitConversion) {
   FlattenedTypeIterator::ComparisonResult result;
   result.LeftCount = 0;
   result.RightCount = 0;
@@ -13951,7 +14090,7 @@ FlattenedTypeIterator::ComparisonResult FlattenedTypeIterator::CompareIterators(
     ExprResult convertedExpr;
     if (!source.CanConvert(loc, hasExpr ? actualExpr : &scratchExpr,
                            leftIter.getCurrentElement(),
-                           ExplicitConversionFalse, nullptr, &standard)) {
+                           explicitConversion, nullptr, &standard)) {
       result.AreElementsEqual = false;
       result.CanConvertElements = false;
       break;
@@ -14008,11 +14147,13 @@ FlattenedTypeIterator::ComparisonResult
 FlattenedTypeIterator::CompareTypesForInit(HLSLExternalSource &source,
                                            QualType left, MultiExprArg args,
                                            SourceLocation leftLoc,
-                                           SourceLocation rightLoc) {
+                                           SourceLocation rightLoc,
+                                           bool explicitConversion) {
   FlattenedTypeIterator leftIter(leftLoc, left, source);
   FlattenedTypeIterator rightIter(rightLoc, args, source);
 
-  return CompareIterators(source, leftLoc, leftIter, rightIter);
+  return CompareIterators(source, leftLoc, leftIter, rightIter,
+                          explicitConversion);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

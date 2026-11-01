@@ -488,6 +488,9 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
       break;
       // HLSL Change Ends
 
+    case BuiltinType::BFloat16: // HLSL Change
+      llvm_unreachable("bfloat16_t is only supported by the SPIR-V backend");
+
     case BuiltinType::Dependent:
 #define BUILTIN_TYPE(Id, SingletonId)
 #define PLACEHOLDER_TYPE(Id, SingletonId) \

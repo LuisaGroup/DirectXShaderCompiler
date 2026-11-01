@@ -160,6 +160,9 @@ FLOATING_TYPE(Min16Float, Min16FloatTy)
  // HLSL Change - 'halffloat' in HLSL
 FLOATING_TYPE(HalfFloat, HalfFloatTy)
 
+// HLSL Change - 'bfloat16_t' in HLSL
+FLOATING_TYPE(BFloat16, BFloat16Ty)
+
 // HLSL Change - literal float in HLSL
 FLOATING_TYPE(LitFloat, LitFloatTy)
 

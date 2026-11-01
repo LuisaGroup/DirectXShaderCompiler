@@ -1925,8 +1925,13 @@ bool Sema::IsFloatingPointPromotion(QualType FromType, QualType ToType) {
         if (FromBuiltin->getKind() == BuiltinType::LitFloat &&
             (ToBuiltin->getKind() == BuiltinType::Min10Float ||
               ToBuiltin->getKind() == BuiltinType::HalfFloat ||
+             ToBuiltin->getKind() == BuiltinType::BFloat16 ||
              ToBuiltin->getKind() == BuiltinType::Float ||
              ToBuiltin->getKind() == BuiltinType::Half ||
+             ToBuiltin->getKind() == BuiltinType::Double))
+          return true;
+        if (FromBuiltin->getKind() == BuiltinType::BFloat16 &&
+            (ToBuiltin->getKind() == BuiltinType::Float ||
              ToBuiltin->getKind() == BuiltinType::Double))
           return true;
         if (FromBuiltin->getKind() == BuiltinType::Min10Float &&

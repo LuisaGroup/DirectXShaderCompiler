@@ -599,6 +599,8 @@ void USRGenerator::VisitType(QualType T) {
         case BuiltinType::HalfFloat: // HLSL Change
         case BuiltinType::Half:
           c = 'h'; break;
+        case BuiltinType::BFloat16: // HLSL Change
+          c = 'B'; break;
         case BuiltinType::Float:
           c = 'f'; break;
         case BuiltinType::Double:
