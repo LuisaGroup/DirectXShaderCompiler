@@ -156,6 +156,10 @@ public:
   // Adds a constant to the module.
   void addConstant(SpirvConstant *);
 
+  // Adds an OpSpecConstantOp to the module. These are emitted after all
+  // constants, in insertion order.
+  void addSpecConstantOp(SpirvInstruction *);
+
   // Adds an Undef to the module.
   void addUndef(SpirvUndef *);
 
@@ -223,6 +227,7 @@ private:
       decorations;
 
   std::vector<SpirvConstant *> constants;
+  std::vector<SpirvInstruction *> specConstantOps;
   std::vector<SpirvUndef *> undefs;
   std::vector<SpirvVariableLike *> variables;
   // A vector of functions in the module in the order that they should be
