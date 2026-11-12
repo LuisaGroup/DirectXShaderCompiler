@@ -1083,9 +1083,26 @@ bool CapabilityVisitor::visit(SpirvModule *, Visitor::Phase phase) {
                                          {spv::Capability::RayTracingKHR});
   }
 
-  addExtensionAndCapabilitiesIfEnabled(
-      Extension::NV_shader_subgroup_partitioned,
-      {spv::Capability::GroupNonUniformPartitionedNV});
+  // HLSL Change - SPV_EXT_shader_subgroup_partitioned. The partitioned wave
+  // operations are provided by two extensions that share one capability
+  // (GroupNonUniformPartitionedEXT == GroupNonUniformPartitionedNV == 5297),
+  // so exactly one of the two OpExtension strings is emitted, picked by
+  // FeatureManager::getShaderSubgroupPartitionedProvider(): the standardised
+  // EXT spelling when the user listed it, the historical NV spelling
+  // otherwise. As before, the capability is trivially removable and the
+  // trimming pass drops it from modules that do not use a partitioned
+  // operation.
+  const auto partitionedExt =
+      featureManager.getShaderSubgroupPartitionedProvider();
+  if (partitionedExt == Extension::EXT_shader_subgroup_partitioned) {
+    addExtensionAndCapabilitiesIfEnabled(
+        Extension::EXT_shader_subgroup_partitioned,
+        {spv::Capability::GroupNonUniformPartitionedEXT});
+  } else {
+    addExtensionAndCapabilitiesIfEnabled(
+        Extension::NV_shader_subgroup_partitioned,
+        {spv::Capability::GroupNonUniformPartitionedNV});
+  }
 
   addCapability(spv::Capability::InterpolationFunction);
 

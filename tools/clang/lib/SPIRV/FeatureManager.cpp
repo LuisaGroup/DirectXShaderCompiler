@@ -242,6 +242,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         .Case("SPV_KHR_fma", Extension::KHR_fma)
         // HLSL Change - SPV_EXT_split_barrier.
         .Case("SPV_EXT_split_barrier", Extension::EXT_split_barrier)
+        // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
+        .Case("SPV_EXT_shader_subgroup_partitioned",
+              Extension::EXT_shader_subgroup_partitioned)
         .Default(Extension::Unknown);
 }
 
@@ -338,6 +341,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_EXT_split_barrier.
     case Extension::EXT_split_barrier:
       return "SPV_EXT_split_barrier";
+    // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
+    case Extension::EXT_shader_subgroup_partitioned:
+      return "SPV_EXT_shader_subgroup_partitioned";
     default:
     break;
   }
@@ -423,6 +429,21 @@ bool FeatureManager::hasExplicitAccelerationStructureProvider() const {
          getAccelerationStructureProvider() != Extension::Unknown;
 }
 
+// HLSL Change Begin - SPV_EXT_shader_subgroup_partitioned.
+Extension FeatureManager::getShaderSubgroupPartitionedProvider() const {
+  // SPV_EXT_shader_subgroup_partitioned and SPV_NV_shader_subgroup_partitioned
+  // are two names for the same capability (5297), so a module declares at most
+  // one of them. The standardised EXT spelling is checked first: with the
+  // default extension set only NV is enabled, and with an explicit
+  // -fspv-extension list the user's choice decides.
+  for (Extension ext : {Extension::EXT_shader_subgroup_partitioned,
+                        Extension::NV_shader_subgroup_partitioned})
+    if (isExtensionEnabled(ext))
+      return ext;
+  return Extension::Unknown;
+}
+// HLSL Change End - SPV_EXT_shader_subgroup_partitioned.
+
 bool FeatureManager::enabledByDefault(Extension ext) {
   switch (ext) {
     // KHR_ray_tracing and NV_ray_tracing are mutually exclusive so enable only
@@ -458,6 +479,15 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // entry points are rejected with a diagnostic instead of silently
     // lowering to OpControlBarrier.
     case Extension::EXT_split_barrier:
+      return false;
+    // HLSL Change - SPV_EXT_shader_subgroup_partitioned. Only one of the two
+    // spellings of the partitioned wave operations may be declared, and DXC
+    // has always emitted SPV_NV_shader_subgroup_partitioned, so the NV
+    // spelling stays the default and the standardised EXT spelling has to be
+    // requested with -fspv-extension=SPV_EXT_shader_subgroup_partitioned.
+    // This keeps the default output of every existing shader unchanged
+    // (docs/SPIR-V.rst, "Shader Model 6.0+ Wave Intrinsics").
+    case Extension::EXT_shader_subgroup_partitioned:
       return false;
     default:
     return true;

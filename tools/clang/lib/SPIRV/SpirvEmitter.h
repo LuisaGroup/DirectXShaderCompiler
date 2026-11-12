@@ -830,6 +830,14 @@ private:
   /// Processes SM6.5 WaveMatch function.
   SpirvInstruction *processWaveMatch(const CallExpr *);
 
+  /// HLSL Change - Checks that a partitioned wave operation (WaveMatch or the
+  /// WaveMultiPrefix* family) is permitted, i.e. that
+  /// SPV_EXT_shader_subgroup_partitioned or
+  /// SPV_NV_shader_subgroup_partitioned is enabled. Emits an error naming
+  /// `target` otherwise. `target` is quoted by the caller, e.g. "'WaveMatch'".
+  void checkSubgroupPartitionedExtension(llvm::StringRef target,
+                                         SourceLocation loc);
+
   /// Processes the NonUniformResourceIndex intrinsic function.
   SpirvInstruction *processIntrinsicNonUniformResourceIndex(const CallExpr *);
 

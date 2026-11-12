@@ -78,6 +78,12 @@ enum class Extension {
     KHR_fma,
     // HLSL Change - SPV_EXT_split_barrier (vk::SplitBarrierArrive/Wait).
     EXT_split_barrier,
+    // HLSL Change - SPV_EXT_shader_subgroup_partitioned, the standardised name
+    // of SPV_NV_shader_subgroup_partitioned. Both extensions name the same
+    // capability (GroupNonUniformPartitionedEXT ==
+    // GroupNonUniformPartitionedNV == 5297), so only one of the two may be
+    // emitted for a module; see getShaderSubgroupPartitionedProvider().
+    EXT_shader_subgroup_partitioned,
     Unknown,
 };
 
@@ -135,6 +141,18 @@ public:
   /// that provides the acceleration structure type.
   /// When no list is given, returns false.
   bool hasExplicitAccelerationStructureProvider() const;
+
+  /// HLSL Change - Returns the allowed extension that provides the partitioned
+  /// wave operations (WaveMatch and the WaveMultiPrefix* family), or
+  /// Extension::Unknown if neither SPV_EXT_shader_subgroup_partitioned nor
+  /// SPV_NV_shader_subgroup_partitioned is enabled.
+  ///
+  /// The two extensions are two names for one capability
+  /// (GroupNonUniformPartitionedEXT == GroupNonUniformPartitionedNV == 5297),
+  /// so a module must declare at most one of them. The standardised EXT
+  /// spelling wins when the user lists both; when no -fspv-extension is given
+  /// only the NV spelling is enabled, which is what DXC emitted historically.
+  Extension getShaderSubgroupPartitionedProvider() const;
 
   /// Returns true if the target environment is Vulkan 1.1 or above.
   /// Returns false otherwise.

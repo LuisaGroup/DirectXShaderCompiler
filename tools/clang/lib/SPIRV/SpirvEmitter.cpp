@@ -12274,6 +12274,11 @@ SpirvInstruction *SpirvEmitter::processWaveReductionOrPrefix(
   featureManager.requestTargetEnv(SPV_ENV_VULKAN_1_1, "Wave Operation",
                                   callExpr->getExprLoc());
 
+  // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
+  if (isMultiPrefix)
+    checkSubgroupPartitionedExtension("'WaveMultiPrefix*'",
+                                      callExpr->getExprLoc());
+
   llvm::SmallVector<SpirvInstruction *, 4> operands;
   auto *value = doExpr(callExpr->getArg(0));
   if (isMultiPrefix) {
@@ -12474,12 +12479,37 @@ SpirvEmitter::processWaveActiveAllEqualMatrix(SpirvInstruction *arg,
   return spvBuilder.createCompositeConstruct(booleanMatrixType, rows, srcLoc);
 }
 
+// HLSL Change Begin - SPV_EXT_shader_subgroup_partitioned.
+// The partitioned wave operations (WaveMatch and the WaveMultiPrefix* family)
+// are provided by SPV_EXT_shader_subgroup_partitioned and by its predecessor
+// SPV_NV_shader_subgroup_partitioned, which name the same capability
+// (GroupNonUniformPartitionedEXT == GroupNonUniformPartitionedNV == 5297).
+// Either one of them is enough, and a module declares at most one. Without
+// both, the instruction would be emitted with a capability that no declared
+// extension provides, which SPIRV-Tools rejects, so the restriction is
+// reported here instead of as a validation failure of the generated module.
+void SpirvEmitter::checkSubgroupPartitionedExtension(llvm::StringRef target,
+                                                     SourceLocation loc) {
+  if (featureManager.getShaderSubgroupPartitionedProvider() !=
+      Extension::Unknown)
+    return;
+  emitError("%0 requires the SPV_EXT_shader_subgroup_partitioned extension; "
+            "pass -fspv-extension=SPV_EXT_shader_subgroup_partitioned (or "
+            "-fspv-extension=SPV_NV_shader_subgroup_partitioned) to enable it",
+            loc) << target;
+}
+// HLSL Change End - SPV_EXT_shader_subgroup_partitioned.
+
 SpirvInstruction *SpirvEmitter::processWaveMatch(const CallExpr *callExpr) {
   assert(callExpr->getNumArgs() == 1);
   const auto loc = callExpr->getExprLoc();
 
-  // The SPV_NV_shader_subgroup_partitioned extension requires SPIR-V 1.3.
+  // The partitioned wave operations require SPIR-V 1.3, with either the NV or
+  // the EXT spelling of the extension.
   featureManager.requestTargetEnv(SPV_ENV_VULKAN_1_1, "Wave Operation", loc);
+
+  // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
+  checkSubgroupPartitionedExtension("'WaveMatch'", loc);
 
   SpirvInstruction *arg = doExpr(callExpr->getArg(0));
   return spvBuilder.createUnaryOp(spv::Op::OpGroupNonUniformPartitionNV,

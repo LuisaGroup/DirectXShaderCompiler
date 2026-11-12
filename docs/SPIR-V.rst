@@ -402,6 +402,7 @@ Supported extensions
 * SPV_EXT_fragment_shader_interlock
 * SPV_EXT_mesh_shader
 * SPV_EXT_shader_stencil_support
+* SPV_EXT_shader_subgroup_partitioned
 * SPV_EXT_shader_viewport_index_layer
 * SPV_EXT_split_barrier
 * SPV_AMD_shader_early_and_late_fragment_tests
@@ -4351,6 +4352,61 @@ Multiprefix   ``WaveMultiPrefixBitXor()``  ``OpGroupNonUniformLogicalXor``     `
 ``OpGroupNonUniformQuadAllKHR`` instructions if the ``SPV_KHR_quad_control``
 extension is enabled. If it is not, they will fall back to constructing the
 value using multiple calls to ``OpGroupNonUniformQuadBroadcast``.
+
+Partitioned wave operations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``WaveMatch()`` partitions the wave into groups of lanes that hold the same
+value and returns the bitmasks of those groups; the ``WaveMultiPrefixSum()``,
+``WaveMultiPrefixProduct()``, ``WaveMultiPrefixBitAnd()``,
+``WaveMultiPrefixBitOr()`` and ``WaveMultiPrefixBitXor()`` intrinsics take such a
+mask back and evaluate an exclusive scan restricted to the lanes it selects.
+``WaveMatch()`` becomes ``OpGroupNonUniformPartitionEXT`` and each
+``WaveMultiPrefix*()`` becomes an ``OpGroupNonUniform*`` with the
+``PartitionedExclusiveScanEXT`` group operation.
+
+That functionality is specified twice:
+
+* ``SPV_NV_shader_subgroup_partitioned`` -- the original NVIDIA spelling. It is
+  what DXC has always emitted and it is still what DXC emits by default.
+* ``SPV_EXT_shader_subgroup_partitioned`` -- the standardised spelling. It is
+  selected with ``-fspv-extension=SPV_EXT_shader_subgroup_partitioned``.
+
+The two extensions are two names for one capability:
+``GroupNonUniformPartitionedEXT`` and ``GroupNonUniformPartitionedNV`` are both
+SPIR-V capability 5297, and ``OpGroupNonUniformPartitionEXT`` (5296) and
+``OpGroupNonUniformPartitionNV`` are the same opcode. The instruction stream
+therefore does not depend on the selection at all -- the differences are the
+string in ``OpExtension`` and the fact that a module must declare at most one of
+the two. Because the capability id is shared, a disassembler prints the
+canonical EXT spelling (``OpCapability GroupNonUniformPartitionedEXT``,
+``OpGroupNonUniformPartitionEXT``, ``PartitionedExclusiveScanEXT``) for a module
+that declares either extension, so only ``OpExtension`` distinguishes them.
+
+Selection rules (``FeatureManager::getShaderSubgroupPartitionedProvider``):
+
+* No ``-fspv-extension`` option: only ``SPV_NV_shader_subgroup_partitioned`` is
+  enabled, so the generated module is unchanged from previous releases.
+* ``-fspv-extension=SPV_EXT_shader_subgroup_partitioned``: the module declares
+  ``OpExtension "SPV_EXT_shader_subgroup_partitioned"`` and not the NV string.
+  Note that ``-fspv-extension`` is a whitelist: this also disables every
+  extension that is otherwise enabled by default, so list the ones the shader
+  needs explicitly.
+* ``-fspv-extension=SPV_NV_shader_subgroup_partitioned``: keeps the NV string,
+  for drivers and tools that only know the NV name.
+* If both are listed, the standardised EXT spelling is emitted.
+
+The partitioned operations require SPIR-V 1.3, hence Vulkan 1.1 or a later
+``-fspv-target-env``; without one DXC reports ``Vulkan 1.1 is required for Wave
+Operation but not permitted to use``. When an explicit ``-fspv-extension`` list
+names neither spelling, ``WaveMatch()`` and the ``WaveMultiPrefix*()`` intrinsics
+are compile errors: the alternative would be a module that contains
+``OpGroupNonUniformPartitionEXT`` while no declared extension provides the
+capability, which the validator rejects.
+
+A host must enable ``VK_EXT_shader_subgroup_partitioned`` and its
+``shaderSubgroupPartitioned`` feature, or ``VK_NV_shader_subgroup_partitioned``
+for the NV spelling; the compiler cannot check either.
 
 The Implicit ``vk`` Namespace
 =============================

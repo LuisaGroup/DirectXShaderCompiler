@@ -38,6 +38,20 @@ The included licenses apply to the following files:
   arrive/wait pairing is not enforced by the compiler: the instructions carry
   no token, so an unmatched arrive or an un-arrived wait is undefined
   behavior.
+- Added `SPV_EXT_shader_subgroup_partitioned` as a name for the extension that
+  provides the partitioned wave operations (`WaveMatch()` and the
+  `WaveMultiPrefix*()` family). With
+  `-fspv-extension=SPV_EXT_shader_subgroup_partitioned` the module declares
+  `OpExtension "SPV_EXT_shader_subgroup_partitioned"` instead of
+  `"SPV_NV_shader_subgroup_partitioned"`, which is what a driver exposing
+  `VK_EXT_shader_subgroup_partitioned` (`shaderSubgroupPartitioned` feature)
+  expects. The two extensions name the same capability
+  (`GroupNonUniformPartitionedEXT` = `GroupNonUniformPartitionedNV` = 5297), so
+  the instruction stream is unchanged and only the `OpExtension` string
+  differs. The NV spelling stays the default, so code generation without the
+  flag is unchanged; `-fspv-extension=SPV_NV_shader_subgroup_partitioned` keeps
+  it available. Naming neither spelling in an explicit `-fspv-extension` list
+  is now a compile error instead of an invalid module.
 - Added `-fvk-resource-heap-stride` and `-fvk-sampler-heap-stride`, which
   override the computed `ArrayStrideIdEXT` of the resource and sampler
   descriptor heaps with a literal `ArrayStride`. The value must be a power of
