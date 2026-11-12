@@ -291,10 +291,16 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
             Extension::NV_cooperative_matrix_decode_vector)
 // HLSL Change - SPV_ARM_tensors.
 .Case("SPV_ARM_tensors", Extension::ARM_tensors)
-// HLSL Change - SPV_ARM_graph.
-.Case("SPV_ARM_graph", Extension::ARM_graph)
-.Default(Extension::Unknown);
-}
+  // HLSL Change - SPV_ARM_graph.
+  .Case("SPV_ARM_graph", Extension::ARM_graph)
+  // HLSL Change - SPV_EXT_shader_invocation_reorder.
+  .Case("SPV_EXT_shader_invocation_reorder",
+        Extension::EXT_shader_invocation_reorder)
+  // HLSL Change - SPV_NV_ray_tracing_motion_blur.
+  .Case("SPV_NV_ray_tracing_motion_blur",
+        Extension::NV_ray_tracing_motion_blur)
+  .Default(Extension::Unknown);
+  }
 
 const char *FeatureManager::getExtensionName(Extension symbol) {
   switch (symbol) {
@@ -446,10 +452,16 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
           // HLSL Change - SPV_ARM_tensors.
           case Extension::ARM_tensors:
             return "SPV_ARM_tensors";
-          // HLSL Change - SPV_ARM_graph.
-          case Extension::ARM_graph:
-            return "SPV_ARM_graph";
-      default:
+            // HLSL Change - SPV_ARM_graph.
+            case Extension::ARM_graph:
+              return "SPV_ARM_graph";
+            // HLSL Change - SPV_EXT_shader_invocation_reorder.
+            case Extension::EXT_shader_invocation_reorder:
+              return "SPV_EXT_shader_invocation_reorder";
+            // HLSL Change - SPV_NV_ray_tracing_motion_blur.
+            case Extension::NV_ray_tracing_motion_blur:
+              return "SPV_NV_ray_tracing_motion_blur";
+        default:
     break;
   }
   return "<unknown extension>";
@@ -840,10 +852,33 @@ bool FeatureManager::enabledByDefault(Extension ext) {
         // the extension is part of any Vulkan version, so
         // isExtensionRequiredForTargetEnv() keeps the default (true) and
         // OpExtension is emitted for every target environment.
-        case Extension::ARM_graph:
-          return true;
-    return true;
-  }
+          case Extension::ARM_graph:
+            return true;
+          // HLSL Change - SPV_EXT_shader_invocation_reorder. Opt-in, unlike the
+          // two entries above, because it is not a type that a pre-existing
+          // shader could already be using: a module that reorders invocations
+          // declares the ShaderInvocationReorderEXT capability (5388) and
+          // OpExtension "SPV_EXT_shader_invocation_reorder", and a driver
+          // without VK_EXT_ray_tracing_invocation_reorder rejects it.
+          // Without -fspv-extension=SPV_EXT_shader_invocation_reorder every
+          // entry point of <vk/ext/invocation_reorder.h> is a compile error
+          // (see the OpHitObject*EXT / OpReorderThread*EXT cases in
+          // CapabilityVisitor) instead of a module that declares an extension
+          // the host never asked for, and a shader that does not reorder is
+          // unchanged.
+          case Extension::EXT_shader_invocation_reorder:
+          // HLSL Change - SPV_NV_ray_tracing_motion_blur. Only
+          // OpHitObjectGetCurrentTimeEXT requests it (SPIRV-Tools:
+          // "<op>: requires RayTracingMotionBlurNV capability"), and a module
+          // that carries RayTracingMotionBlurNV is rejected by a driver without
+          // VK_NV_ray_tracing_motion_blur. Opt-in for the same reason: without
+          // -fspv-extension=SPV_NV_ray_tracing_motion_blur that one accessor is
+          // a compile error instead of a module with an extension the host never
+          // asked for, and no other accessor is affected.
+          case Extension::NV_ray_tracing_motion_blur:
+            return false;
+      return true;
+    }
 }
 
 bool FeatureManager::isTargetEnvVulkan1p1OrAbove() const {

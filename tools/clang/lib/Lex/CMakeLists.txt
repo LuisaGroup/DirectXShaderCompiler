@@ -52,9 +52,10 @@ if (ENABLE_SPIRV_CODEGEN)
  vk/arm/graph.h
        vk/arm/tensors.h
 vk/arm/tosa.h
-       vk/ext/abort.h
-   vk/ext/long_vector.h
-   vk/ext/split_barrier.h
+         vk/ext/abort.h
+     vk/ext/invocation_reorder.h
+     vk/ext/long_vector.h
+     vk/ext/split_barrier.h
  vk/khr/cooperative_matrix.h
  vk/khr/cooperative_matrix.impl
  vk/nv/cluster_as.h

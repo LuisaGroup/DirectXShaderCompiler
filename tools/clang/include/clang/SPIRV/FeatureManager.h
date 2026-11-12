@@ -161,13 +161,25 @@ enum class Extension {
       // vk::arm::Tensor type with its accessors in <vk/arm/tensors.h>). Enabled
       // by default; see enabledByDefault() in FeatureManager.cpp.
       ARM_tensors,
-      // HLSL Change - SPV_ARM_graph (the module-scope graph region of
-      // VK_ARM_data_graph: OpGraphARM, OpGraphEntryPointARM, OpGraphInputARM,
-      // OpGraphSetOutputARM and OpGraphEndARM, declared by the entry points in
-      // <vk/arm/graph.h>). Enabled by default; see enabledByDefault() in
-      // FeatureManager.cpp.
-      ARM_graph,
-    Unknown,
+        // HLSL Change - SPV_ARM_graph (the module-scope graph region of
+        // VK_ARM_data_graph: OpGraphARM, OpGraphEntryPointARM, OpGraphInputARM,
+        // OpGraphSetOutputARM and OpGraphEndARM, declared by the entry points in
+        // <vk/arm/graph.h>). Enabled by default; see enabledByDefault() in
+        // FeatureManager.cpp.
+        ARM_graph,
+      // HLSL Change - SPV_EXT_shader_invocation_reorder
+      // (OpTypeHitObjectEXT, the OpHitObject*EXT accessors and the
+      // OpReorderThreadWithHintEXT / OpReorderThreadWithHitObjectEXT entry
+      // points, i.e. the API of <vk/ext/invocation_reorder.h>). Opt-in; see
+      // enabledByDefault() in FeatureManager.cpp.
+      EXT_shader_invocation_reorder,
+      // HLSL Change - SPV_NV_ray_tracing_motion_blur, requested only by
+      // OpHitObjectGetCurrentTimeEXT (SPIRV-Tools: "<op>: requires
+      // RayTracingMotionBlurNV capability"), which is why the one accessor of
+      // <vk/ext/invocation_reorder.h> that needs it declares both extensions.
+      // Opt-in; see enabledByDefault() in FeatureManager.cpp.
+      NV_ray_tracing_motion_blur,
+      Unknown,
 };
 
 /// The class for handling SPIR-V version and extension requests.

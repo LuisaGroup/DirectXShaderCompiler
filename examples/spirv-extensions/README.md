@@ -41,6 +41,7 @@ features.
 | `khr-constant-data.hlsl` | `VK_KHR_shader_constant_data` → `OpConstantDataKHR` for a lookup table | `-fspv-constant-data -fspv-extension=SPV_KHR_constant_data` |
 | `khr-shader-abort.hlsl` | `VK_KHR_shader_abort` → `OpAbortKHR` | `-fspv-extension=SPV_KHR_abort` |
 | `khr-opacity-micromap.hlsl` | `VK_KHR_opacity_micromap` → `OpacityMicromapIdKHR` execution mode | `-fspv-extension=SPV_KHR_opacity_micromap` |
+| `ext-invocation-reorder.hlsl` | `VK_EXT_ray_tracing_invocation_reorder` → `OpTypeHitObjectEXT` + `OpReorderThread*EXT` | `-fspv-target-env=vulkan1.2 -fspv-extension=SPV_EXT_shader_invocation_reorder` |
 | `nv-cluster-acceleration-structure.hlsl` | `VK_NV_cluster_acceleration_structure` → `OpRayQueryGetIntersectionClusterIdNV` | `-fspv-extension=SPV_NV_cluster_acceleration_structure` |
 | `nv-linear-swept-spheres.hlsl` | `VK_NV_ray_tracing_linear_swept_spheres` → sphere/LSS ray-query accessors | `-fspv-extension=SPV_NV_linear_swept_spheres` |
 | `qcom-image-processing3.hlsl` | `VK_QCOM_image_processing3` → `OpImageGatherQCOM` | `-fspv-extension=SPV_QCOM_image_processing3` |

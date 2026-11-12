@@ -20,6 +20,54 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_EXT_shader_invocation_reorder`
+  (`VK_EXT_ray_tracing_invocation_reorder`): hit objects and invocation
+  reordering. A ray generation shader can now build the ray it wants to trace as a
+  *hit object* first and reorder second, so the implementation can group the
+  invocations that hold similar objects and traverse their rays with coherent
+  memory accesses instead of one divergent traversal per lane. The new
+  `<vk/ext/invocation_reorder.h>` header provides `vk::ext::HitObject` (which
+  lowers to the opaque type `OpTypeHitObjectEXT`, 5313), the two reorder entry
+  points `vk::ext::ReorderThread(hint, bits)` (`OpReorderThreadWithHintEXT`, 5314)
+  and `vk::ext::ReorderThread(hitObject[, hint, bits])`
+  (`OpReorderThreadWithHitObjectEXT`, 5315 - the two optional operands are
+  both-or-neither, hence the two overloads), the two constructions that need
+  nothing but ordinary HLSL values - `HitObjectRecordEmpty` (5318) and
+  `HitObjectRecordMiss` (5305) - and the accessors of the extension:
+  `HitObjectGetRayFlags` (5308), `HitObjectGetObjectRayOrigin` /
+  `GetObjectRayDirection` / `GetWorldRayOrigin` / `GetWorldRayDirection`
+  (5327-5330), `HitObjectGetRayTMin` / `GetRayTMax` (5347 / 5333),
+  `HitObjectGetObjectToWorld` / `GetWorldToObject` (5331 / 5332),
+  `HitObjectGetHitKind` / `GetPrimitiveIndex` / `GetGeometryIndex` /
+  `GetInstanceId` / `GetInstanceCustomIndex` (5322-5326),
+  `HitObjectGetShaderBindingTableRecordIndex` / `GetShaderRecordBufferHandle`
+  (5348 / 5349), `HitObjectSetShaderBindingTableRecordIndex` (5309),
+  `HitObjectIsEmpty` / `IsHit` / `IsMiss` (5350-5352) and
+  `HitObjectGetCurrentTime` (5320). `SPV_EXT_shader_invocation_reorder` is a
+  registered, opt-in `FeatureManager` extension: without
+  `-fspv-extension=SPV_EXT_shader_invocation_reorder` every use is a compile error
+  instead of a module that declares `ShaderInvocationReorderEXT` (5388) for a host
+  that never asked for it. The capability and both extension strings are emitted
+  from the type and the instructions through the ordinary `CapabilityVisitor`
+  path, never through `[[vk::ext_capability]]`/`[[vk::ext_extension]]`, so
+  `-fspv-extension=` stays an allow-list. Both execution-model restrictions of the
+  extension are diagnosed while the call is lowered - `OpReorderThread*EXT` is
+  `RayGenerationKHR` only and the accessors need `RayGenerationKHR`,
+  `ClosestHitKHR` or `MissKHR` - as is the use of a hit object that no recording
+  instruction has written to. `HitObjectGetCurrentTime` additionally needs
+  `-fspv-extension=SPV_NV_ray_tracing_motion_blur`, because SPIRV-Tools requires
+  the `RayTracingMotionBlurNV` capability for it. Not provided yet, and documented
+  as the construction gap: tracing into a hit object
+  (`OpHitObjectTraceRayEXT`, 5316, and the `*ReorderExecute*` instructions
+  5310-5312, which need a `RayPayloadKHR` payload variable) and recording one from
+  a ray query (`OpHitObjectRecordFromQueryEXT`, 5304, which needs a
+  `HitObjectAttributeEXT` variable) - HLSL has no surface for either, so a *hit*
+  (as opposed to miss or empty) hit object cannot be produced yet, while the type,
+  the reorder entry points and the accessors are complete.
+  `OpHitObjectGetClusterIdNV` (5346) is deliberately absent: the vendored
+  validator requires the `NV` hit object type (`OpTypeHitObjectNV`) for it. See
+  `docs/SPIR-V.rst` ("Invocation reordering") and
+  `examples/spirv-extensions/ext-invocation-reorder.hlsl`.
 - Added support for `SPV_ARM_graph` (`VK_ARM_data_graph`): the module-scope data
   graph. A graph describes dataflow over complete tensors instead of per-invocation
   code - inputs, a body of tensor operations and outputs - and `VK_ARM_data_graph`

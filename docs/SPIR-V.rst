@@ -1392,8 +1392,13 @@ Limitations:
   the header. The sphere accessors and the scalar linear-swept-sphere accessors
   are unaffected.
 * The hit object half of the extension (``OpHitObjectGetSpherePositionNV``, 5432,
-  and the rest) is not exposed: it needs ``SPV_EXT_shader_invocation_reorder``
-  support in the backend first.
+  and the rest) is not exposed. It is not a limitation of
+  ``SPV_EXT_shader_invocation_reorder`` any more - see `Invocation reordering`_ -
+  but of the *type* those instructions take: every ``OpHitObject*NV`` instruction in
+  the vendored validator requires a pointer to ``OpTypeHitObjectNV`` (5281), the hit
+  object type of ``SPV_NV_shader_invocation_reorder``, and rejects the ``EXT`` type
+  (5313) that ``<vk/ext/invocation_reorder.h>`` declares. Exposing them needs the NV
+  hit object type and the NV extension, which is a separate landing.
 
 See ``examples/spirv-extensions/nv-linear-swept-spheres.hlsl`` for a
 self-contained example and
@@ -1402,6 +1407,247 @@ the two capabilities and the extension, the three sphere instructions with their
 result types and both intersection selectors, the linear-swept-sphere half, the
 unchanged off path, the survival of the accessors through spirv-opt and the
 diagnostic for a missing ``-fspv-extension``.
+
+Invocation reordering
+~~~~~~~~~~~~~~~~~~~~~
+``VK_EXT_ray_tracing_invocation_reorder`` lets a ray generation shader decide
+*which* rays are traversed together. Without it, every ray is traced at the point in
+the shader that asks for it, so the invocations of a wave walk the acceleration
+structure from unrelated starting points: the nodes and the geometry they fetch are
+different, the caches hold no shared lines, and the time an invocation spends waiting
+for memory is time the wave is not executing. The extension makes the ray a *value* -
+a hit object - that the shader builds first and traverses second, together with a
+hint that says which invocations are worth grouping. The implementation then repacks
+("reorders") the invocations that hold similar objects, so the traversal of a
+reordered wave starts from rays that are likely to touch the same memory.
+Two things about the win are worth stating explicitly: the hint is a *request* that
+an implementation may ignore, and a shader must not depend on the order the
+invocations run in, nor on which lanes share a wave after the reorder.
+
+The entry API lives in ``<vk/ext/invocation_reorder.h>``:
+
+.. code:: hlsl
+
+  #include <vk/ext/invocation_reorder.h>
+
+  vk::ext::HitObject hitObject;
+  vk::ext::HitObjectRecordMiss(hitObject, 0u, missIndex, origin, tMin, direction,
+                               tMax);
+  vk::ext::ReorderThread(hitObject, hint, hintBits);   // or ReorderThread(hint, bits)
+  float t = vk::ext::HitObjectGetRayTMax(hitObject);
+  bool miss = vk::ext::HitObjectIsMiss(hitObject);
+
+and lowers to the instructions of the extension. The module header a shader that
+uses any of it gets is
+
+.. code:: spirv
+
+  OpCapability RayTracingKHR                      ; 4479, what the extension depends on
+  OpCapability ShaderInvocationReorderEXT         ; 5388
+  OpExtension "SPV_KHR_ray_tracing"
+  OpExtension "SPV_EXT_shader_invocation_reorder"
+
+and the two reorder entry points are
+
+.. code:: spirv
+
+  OpReorderThreadWithHintEXT %hint %bits                          ; 5314
+  OpReorderThreadWithHitObjectEXT %hitObject                      ; 5315
+  OpReorderThreadWithHitObjectEXT %hitObject %hint %bits          ; 5315, optional pair
+
+The optional ``Hint`` and ``Bits`` operands of ``OpReorderThreadWithHitObjectEXT``
+are both-or-neither, so the header declares one overload without them and one with
+both. The ``Hint`` form takes the two 32-bit integers the shader sorts by; the
+implementation reads the bits selected by ``Bits``.
+
+**The hit object is an opaque type read through a pointer.** ``HitObject`` is a
+``vk::SpirvOpaqueType`` with the ``OpTypeHitObjectEXT`` opcode (5313), an opaque type
+declaration with no operands and no result type - the same shape as
+``OpTypeRayQueryKHR``, not a struct:
+
+.. code:: spirv
+
+  %hitobject = OpTypeHitObjectEXT
+  %ho        = OpVariable %_ptr_Function_hitobject Function
+                OpHitObjectRecordEmptyEXT %ho
+  %flags     = OpHitObjectGetRayFlagsEXT %uint %ho
+
+SPIRV-Tools requires every hit object operand to be a pointer to that type
+(``ValidateHitObjectPointerEXT``: "Hit Object must be a pointer", "Type must be
+``OpTypeHitObjectEXT``"), so every entry point of the header takes the object through
+a ``[[vk::ext_reference]]`` parameter: the call passes the address of a variable, and
+a shader cannot accidentally copy, compute or select a hit object. The entry points
+are free functions in namespace ``vk::ext`` rather than members of an HLSL class
+because the methods of the ``RayQuery`` and ``HitObject`` builtin types are declared
+once and have to work for both backends, and DXR has no SPIR-V hit-object
+instructions. The header is SPIR-V only, like ``<vk/ext/long_vector.h>``: the
+``vk::SpirvOpaqueType`` template it builds the type from is declared by the front end
+only when SPIR-V CodeGen is enabled, so a DXIL compile of a shader that includes it
+fails at the ``HitObject`` declaration rather than silently lowering to something
+else. A hit object may live in a local variable or in a ``Function``-storage struct
+member (the member access becomes an ``OpAccessChain`` that still yields a pointer to
+``OpTypeHitObjectEXT``), and it is an ordinary HLSL value otherwise: ``ho1 = ho2`` and
+``vk::ext::HitObject ho2 = ho1`` encode as ``OpLoad``/``OpStore`` of the opaque type,
+compile, and validate.
+
+**The accessors** are the scalar, vector and matrix readers of the extension, one per
+member of the DXR ``HitObject`` method set:
+
+============================================= ===== ===========================
+HLSL entry point                              Op    Result
+============================================= ===== ===========================
+``HitObjectGetRayFlags``                      5308  ``uint``
+``HitObjectGetObjectRayOrigin``               5327  ``float3``
+``HitObjectGetObjectRayDirection``            5328  ``float3``
+``HitObjectGetWorldRayOrigin``                5330  ``float3``
+``HitObjectGetWorldRayDirection``             5329  ``float3``
+``HitObjectGetRayTMin``                       5347  ``float``
+``HitObjectGetRayTMax``                       5333  ``float``
+``HitObjectGetObjectToWorld``                 5331  ``float4x3``
+``HitObjectGetWorldToObject``                 5332  ``float4x3``
+``HitObjectGetHitKind``                       5322  ``uint``
+``HitObjectGetPrimitiveIndex``                5323  ``uint``
+``HitObjectGetGeometryIndex``                 5324  ``uint``
+``HitObjectGetInstanceId``                    5325  ``uint``
+``HitObjectGetInstanceCustomIndex``           5326  ``uint``
+``HitObjectGetShaderBindingTableRecordIndex`` 5348  ``uint``
+``HitObjectGetShaderRecordBufferHandle``      5349  ``uint2``
+``HitObjectSetShaderBindingTableRecordIndex`` 5309  (no result)
+``HitObjectIsEmpty``                          5350  ``bool``
+``HitObjectIsHit``                            5351  ``bool``
+``HitObjectIsMiss``                           5352  ``bool``
+``HitObjectGetCurrentTime``                   5320  ``float``
+``HitObjectRecordEmpty``                      5318  (no result)
+``HitObjectRecordMiss``                       5305  (no result)
+============================================= ===== ===========================
+
+Every result type is fixed by the extension, and SPIRV-Tools checks each one
+("expected Result Type matrix to have a Column Count of 4", "Expected 32-bit integer
+type 2-component vector as Result Type", ...), so a wrong result type is an invalid
+module rather than a silent miscompile. ``float4x3`` is what the backend emits for
+the transforms because the extension asks for four ``%v3float`` columns, i.e. HLSL's
+row-major ``float4x3``; it is the same shape as the DXR ``ObjectToWorld4x3()``
+result. The transforms and every intersection accessor are only defined for an object
+that recorded an intersection.
+
+**Reordering is not a terminator.** Unlike ``OpAbortKHR``, the two
+``OpReorderThread*EXT`` instructions are ordinary instructions in SPIR-V: the
+vendored grammar declares them without a block-terminator class,
+``spvOpcodeIsBlockTerminator`` is false for them, and the validator only links them to
+the ``MaximallyReconvergesKHR`` execution mode (an entry point that uses one may not
+request maximal reconvergence, VUID 9565). The block continues after the call, which
+is also what the DXR ``ReorderThread`` intrinsic does. What a shader must not do is
+assume that the invocations of the original wave still run in lockstep afterwards.
+
+**Two execution-model restrictions, both diagnosed.** The extension allows
+``OpReorderThread*EXT`` only in the ``RayGenerationKHR`` execution model and the
+``OpHitObject*EXT`` instructions only in ``RayGenerationKHR``, ``ClosestHitKHR`` and
+``MissKHR``; SPIRV-Tools registers exactly those two limitations. The compiler checks
+them while the call is lowered, because only then is the stage of the entry point
+known, so a compute or pixel shader that includes the header is a compile error
+instead of a module the validator rejects.
+
+**The extension is not enabled by default.** A module that declares a hit object or
+uses one of the instructions declares ``ShaderInvocationReorderEXT`` and
+``OpExtension "SPV_EXT_shader_invocation_reorder"``, which a driver without
+``VK_EXT_ray_tracing_invocation_reorder`` rejects, so the header is only accepted with
+``-fspv-extension=SPV_EXT_shader_invocation_reorder``. Without it every use is a
+compile error instead of a module that declares an extension the host never asked for,
+and a module that does not reorder is unchanged - including one that includes the
+header. ``HitObjectGetCurrentTime`` is the one accessor that needs a second extension:
+SPIRV-Tools requires the ``RayTracingMotionBlurNV`` capability for
+``OpHitObjectGetCurrentTimeEXT`` ("``OpHitObjectGetCurrentTimeEXT``: requires
+``RayTracingMotionBlurNV`` capability"), so the compiler also requests
+``-fspv-extension=SPV_NV_ray_tracing_motion_blur`` and emits that capability plus its
+extension string. Both capabilities and both extension strings come from the
+instruction through the ordinary extension registration path
+(``CapabilityVisitor``), not from ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]`` on the header declarations, so ``-fspv-extension`` can both
+select and refuse them; a module that only *declares* a hit object picks the
+capability up from the type.
+
+Where a hit object comes from, and what is still missing:
+
+* **Recorded here:** ``HitObjectRecordEmpty`` (an object that records no
+  intersection: ``IsEmpty()`` is true) and ``HitObjectRecordMiss`` (an object that
+  records the miss of the ray it is given: ``IsMiss()`` is true and the ray accessors
+  are defined). Both need nothing but ordinary HLSL values.
+* **Not exposed: tracing into an object.** ``OpHitObjectTraceRayEXT`` (5316) and the
+  three ``*ReorderExecute*`` instructions (5310-5312) trace the ray themselves and
+  need a payload variable in storage class ``RayPayloadKHR``
+  (``ValidateHitObjectInstructionCommonParameters``: "payload must be a ``OpVariable``
+  of storage class ``RayPayloadKHR`` or ``IncomingRayPayloadKHR``"). The only
+  instruction that creates such a variable today is the HLSL ``TraceRay`` intrinsic,
+  which builds it from its own ``inout`` payload argument; a
+  ``[[vk::ext_instruction]]`` declaration would pass an ordinary ``Function``
+  variable and produce an invalid module.
+* **Not exposed: recording from a ray query.** ``OpHitObjectRecordFromQueryEXT``
+  (5304) turns a ``RayQuery`` into a hit object and needs an operand of storage class
+  ``HitObjectAttributeEXT`` (5411) for the hit attributes. HLSL has no syntax for a
+  variable in that storage class, so the instruction cannot be declared honestly yet.
+* **Consequence:** a *hit* (as opposed to miss or empty) hit object cannot be
+  produced today. The type, the reorder entry points and the accessors are complete
+  and do not change when one of the two missing pieces lands; the header documents
+  the gap, and ``HitObjectIsHit`` is simply always false for the objects this front
+  end can build.
+* **Not exposed: the arrays and the motion-blur set.**
+  ``OpHitObjectGetIntersectionTriangleVertexPositionsEXT`` (5307) returns a
+  three-element array of ``float3`` and additionally needs the
+  ``RayTracingPositionFetchKHR`` capability, and the motion-blur variants
+  (``OpHitObjectRecordMissMotionEXT`` 5306, ``OpHitObjectTraceRayMotionEXT`` 5317,
+  ``OpHitObjectTraceMotionReorderExecuteEXT`` 5312) record a ray time as well.
+* **Not here: ``OpHitObjectGetClusterIdNV`` (5346).** It is the hit object half of
+  ``VK_NV_cluster_acceleration_structure``, and the vendored validator requires its
+  hit object operand to be a pointer to ``OpTypeHitObjectNV`` (5281), the type of
+  ``SPV_NV_shader_invocation_reorder`` - it rejects the ``EXT`` type this extension
+  declares ("Type must be ``OpTypeHitObjectNV``"). Reading a cluster ID from an
+  ``EXT`` hit object would therefore be an invalid module; the NV hit object type and
+  its instruction set are a separate landing.
+
+**An uninitialised hit object is diagnosed.** A local hit object that nothing has
+written to holds no defined value, and the instructions that read it are valid SPIR-V
+either way, so the validator cannot help. The emitter tracks, per function, which local
+objects acquire a value, and refuses a read of one that has none. Acquiring a value
+means any of: a recording instruction, an assignment from another object, a declaration
+with an initializer, or passing the object to a user-defined function (whose parameter
+receives the pointer, so it can record into the caller's object - and only an ``inout``
+parameter does; a by-value ``HitObject`` parameter receives a copy). The tracking is
+flow-insensitive, and only local variables of the function being translated are covered:
+an object that arrives through a parameter or through a struct member is not diagnosed.
+
+Limitations:
+* The values of an accessor are only defined for the kind of object it is applied to:
+  the ray accessors for a recorded ray, the intersection accessors only for an object
+  that recorded an intersection, and the transforms and the shader binding table record
+  accessors likewise. The compiler cannot tell which kind an object holds at run time,
+  so deciding that is the shader's job (``HitObjectIsEmpty``, ``HitObjectIsHit``,
+  ``HitObjectIsMiss``).
+* The hint and its bits carry no semantics the compiler can check: SPIRV-Tools only
+  requires two 32-bit integer operands. Whether a hint is worth passing, and which
+  bits of it an implementation honours, is implementation-defined.
+* A ray tracing pipeline is required: the three execution models above are part of
+  ``VK_KHR_ray_tracing_pipeline``, and ``-fspv-extension`` is an allow-list, so a
+  shader that passes it has to keep naming ``SPV_KHR_ray_tracing`` as well
+  (``-fspv-extension=SPV_KHR_ray_tracing
+  -fspv-extension=SPV_EXT_shader_invocation_reorder``). Naming only the reorder
+  extension is not an error at the extension level, but the ``RayGenerationKHR`` entry
+  point then stops being permitted and the module fails to validate.
+* The host must enable ``VK_EXT_ray_tracing_invocation_reorder`` and its
+  ``rayTracingInvocationReorder`` feature bit
+  (``VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT``), and for
+  ``HitObjectGetCurrentTime`` also ``VK_NV_ray_tracing_motion_blur`` and its
+  ``rayTracingMotionBlur`` feature bit. The compiler cannot check either. There is no
+  pipeline or host call that turns reordering on or off per shader: the reorder is a
+  shader-side request, and the reorder mode the extension reports in its own properties
+  struct decides whether an implementation does anything with it.
+
+See ``examples/spirv-extensions/ext-invocation-reorder.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/ext.invocation-reorder*.hlsl`` for the tests
+that pin the capability and both extension strings, the opaque type, the recording
+instruction, every accessor with its result type and operand order, both reorder forms,
+the unchanged off path, the survival of the whole family through spirv-opt, and the four
+diagnostics (missing extension, missing motion-blur extension, wrong execution model,
+uninitialised object).
 
 Dynamic image offsets and signed remainder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3087,6 +3333,7 @@ Supported extensions
 * SPV_KHR_ray_query
 * SPV_KHR_opacity_micromap
 * SPV_EXT_shader_image_int64
+* SPV_EXT_shader_invocation_reorder
 * SPV_KHR_fragment_shader_barycentric
 * SPV_KHR_physical_storage_buffer
 * SPV_KHR_vulkan_memory_model
@@ -3095,6 +3342,7 @@ Supported extensions
 * SPV_KHR_maximal_reconvergence
 * SPV_KHR_float_controls
 * SPV_NV_shader_subgroup_partitioned
+* SPV_NV_ray_tracing_motion_blur
 * SPV_KHR_quad_control
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap

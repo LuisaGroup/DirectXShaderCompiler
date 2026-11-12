@@ -310,9 +310,33 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
   // operand. A bfloat16_t component additionally requires
   // BFloat16CooperativeMatrixKHR on top of CooperativeMatrixKHR (which the
   // header requests itself) and its dependency BFloat16TypeKHR.
-  else if (const auto *intrinsicType = dyn_cast<SpirvIntrinsicType>(type)) {
-    if (intrinsicType->getOpCode() ==
-        uint32_t(spv::Op::OpTypeCooperativeMatrixKHR)) {
+    else if (const auto *intrinsicType = dyn_cast<SpirvIntrinsicType>(type)) {
+      // HLSL Change Begin - SPV_EXT_shader_invocation_reorder.
+      // vk::ext::HitObject in <vk/ext/invocation_reorder.h> is lowered to a
+      // vk::SpirvOpaqueType with the OpTypeHitObjectEXT opcode (5313) and no
+      // operands, so this visitor sees a SpirvIntrinsicType with neither a
+      // component type nor a literal to look at. The *type* is what makes a
+      // module require ShaderInvocationReorderEXT (5388) and
+      // OpExtension "SPV_EXT_shader_invocation_reorder": declaring the variable
+      // a hit object lives in is already an opaque type a driver without
+      // VK_EXT_ray_tracing_invocation_reorder does not understand, whether or
+      // not an instruction ever mentions it. Emitting both here - and not
+      // through [[vk::ext_capability]] / [[vk::ext_extension]] on the header
+      // declarations - is what keeps -fspv-extension= an allow-list:
+      // addExtension() reports "SPIR-V extension
+      // 'SPV_EXT_shader_invocation_reorder' required for hit object types but
+      // not permitted to use" when the extension is not enabled, and the
+      // capability is then never emitted without the extension Vulkan requires
+      // of it (SPIRV-Tools: "Capability ShaderInvocationReorderEXT is not
+      // allowed by Vulkan 1.2 specification (or requires extension)").
+      if (intrinsicType->getOpCode() == uint32_t(spv::Op::OpTypeHitObjectEXT)) {
+        addExtension(Extension::EXT_shader_invocation_reorder,
+                     "hit object types", loc);
+        addCapability(spv::Capability::ShaderInvocationReorderEXT);
+      }
+      // HLSL Change End - SPV_EXT_shader_invocation_reorder.
+      if (intrinsicType->getOpCode() ==
+          uint32_t(spv::Op::OpTypeCooperativeMatrixKHR)) {
       const auto operands = intrinsicType->getOperands();
       if (!operands.empty() && operands.front().isTypeOperand) {
         const auto *componentType =
@@ -1207,7 +1231,158 @@ case spv::Op::OpDPdxCoarse:
                  loc);
     addCapability(spv::Capability::RayTracingLinearSweptSpheresGeometryNV, loc);
     break;
-  // HLSL Change End - SPV_NV_linear_swept_spheres.
+      // HLSL Change End - SPV_NV_linear_swept_spheres.
+    // HLSL Change Begin - SPV_EXT_shader_invocation_reorder.
+    // Every instruction of <vk/ext/invocation_reorder.h> declares the same
+    // capability, ShaderInvocationReorderEXT (5388), and the same extension,
+    // OpExtension "SPV_EXT_shader_invocation_reorder", so one list covers the
+    // whole family. Both are emitted here, from the instruction, rather than
+    // through [[vk::ext_capability]] / [[vk::ext_extension]] on the header
+    // declarations, so that -fspv-extension= stays an effective allow-list:
+    // addExtension() reports "SPIR-V extension
+    // 'SPV_EXT_shader_invocation_reorder' required for <op> but not permitted to
+    // use" when the extension is not enabled, and the capability is never
+    // emitted without the extension Vulkan requires of it.
+    // The type half of the family (OpTypeHitObjectEXT) is handled in
+    // addCapabilityForType, which is also where a module that only declares a hit
+    // object picks up the capability.
+    case spv::Op::OpHitObjectRecordEmptyEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectRecordEmptyEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectRecordMissEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectRecordMissEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetRayFlagsEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetRayFlagsEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetObjectRayOriginEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetObjectRayOriginEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetObjectRayDirectionEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetObjectRayDirectionEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetWorldRayOriginEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetWorldRayOriginEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetWorldRayDirectionEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetWorldRayDirectionEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetRayTMinEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetRayTMinEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetRayTMaxEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetRayTMaxEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetObjectToWorldEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetObjectToWorldEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetWorldToObjectEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetWorldToObjectEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetHitKindEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetHitKindEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetPrimitiveIndexEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetPrimitiveIndexEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetGeometryIndexEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetGeometryIndexEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetInstanceIdEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetInstanceIdEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetInstanceCustomIndexEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetInstanceCustomIndexEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetShaderBindingTableRecordIndexEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetShaderBindingTableRecordIndexEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetShaderRecordBufferHandleEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetShaderRecordBufferHandleEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectSetShaderBindingTableRecordIndexEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectSetShaderBindingTableRecordIndexEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectIsEmptyEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectIsEmptyEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectIsHitEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectIsHitEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectIsMissEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectIsMissEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpHitObjectGetCurrentTimeEXT:
+      // The one accessor of the family that needs a second extension: the
+      // current time of a hit object is only defined with motion blur, and
+      // SPIRV-Tools enforces it ("OpHitObjectGetCurrentTimeEXT: requires
+      // RayTracingMotionBlurNV capability"). Both extensions are requested, so
+      // the module never carries RayTracingMotionBlurNV without
+      // SPV_NV_ray_tracing_motion_blur ("Capability RayTracingMotionBlurNV is
+      // not allowed by Vulkan 1.2 specification (or requires extension)") and a
+      // shader that calls this accessor has to enable both.
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpHitObjectGetCurrentTimeEXT", loc);
+      addExtension(Extension::NV_ray_tracing_motion_blur,
+                   "OpHitObjectGetCurrentTimeEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      addCapability(spv::Capability::RayTracingMotionBlurNV, loc);
+      break;
+    case spv::Op::OpReorderThreadWithHintEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpReorderThreadWithHintEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    case spv::Op::OpReorderThreadWithHitObjectEXT:
+      addExtension(Extension::EXT_shader_invocation_reorder,
+                   "OpReorderThreadWithHitObjectEXT", loc);
+      addCapability(spv::Capability::ShaderInvocationReorderEXT, loc);
+      break;
+    // HLSL Change End - SPV_EXT_shader_invocation_reorder.
 
   // HLSL Change Begin - SPV_NV_cooperative_vector.
   // The six OpCooperativeVector*NV instructions in

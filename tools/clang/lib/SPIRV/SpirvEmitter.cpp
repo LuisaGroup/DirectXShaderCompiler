@@ -45,6 +45,12 @@ const char *getGitCommitHash() { return "<unknown-hash>"; }
 namespace clang {
 namespace spirv {
 
+// HLSL Change Begin - SPV_EXT_shader_invocation_reorder. Forward declarations;
+// the definitions and the reasoning are next to checkInvocationReorderExt().
+static bool isVkHitObjectType(QualType type);
+static const VarDecl *getReferencedVarDecl(const Expr *argExpr);
+// HLSL Change End - SPV_EXT_shader_invocation_reorder.
+
 using spvtools::opt::DescriptorSetAndBinding;
 
 namespace {
@@ -1754,6 +1760,11 @@ void SpirvEmitter::doFunctionDecl(const FunctionDecl *decl) {
   // and the continue stack.
   breakStack = std::stack<SpirvBasicBlock *>();
   continueStack = std::stack<SpirvBasicBlock *>();
+  // HLSL Change Begin - SPV_EXT_shader_invocation_reorder. Which hit objects of
+  // this function have been recorded into is a property of this function body;
+  // see checkInvocationReorderExt().
+  recordedHitObjects.clear();
+  // HLSL Change End - SPV_EXT_shader_invocation_reorder.
 
   // This will allow the entry-point name to be something like
   // myNamespace::myEntrypointFunc.
@@ -3650,6 +3661,17 @@ SpirvInstruction *SpirvEmitter::doBinaryOperator(const BinaryOperator *expr) {
     // Update counter variable associated with lhs of assignments
     tryToAssignCounterVar(expr->getLHS(), expr->getRHS());
 
+    // HLSL Change Begin - SPV_EXT_shader_invocation_reorder. Assigning one hit
+    // object to another gives the target a value (the module encodes the copy
+    // as OpLoad/OpStore of the opaque type), so it counts as recording into it
+    // for checkInvocationReorderExt(). Without this, a shader that copies an
+    // object and then reads the copy would be diagnosed as reading an
+    // uninitialised object.
+    if (const VarDecl *lhsVar = getReferencedVarDecl(expr->getLHS())) {
+      if (isVkHitObjectType(lhsVar->getType()))
+        recordedHitObjects.insert(lhsVar);
+    }
+    // HLSL Change End - SPV_EXT_shader_invocation_reorder.
     SpirvInstruction *heapResult = nullptr;
     SpirvInstruction *rhs = nullptr;
     if (tryHandleDescriptorHeapAssignment(expr, &heapResult, &rhs))
@@ -3694,6 +3716,22 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
 
   auto funcDecl = callExpr->getDirectCallee();
   if (funcDecl) {
+    // HLSL Change Begin - SPV_EXT_shader_invocation_reorder.
+    // A user-defined function can record into a hit object it is given (the object
+    // is passed by pointer in SPIR-V), so every hit object argument of a call that
+    // is not one of the [[vk::ext_instruction]] entry points - those are handled by
+    // checkInvocationReorderExt() - is conservatively treated as recorded
+    // afterwards. Without this, a shader that sets an object up in a helper
+    // function would be diagnosed as reading an uninitialised object.
+    if (!funcDecl->hasAttr<VKInstructionExtAttr>())
+      for (unsigned argIndex = 0; argIndex < callExpr->getNumArgs();
+           ++argIndex) {
+        const VarDecl *argVar = getReferencedVarDecl(callExpr->getArg(argIndex));
+        if (argVar && argVar->isLocalVarDecl() &&
+            isVkHitObjectType(argVar->getType().getNonReferenceType()))
+          recordedHitObjects.insert(argVar);
+      }
+    // HLSL Change End - SPV_EXT_shader_invocation_reorder.
     if (funcDecl->hasAttr<VKInstructionExtAttr>())
       return processSpvIntrinsicCallExpr(callExpr);
     else if (funcDecl->hasAttr<VKTypeDefExtAttr>())
@@ -18371,9 +18409,27 @@ SpirvInstruction *SpirvEmitter::invertYIfRequested(SpirvInstruction *position,
 }
 
 SpirvInstruction *
-SpirvEmitter::processSpvIntrinsicCallExpr(const CallExpr *expr) {
-  const auto *funcDecl = expr->getDirectCallee();
-  llvm::SmallVector<SpirvInstruction *, 8> spvArgs;
+  SpirvEmitter::processSpvIntrinsicCallExpr(const CallExpr *expr) {
+    const auto *funcDecl = expr->getDirectCallee();
+    // HLSL Change Begin - SPV_EXT_shader_invocation_reorder. The execution-model
+    // and the initialisation rules of the instructions declared in
+    // <vk/ext/invocation_reorder.h> depend on the entry point the call is
+    // reachable from, which is known here and nowhere else in the pipeline.
+    // checkInvocationReorderExt() ignores every other opcode, so this costs one
+    // attribute walk per [[vk::ext_instruction]] call.
+    {
+      uint32_t extOpcode = 0;
+      for (const auto *attr : funcDecl->getAttrs()) {
+        if (const auto *instAttr = dyn_cast<VKInstructionExtAttr>(attr)) {
+          extOpcode = instAttr->getOpcode();
+          break;
+        }
+      }
+      if (extOpcode && !checkInvocationReorderExt(extOpcode, expr))
+        return nullptr;
+    }
+    // HLSL Change End - SPV_EXT_shader_invocation_reorder.
+    llvm::SmallVector<SpirvInstruction *, 8> spvArgs;
   const auto args = expr->getArgs();
   for (uint32_t i = 0; i < expr->getNumArgs(); ++i) {
     const auto *param = funcDecl->getParamDecl(i);
@@ -18495,10 +18551,175 @@ spvArgs.push_back(argInst);
       }
   }
 
-  return createSpirvIntrInstExt(funcDecl->getAttrs(), funcDecl->getReturnType(),
-                                spvArgs,
-                                /*isInstr*/ true, expr->getExprLoc());
+    return createSpirvIntrInstExt(funcDecl->getAttrs(), funcDecl->getReturnType(),
+                                  spvArgs,
+                                  /*isInstr*/ true, expr->getExprLoc());
+  }
+
+// HLSL Change Begin - SPV_EXT_shader_invocation_reorder.
+// True if the given type is vk::ext::HitObject from
+// <vk/ext/invocation_reorder.h>, i.e. a vk::SpirvOpaqueType with the
+// OpTypeHitObjectEXT (5313) opcode. The template argument is the opcode, so
+// reading it back is what identifies the type; a user-defined class of the same
+// name cannot reach this test, because only the implicit vk::SpirvOpaqueType
+// template can carry it.
+static bool isVkHitObjectType(QualType type) {
+  const auto *recordType = type->getAs<RecordType>();
+  if (!recordType)
+    return false;
+  const auto *decl = recordType->getDecl();
+  const auto *nsDecl = dyn_cast<NamespaceDecl>(decl->getDeclContext());
+  if (!nsDecl || !nsDecl->getName().equals("vk") ||
+      !decl->getName().equals("SpirvOpaqueType"))
+    return false;
+  return hlsl::GetHLSLResourceTemplateUInt(type) ==
+         uint32_t(spv::Op::OpTypeHitObjectEXT);
 }
+
+// The variable an argument names, or nullptr if the argument is not a plain
+// reference to a variable. Used to find the hit object a call reads.
+static const VarDecl *getReferencedVarDecl(const Expr *argExpr) {
+  if (!argExpr)
+    return nullptr;
+  const auto *declRef = dyn_cast<DeclRefExpr>(argExpr->IgnoreParenLValueCasts());
+  return declRef ? dyn_cast<VarDecl>(declRef->getDecl()) : nullptr;
+}
+
+bool SpirvEmitter::checkInvocationReorderExt(uint32_t opcode,
+                                             const CallExpr *expr) {
+  // The execution model SPV_EXT_shader_invocation_reorder allows an instruction
+  // in. SPIRV-Tools enforces exactly this and nothing else
+  // (external/SPIRV-Tools/source/val/validate_ray_tracing_reorder.cpp): the
+  // reorder entry points register the "requires RayGenerationKHR execution
+  // model" limitation, and every OpHitObject*EXT instruction registers the
+  // "requires RayGenerationKHR, ClosestHitKHR and MissKHR execution models"
+  // one. Checking it here, while the call is lowered, is the only place the
+  // stage of the entry point the call is reachable from is known
+  // (spvContext.getCurrentShaderModelKind(), set once per entry point and
+  // inherited by every function the entry point calls). A module that gets this
+  // wrong is rejected by SPIRV-Tools, so a diagnostic is strictly better than a
+  // late "generated SPIR-V is invalid".
+  const auto kind = spvContext.getCurrentShaderModelKind();
+  const bool isRayTracingStage =
+      kind == hlsl::ShaderModel::Kind::RayGeneration ||
+      kind == hlsl::ShaderModel::Kind::ClosestHit ||
+      kind == hlsl::ShaderModel::Kind::Miss;
+
+  // The recording instructions are the ones that give a hit object a value;
+  // everything else in the family reads one. Both lists are the set of opcodes
+  // <vk/ext/invocation_reorder.h> declares, so an unrelated
+  // [[vk::ext_instruction(5318)]] call is the same instruction and behaves the
+  // same way.
+  bool recordsHitObject = false;
+  bool readsHitObject = false;
+  switch (static_cast<spv::Op>(opcode)) {
+  case spv::Op::OpReorderThreadWithHintEXT:
+  case spv::Op::OpReorderThreadWithHitObjectEXT:
+    if (kind != hlsl::ShaderModel::Kind::RayGeneration) {
+      emitError("ReorderThread can only be used in a ray generation shader: "
+                "OpReorderThreadWithHintEXT and OpReorderThreadWithHitObjectEXT "
+                "require the RayGenerationKHR execution model, and the current "
+                "entry point is a '%0' shader",
+                expr->getExprLoc())
+          << hlsl::ShaderModel::GetKindName(kind);
+      return false;
+    }
+    // The hit object overload reads its object; the hint overload has none.
+    readsHitObject = opcode == uint32_t(spv::Op::OpReorderThreadWithHitObjectEXT);
+    break;
+  case spv::Op::OpHitObjectRecordEmptyEXT:
+  case spv::Op::OpHitObjectRecordMissEXT:
+    recordsHitObject = true;
+    break;
+  case spv::Op::OpHitObjectGetRayFlagsEXT:
+  case spv::Op::OpHitObjectGetObjectRayOriginEXT:
+  case spv::Op::OpHitObjectGetObjectRayDirectionEXT:
+  case spv::Op::OpHitObjectGetWorldRayOriginEXT:
+  case spv::Op::OpHitObjectGetWorldRayDirectionEXT:
+  case spv::Op::OpHitObjectGetRayTMinEXT:
+  case spv::Op::OpHitObjectGetRayTMaxEXT:
+  case spv::Op::OpHitObjectGetObjectToWorldEXT:
+  case spv::Op::OpHitObjectGetWorldToObjectEXT:
+  case spv::Op::OpHitObjectGetHitKindEXT:
+  case spv::Op::OpHitObjectGetPrimitiveIndexEXT:
+  case spv::Op::OpHitObjectGetGeometryIndexEXT:
+  case spv::Op::OpHitObjectGetInstanceIdEXT:
+  case spv::Op::OpHitObjectGetInstanceCustomIndexEXT:
+  case spv::Op::OpHitObjectGetShaderBindingTableRecordIndexEXT:
+  case spv::Op::OpHitObjectGetShaderRecordBufferHandleEXT:
+  case spv::Op::OpHitObjectSetShaderBindingTableRecordIndexEXT:
+  case spv::Op::OpHitObjectIsEmptyEXT:
+  case spv::Op::OpHitObjectIsHitEXT:
+  case spv::Op::OpHitObjectIsMissEXT:
+  case spv::Op::OpHitObjectGetCurrentTimeEXT:
+    readsHitObject = true;
+    break;
+  default:
+    // Not an instruction of this extension.
+    return true;
+  }
+
+  if (!isRayTracingStage) {
+    emitError("hit object instructions can only be used in a ray generation, "
+              "closest hit or miss shader: the OpHitObject*EXT instructions of "
+              "SPV_EXT_shader_invocation_reorder require the RayGenerationKHR, "
+              "ClosestHitKHR or MissKHR execution model, and the current entry "
+              "point is a '%0' shader",
+              expr->getExprLoc())
+        << hlsl::ShaderModel::GetKindName(kind);
+    return false;
+  }
+
+  // Find the hit object the call passes by reference: the first parameter
+  // declared with that type. Every instruction of the family takes it as its
+  // first operand, and SPIRV-Tools requires that operand to be a pointer to
+  // OpTypeHitObjectEXT, i.e. the address of a variable.
+  const auto *funcDecl = expr->getDirectCallee();
+  if (!funcDecl)
+    return true;
+  const VarDecl *hitObjectVar = nullptr;
+  for (unsigned i = 0; i < funcDecl->getNumParams(); ++i) {
+    if (isVkHitObjectType(
+            funcDecl->getParamDecl(i)->getType().getNonReferenceType())) {
+      hitObjectVar = getReferencedVarDecl(expr->getArg(i));
+      break;
+    }
+  }
+  if (!hitObjectVar)
+    return true;
+
+  if (recordsHitObject) {
+    recordedHitObjects.insert(hitObjectVar);
+    return true;
+  }
+
+  // Reading an object no instruction has recorded into yields an undefined
+  // value. Only a local variable of the function being translated can be
+  // tracked: a parameter, or an object that arrives through a struct member,
+  // was recorded into somewhere this emitter cannot see, so it is not
+  // diagnosed. recordedHitObjects is filled per function by the three ways an
+  // object can acquire a value - a recording instruction (below), an assignment
+  // (doBinaryOperator) and a call that hands the object to a user-defined
+  // function (doCallExpr) - and a declaration with an initializer is a copy of
+  // another object and counts as well. The check is flow-insensitive: a write
+  // anywhere in the function is enough, which keeps a legitimate copy from being
+  // reported and only misses the object that is read before the write.
+  if (readsHitObject && hitObjectVar->isLocalVarDecl() &&
+      // A variable with an initializer was copied from another object, so it
+      // holds that object's value; only a bare declaration can be empty.
+      !hitObjectVar->hasInit() &&
+      recordedHitObjects.count(hitObjectVar) == 0) {
+    emitError("hit object '%0' is used before any instruction recorded it: a "
+              "vk::ext::HitObject holds no defined value until "
+              "vk::ext::HitObjectRecordEmpty or vk::ext::HitObjectRecordMiss "
+              "has been called on it",
+              expr->getExprLoc())
+        << hitObjectVar->getName();
+    return false;
+  }
+  return true;
+}
+// HLSL Change End - SPV_EXT_shader_invocation_reorder.
 
 uint32_t SpirvEmitter::getRawBufferAlignment(const Expr *expr) {
   llvm::APSInt value;

@@ -33,6 +33,7 @@
 #include "clang/SPIRV/FeatureManager.h"
 #include "clang/SPIRV/SpirvBuilder.h"
 #include "clang/SPIRV/SpirvContext.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
@@ -924,6 +925,24 @@ private:
   // HLSL Change End.
   /// Process spirv intrinsic instruction
   SpirvInstruction *processSpvIntrinsicCallExpr(const CallExpr *expr);
+
+  // HLSL Change Begin - SPV_EXT_shader_invocation_reorder.
+  /// Checks the restrictions SPV_EXT_shader_invocation_reorder places on the
+  /// OpHitObject*EXT and OpReorderThread*EXT instructions of
+  /// <vk/ext/invocation_reorder.h> that only the emitter can check, because
+  /// they depend on the entry point the call is reachable from:
+  /// * the execution model (OpReorderThread*EXT is RayGenerationKHR only, the
+  ///   accessors are RayGenerationKHR / ClosestHitKHR / MissKHR only), and
+  /// * that a hit object local to the current function has been recorded into
+  ///   before it is read.
+  /// Returns false and reports a diagnostic when the call must not be emitted.
+  bool checkInvocationReorderExt(uint32_t opcode, const CallExpr *expr);
+
+  /// \brief The hit object variables a recording instruction has written to so
+  /// far, for the function currently being translated. Reset at the start of
+  /// every function body; see checkInvocationReorderExt().
+  llvm::DenseSet<const VarDecl *> recordedHitObjects;
+  // HLSL Change End.
 
   /// Process spirv intrinsic type definition
   SpirvInstruction *processSpvIntrinsicTypeDef(const CallExpr *expr);
