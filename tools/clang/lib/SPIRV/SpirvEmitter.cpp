@@ -590,6 +590,39 @@ bool isVkSplitBarrierIntrinsic(const FunctionDecl *fd, bool *isArrive) {
   return false;
 }
 // HLSL Change End - SPV_EXT_split_barrier.
+
+// HLSL Change Begin - SPV_QCOM_tile_shading.
+// Returns true if the given function is one of the tile built-in accessors of
+// <vk/qcom/tile_shading.h> and sets *builtin to the SPIR-V built-in it reads.
+// They are declaration-only entry points dispatched here by name: the value
+// comes from an OpVariable in the Input storage class decorated with the
+// built-in, so the whole encoding is the spv::BuiltIn enumerant plus the
+// component count (TileOffsetQCOM and TileApronSizeQCOM are uint2,
+// TileDimensionQCOM is uint3).
+bool isVkQcomTileShadingBuiltin(const FunctionDecl *fd, spv::BuiltIn *builtin) {
+  const auto *nsDecl = dyn_cast<NamespaceDecl>(fd->getDeclContext());
+  if (!nsDecl || !nsDecl->getName().equals("qcom"))
+    return false;
+  const auto *parentNs =
+      dyn_cast_or_null<NamespaceDecl>(nsDecl->getDeclContext());
+  if (!parentNs || !parentNs->getName().equals("vk"))
+    return false;
+  if (fd->getName().equals("TileOffset")) {
+    *builtin = spv::BuiltIn::TileOffsetQCOM;
+    return true;
+  }
+  if (fd->getName().equals("TileDimension")) {
+    *builtin = spv::BuiltIn::TileDimensionQCOM;
+    return true;
+  }
+  if (fd->getName().equals("TileApronSize")) {
+    *builtin = spv::BuiltIn::TileApronSizeQCOM;
+    return true;
+  }
+  return false;
+}
+// HLSL Change End - SPV_QCOM_tile_shading.
+
 // HLSL Change Begin - SPV_KHR_abort.
 // Returns true if the given function is 'vk::Abort' from <vk/ext/abort.h>.
 // It is a declaration-only entry point dispatched here by name; it carries the
@@ -2591,8 +2624,12 @@ void SpirvEmitter::doVarDecl(const VarDecl *decl) {
     if (decl->hasAttrs()) {
       declIdMapper.decorateWithIntrinsicAttrs(decl, var);
       if (auto attr = decl->getAttr<VKStorageClassExtAttr>()) {
-        var->setStorageClass(
-            static_cast<spv::StorageClass>(attr->getStclass()));
+        const auto stclass = static_cast<spv::StorageClass>(attr->getStclass());
+        // HLSL Change Begin - SPV_QCOM_tile_shading.
+        if (stclass == spv::StorageClass::TileAttachmentQCOM)
+          checkTileAttachmentQCOM(decl, loc);
+        // HLSL Change End - SPV_QCOM_tile_shading.
+        var->setStorageClass(stclass);
       }
     }
   }
@@ -3786,6 +3823,13 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
       return processAbortKHR(callExpr);
     }
     // HLSL Change End - SPV_KHR_abort.
+    // HLSL Change Begin - SPV_QCOM_tile_shading.
+    // Handle 'vk::qcom::TileOffset()', 'TileDimension()' and 'TileApronSize()'.
+    spv::BuiltIn tileShadingBuiltin = spv::BuiltIn::Max;
+    if (isVkQcomTileShadingBuiltin(funcDecl, &tileShadingBuiltin)) {
+      return processTileShadingBuiltinQCOM(callExpr, tileShadingBuiltin);
+    }
+    // HLSL Change End - SPV_QCOM_tile_shading.
     // HLSL Change Begin - SPV_ARM_graph.
     // Handle 'vk::arm::GraphBegin()', 'GraphInput()', 'GraphSetOutput()' and
     // 'GraphEnd()'.
@@ -13797,6 +13841,175 @@ SpirvEmitter::processSplitBarrierEXT(const CallExpr *callExpr, bool isArrive) {
   return nullptr;
 }
 // HLSL Change End - SPV_EXT_split_barrier.
+
+// HLSL Change Begin - SPV_QCOM_tile_shading.
+bool SpirvEmitter::checkTileAttachmentQCOM(const VarDecl *decl,
+                                           SourceLocation loc) {
+  if (!checkTileShadingQCOM("the TileAttachmentQCOM storage class", loc))
+    return false;
+
+  // A tile attachment lives in tile memory, which is neither stage I/O nor
+  // workgroup shared memory: VK_QCOM_tile_shading describes it as an image
+  // attachment the driver keeps on chip for the duration of a tile.
+  // 'groupshared' asks for Workgroup storage, which the storage class attribute
+  // would silently replace, so the combination is refused instead of silently
+  // dropping one of the two.
+  if (decl->hasAttr<HLSLGroupSharedAttr>()) {
+    emitError("a tile attachment cannot be declared 'groupshared': the "
+              "TileAttachmentQCOM storage class is tile memory, not workgroup "
+              "shared memory",
+              loc);
+    return false;
+  }
+
+  // The extension narrows the variable to a 2D image (SPIRV-Tools: "Any
+  // OpTypeImage variable in the TileAttachmentQCOM Storage Class must have 2D
+  // as its dimension"). Texture2D and RWTexture2D are the two HLSL spellings
+  // whose SPIR-V type is a 2D image with MS = 0 and Sampled = 1 or 2; a
+  // 1D/3D/cube/array/multisampled texture, a buffer or a structured buffer has
+  // no tile attachment form.
+  const auto resourceKind = hlsl::GetHLSLResourceKind(decl->getType());
+  if (resourceKind != hlsl::DXIL::ResourceKind::Texture2D) {
+    emitError("a tile attachment must be a 2D image: declare it as "
+              "Texture2D<T> or RWTexture2D<T> with the TileAttachmentQCOM "
+              "storage class",
+              loc);
+    return false;
+  }
+  return true;
+}
+
+bool SpirvEmitter::checkTileShadingQCOM(llvm::StringRef what,
+                                        SourceLocation loc) {
+  if (!featureManager.isExtensionEnabled(Extension::QCOM_tile_shading)) {
+    emitError("%0 requires the SPV_QCOM_tile_shading extension; pass "
+              "-fspv-extension=SPV_QCOM_tile_shading to enable it",
+              loc)
+        << what;
+    return false;
+  }
+  // The TileShadingQCOM capability may only be enabled in a compute or fragment
+  // stage (SPIRV-Tools: "The TileShadingQCOM capability must not be enabled in
+  // any stage other than compute or fragment"). Library targets are accepted
+  // here because the stage of a plain helper function is not known while it is
+  // emitted; the validator rejects a linked module that enables the capability
+  // in a stage that cannot use it.
+  if (!spvContext.isCS() && !spvContext.isPS() && !spvContext.isLib()) {
+    emitError("%0 is only available in compute and fragment shaders", loc)
+        << what;
+    return false;
+  }
+  return true;
+}
+
+bool SpirvEmitter::checkTileShadingExecutionModeQCOM(
+    spv::ExecutionMode mode, llvm::ArrayRef<uint32_t> params,
+    SourceLocation loc) {
+  switch (mode) {
+  case spv::ExecutionMode::TileShadingRateQCOM: {
+    if (!checkTileShadingQCOM("TileShadingRateQCOM", loc))
+      return false;
+    // The tile shading rate is a property of a compute dispatch: the tile size
+    // plays the role the workgroup size plays elsewhere, and SPIRV-Tools rejects
+    // the mode in any stage but GLCompute ("The TileShadingRateQCOM execution
+    // mode must not be used in any stage other than compute").
+    if (!spvContext.isCS() && !spvContext.isLib()) {
+      emitError("the TileShadingRateQCOM execution mode is only available in "
+                "compute shaders",
+                loc);
+      return false;
+    }
+    if (params.size() != 3) {
+      emitError("the TileShadingRateQCOM execution mode requires three rate "
+                "operands (x, y and z)",
+                loc);
+      return false;
+    }
+    // "The TileShadingRateQCOM execution mode's x and y values must be powers of
+    // 2"; z is the number of samples per pixel (MSAA) and has no such rule.
+    for (unsigned i = 0; i < 2; ++i) {
+      if (params[i] == 0 || (params[i] & (params[i] - 1)) != 0) {
+        emitError("the TileShadingRateQCOM execution mode's x and y rates must "
+                  "be powers of 2",
+                  loc);
+        return false;
+      }
+    }
+    // "If the TileShadingRateQCOM execution mode is used, LocalSize and
+    // LocalSizeId must not be specified" (SPIRV-Tools
+    // VUID-StandaloneSpirv-TileShadingRateQCOM-10692). [numthreads] is mandatory
+    // for an HLSL compute entry point, so the LocalSize it produced is dropped
+    // here instead of asking the shader to omit the attribute; the tile size is
+    // what the dispatch is expressed in.
+    auto *module = spvBuilder.getModule();
+    module->removeExecutionMode(entryFunction, spv::ExecutionMode::LocalSize);
+    module->removeExecutionMode(entryFunction, spv::ExecutionMode::LocalSizeId);
+    return true;
+  }
+  case spv::ExecutionMode::NonCoherentTileAttachmentReadQCOM: {
+    if (!checkTileShadingQCOM("NonCoherentTileAttachmentReadQCOM", loc))
+      return false;
+    // The non-coherent read mode says that reads of the tile attachment ignore
+    // rasterization order, which only means anything for a fragment shader:
+    // SPIRV-Tools rejects the mode in any stage but Fragment ("The
+    // NonCoherentTileAttachmentQCOM execution mode must not be used in any stage
+    // other than fragment").
+    if (!spvContext.isPS() && !spvContext.isLib()) {
+      emitError("the NonCoherentTileAttachmentReadQCOM execution mode is only "
+                "available in fragment shaders",
+                loc);
+      return false;
+    }
+    if (!params.empty()) {
+      emitError("the NonCoherentTileAttachmentReadQCOM execution mode takes no "
+                "operands",
+                loc);
+      return false;
+    }
+    return true;
+  }
+  default:
+    return true;
+  }
+}
+
+SpirvInstruction *
+SpirvEmitter::processTileShadingBuiltinQCOM(const CallExpr *callExpr,
+                                            spv::BuiltIn builtin) {
+  const auto loc = callExpr->getExprLoc();
+  llvm::StringRef name;
+  uint32_t numComponents = 2;
+  switch (builtin) {
+  case spv::BuiltIn::TileOffsetQCOM:
+    name = "vk::qcom::TileOffset";
+    break;
+  case spv::BuiltIn::TileDimensionQCOM:
+    name = "vk::qcom::TileDimension";
+    numComponents = 3;
+    break;
+  case spv::BuiltIn::TileApronSizeQCOM:
+    name = "vk::qcom::TileApronSize";
+    break;
+  default:
+    llvm_unreachable("not a tile shading built-in");
+  }
+
+  if (!checkTileShadingQCOM(name, loc))
+    return nullptr;
+
+  // All three built-ins are 32-bit unsigned integer vectors in the Input storage
+  // class (SPIRV-Tools: "According to the Vulkan spec BuiltIn TileOffsetQCOM
+  // variable must be a 2-component 32-bit unsigned int vector"), so the type is
+  // derived here rather than read back from the declaration: the header only
+  // spells the return type the shader sees.
+  QualType vecType =
+      astContext.getExtVectorType(astContext.UnsignedIntTy, numComponents);
+  auto *var = declIdMapper.getBuiltinVar(builtin, vecType, loc);
+  needsLegalization = true;
+  return spvBuilder.createLoad(vecType, var, loc, callExpr->getSourceRange());
+}
+// HLSL Change End - SPV_QCOM_tile_shading.
+
 // HLSL Change Begin - SPV_KHR_abort.
 SpirvInstruction *SpirvEmitter::processAbortKHR(const CallExpr *callExpr) {
   const auto loc = callExpr->getExprLoc();
@@ -16481,6 +16694,15 @@ void SpirvEmitter::processInlineSpirvAttributes(const FunctionDecl *decl) {
 
   for (auto &attr : decl->getAttrs()) {
     if (auto *modeAttr = dyn_cast<VKSpvExecutionModeAttr>(attr)) {
+      // HLSL Change Begin - SPV_QCOM_tile_shading. [[vk::spvexecutionmode(N)]]
+      // cannot carry operands, so it can only name the operand-less of the two
+      // tile-shading modes; the rate mode needs three and is rejected here with
+      // the same diagnostic vk::ext_execution_mode(4490, ...) would produce.
+      if (!checkTileShadingExecutionModeQCOM(
+              spv::ExecutionMode(modeAttr->getExecutionMode()), {},
+              modeAttr->getLocation()))
+        continue;
+      // HLSL Change End - SPV_QCOM_tile_shading.
       spvBuilder.addExecutionMode(
           entryFunction, spv::ExecutionMode(modeAttr->getExecutionMode()), {},
           modeAttr->getLocation());
@@ -19613,6 +19835,18 @@ SpirvEmitter::processIntrinsicExecutionMode(const CallExpr *expr) {
   assert(entryFunction != nullptr);
   assert(exeMode != 0);
 
+  // HLSL Change Begin - SPV_QCOM_tile_shading.
+  // 'vk::ext_execution_mode' can name any execution mode, including the two that
+  // belong to SPV_QCOM_tile_shading. They are gated here so that using one of
+  // them without -fspv-extension=SPV_QCOM_tile_shading, in a stage that cannot
+  // use it, or with operands the extension does not allow, is a diagnostic
+  // instead of a module the validator refuses.
+  if (!checkTileShadingExecutionModeQCOM(
+          static_cast<spv::ExecutionMode>(exeMode), execModesParams,
+          expr->getExprLoc()))
+    return nullptr;
+  // HLSL Change End - SPV_QCOM_tile_shading.
+
   return spvBuilder.addExecutionMode(entryFunction,
                                      static_cast<spv::ExecutionMode>(exeMode),
                                      execModesParams, expr->getExprLoc());
@@ -19632,6 +19866,24 @@ SpirvEmitter::processIntrinsicExecutionModeId(const CallExpr *expr) {
               expr->getExprLoc());
     return nullptr;
   }
+
+  // HLSL Change Begin - SPV_QCOM_tile_shading.
+  // The two execution modes of SPV_QCOM_tile_shading are declared with literal
+  // operands (TileShadingRateQCOM) or with none
+  // (NonCoherentTileAttachmentReadQCOM), so OpExecutionModeId - which carries id
+  // operands - has no encoding for either of them.
+  if (exeMode == uint32_t(spv::ExecutionMode::TileShadingRateQCOM) ||
+      exeMode ==
+          uint32_t(spv::ExecutionMode::NonCoherentTileAttachmentReadQCOM)) {
+    emitError("%0 takes literal operands; declare it with vk::ext_execution_mode "
+              "instead of vk::ext_execution_mode_id",
+              expr->getExprLoc())
+        << (exeMode == uint32_t(spv::ExecutionMode::TileShadingRateQCOM)
+                ? "TileShadingRateQCOM"
+                : "NonCoherentTileAttachmentReadQCOM");
+    return nullptr;
+  }
+  // HLSL Change End - SPV_QCOM_tile_shading.
 
   llvm::SmallVector<SpirvInstruction *, 2> execModesParams;
   const auto args = expr->getArgs();
@@ -19772,6 +20024,12 @@ void SpirvEmitter::addDerivativeGroupExecutionMode() {
   SpirvExecutionMode *numThreadsEm =
       cast<SpirvExecutionMode>(spvBuilder.getModule()->findExecutionMode(
           entryFunction, spv::ExecutionMode::LocalSize));
+  // HLSL Change - SPV_QCOM_tile_shading. A compute entry point that declares
+  // TileShadingRateQCOM has no LocalSize execution mode (SPIRV-Tools
+  // VUID-StandaloneSpirv-TileShadingRateQCOM-10692 forbids both), so there is no
+  // thread-group shape to derive the quad layout from.
+  if (!numThreadsEm)
+    return;
   auto numThreads = numThreadsEm->getParams();
 
   // The layout of the quad is determined by the numer of threads in each

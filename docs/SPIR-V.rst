@@ -460,6 +460,129 @@ Limitations:
   more queues than ``maxShaderWaitQueues`` reports. The compiler cannot check
   either of these; an argument above the device limit is at best ignored.
 
+Tile shading
+~~~~~~~~~~~~
+The ``SPV_QCOM_tile_shading`` extension exposes *tile memory* to shaders. A
+tile-based GPU renders a framebuffer as a grid of rectangular tiles and keeps the
+attachments of the tile it is currently rendering in a fast on-chip memory; the
+extension lets a fragment or compute shader address that memory directly, so a
+fragment shader can read the render pass attachments at any location inside its
+tile instead of only at its own pixel, and a compute shader can read and write the
+tile's color attachments. It is gated by the Vulkan ``VK_QCOM_tile_shading`` device
+extension, whose ``VkPhysicalDeviceTileShadingFeaturesQCOM`` structure carries one
+feature bit per capability (``tileShading``, ``tileShadingFragmentStage``,
+``tileShadingComputeStage``, ``tileShadingColorAttachments``,
+``tileShadingDepthAttachments``, ``tileShadingStencilAttachments``,
+``tileShadingInputAttachments``, ``tileShadingSampledAttachments``,
+``tileShadingPerTileDraw``, ``tileShadingPerTileDispatch``,
+``tileShadingBufferStores``), and whose
+``VkPhysicalDeviceTileShadingPropertiesQCOM`` structure reports
+``maxTileShadingRate``, ``maxApronSize``, ``tileGranularity`` and
+``preferNonCoherent``.
+The surface lives in ``<vk/qcom/tile_shading.h>``. A *tile attachment* is an
+ordinary 2D image whose variable is declared in the ``TileAttachmentQCOM`` (4491)
+storage class; ``RWTexture2D<T>`` reads and writes it, ``Texture2D<T>`` only reads
+it, and ``vk::qcom::TileAttachment2D<T>`` names the read/write form:
+
+.. code:: hlsl
+
+  #include <vk/qcom/tile_shading.h>
+
+  [[vk::binding(0, 0)]]
+  [[vk::ext_storage_class(vk::qcom::StorageClassTileAttachmentQCOM)]]
+  vk::qcom::TileAttachment2D<float4> color;
+
+A read or write of it lowers to ``OpImageRead`` / ``OpImageWrite`` on that
+variable, exactly like an ``RWTexture2D``, and the module header grows the
+capability and the extension:
+
+.. code:: spirv
+
+  OpCapability TileShadingQCOM ; 4495
+  OpExtension "SPV_QCOM_tile_shading"
+  %t = OpTypeImage %float 2D 2 0 0 2 Rgba32f
+  %p = OpTypePointer TileAttachmentQCOM %t
+  %color = OpVariable %p TileAttachmentQCOM
+  OpDecorate %color DescriptorSet 0
+  OpDecorate %color Binding 0
+
+``[[vk::binding]]`` is not optional: the extension requires both
+``DescriptorSet`` and ``Binding`` on every ``TileAttachmentQCOM`` variable, and
+only a 2D image with ``MS = 0`` and ``Sampled`` of 1 or 2 is a valid pointee.
+CodeGen diagnoses the rest - ``groupshared`` on a tile attachment, a 1D/3D/cube/
+arrayed/multisampled texture, a buffer or a structured buffer - because the
+storage class has no other way to name a tile attachment.
+Three built-ins report the current tile. They are ``Input`` variables decorated
+with their ``BuiltIn`` (and ``Flat``, an integer fragment input), and the
+accessors in the header load them:
+
+.. code:: hlsl
+
+  uint2 tileOrigin = vk::qcom::TileOffset();     // BuiltIn TileOffsetQCOM, 4492
+  uint3 tileSize = vk::qcom::TileDimension();    // BuiltIn TileDimensionQCOM, 4493
+  uint2 apron = vk::qcom::TileApronSize();       // BuiltIn TileApronSizeQCOM, 4494
+
+``TileOffsetQCOM`` is the framebuffer coordinate of the top-left texel of the
+tile, ``TileDimensionQCOM`` the tile size in pixels (x, y) and the number of
+layers (z) - the same for edge tiles as for interior ones - and
+``TileApronSizeQCOM`` the width of the apron, the guard band of extra pixels a
+tile carries when the render pass enables tiling aprons.
+The two execution modes are declared by calling ``vk::ext_execution_mode`` from
+the entry point:
+
+.. code:: hlsl
+
+  // fragment: reads of the tile attachment may ignore rasterization order
+  // OpExecutionMode %main NonCoherentTileAttachmentReadQCOM
+  vk::ext_execution_mode(
+      vk::qcom::ExecutionModeNonCoherentTileAttachmentReadQCOM);
+
+  // compute: run per tile, one invocation per 2x4 pixels
+  // OpExecutionMode %main TileShadingRateQCOM 2 4 1
+  vk::ext_execution_mode(vk::qcom::ExecutionModeTileShadingRateQCOM, 2, 4, 1);
+
+``NonCoherentTileAttachmentReadQCOM`` (4489) gives up rasterization ordering for
+the attachment reads - a fragment that reads a pixel another fragment of the same
+tile writes may see the value from before or after that write - in exchange for
+letting the driver keep more of the tile in its own storage. It is fragment-only.
+``TileShadingRateQCOM`` (4490) makes a compute entry point run per tile at the
+given shading rate: the three literal operands are how many pixels one invocation
+covers in x, y and z, x and y must be powers of 2 (the extension requires it), and
+the rate replaces the workgroup size. ``[numthreads]`` is mandatory on an HLSL
+compute entry point but the ``LocalSize`` it produces must not reach the module -
+SPIR-V forbids the two together - so CodeGen drops it when the mode is declared.
+The extension is **not** enabled by default: a module that declares
+``TileShadingQCOM`` is rejected by a driver without ``VK_QCOM_tile_shading``, and
+the capability is only legal in a compute or fragment stage, so enabling it by
+default would turn a stage mistake into a module the validator refuses instead of
+a diagnostic on the source line. Without
+``-fspv-extension=SPV_QCOM_tile_shading`` the storage class, the three built-ins
+and both execution modes are compile errors, and a module that uses none of them
+is unchanged.
+Limitations:
+* **The stage is checked, the host is not.** A tile attachment or a tile built-in
+  outside a compute or fragment stage, and a shading rate outside compute (or a
+  non-coherent read outside fragment), are diagnosed. Everything the host has to
+  provide - the feature bits above, a rendering pass whose attachments are tile
+  shading attachments, ``vkCmdDispatchTileQCOM`` for a rate-declaring compute
+  shader, per-tile draws and dispatches bracketed with
+  ``vkCmdBeginPerTileExecutionQCOM`` / ``vkCmdEndPerTileExecutionQCOM``, aprons
+  declared through ``VkRenderPassTileShadingCreateInfoQCOM``, and an image
+  descriptor laid out with the tile shading image layouts - is invisible to the
+  compiler. A rate above ``maxTileShadingRate`` is a run-time failure, not a
+  compile-time one, and ``maxApronSize`` is likewise only known at run time.
+* **Which attachment a descriptor refers to is the host's choice.** The shader
+  declaration says "an attachment of the current tile", not "the color attachment
+  at index 0"; the same module can be bound to a color, depth, stencil, input or
+  sampled attachment of the render pass as long as the descriptor type and layout
+  agree.
+* **Coherence is the programmer's responsibility.** With
+  ``NonCoherentTileAttachmentReadQCOM`` the reads are unordered by definition, and
+  ordering between invocations of a tile otherwise needs the same barriers any
+  other cross-invocation access needs. DXC inserts none.
+* No CI driver implements the extension, so the tests assert the encoding and the
+  validator's rules only; there is no execution coverage.
+
 Long vectors
 ~~~~~~~~~~~~
 The ``SPV_EXT_long_vector`` extension lifts the 1..4 component limit on
@@ -3351,6 +3474,7 @@ Supported extensions
 * SPV_KHR_constant_data
 * SPV_QCOM_image_processing3
 * SPV_QCOM_multiple_wait_queues
+* SPV_QCOM_tile_shading
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product
 * SPV_ARM_cooperative_matrix_layouts

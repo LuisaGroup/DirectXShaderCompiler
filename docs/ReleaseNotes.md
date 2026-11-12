@@ -20,6 +20,47 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_QCOM_tile_shading` (`VK_QCOM_tile_shading`): tile
+  attachments, the tile built-ins and the two tile shading execution modes. A
+  tile-based GPU keeps the attachments of the tile it renders in an on-chip tile
+  memory; with this extension a fragment or compute shader can address that memory
+  directly, so a fragment shader reads the render pass attachments at any location
+  inside its tile instead of only at its own pixel, and a compute shader reads and
+  writes the tile's color attachments without a round trip through system memory.
+  A tile attachment is an ordinary 2D image whose variable is declared in the
+  `TileAttachmentQCOM` (4491) storage class:
+  `[[vk::ext_storage_class(vk::qcom::StorageClassTileAttachmentQCOM)]]` on a
+  `vk::qcom::TileAttachment2D<T>` (an `RWTexture2D<T>`; `Texture2D<T>` reads only),
+  which lowers to `OpTypePointer TileAttachmentQCOM` + `OpVariable ... ...
+  TileAttachmentQCOM` and still requires `[[vk::binding]]`, because the extension
+  requires `DescriptorSet` and `Binding` on the variable. The new
+  `<vk/qcom/tile_shading.h>` header also provides the three tile built-in accessors
+  `vk::qcom::TileOffset()` (`BuiltIn TileOffsetQCOM`, 4492, `uint2`),
+  `vk::qcom::TileDimension()` (`TileDimensionQCOM`, 4493, `uint3`) and
+  `vk::qcom::TileApronSize()` (`TileApronSizeQCOM`, 4494, `uint2`), plus the two
+  execution modes, declared with the existing `vk::ext_execution_mode`:
+  `NonCoherentTileAttachmentReadQCOM` (4489, fragment) and `TileShadingRateQCOM`
+  (4490, compute, three literal rate operands whose x and y must be powers of 2).
+  `[numthreads]` is mandatory on an HLSL compute entry point but the `LocalSize` it
+  produces is dropped when the rate mode is declared, because SPIR-V forbids the two
+  together - the rate replaces the workgroup size. `SPV_QCOM_tile_shading` is a
+  registered, opt-in `FeatureManager` extension: without
+  `-fspv-extension=SPV_QCOM_tile_shading` the storage class, the three built-ins and
+  both modes are compile errors instead of a module that declares
+  `TileShadingQCOM` (4495) for a host that never asked for it, and the capability is
+  emitted through the ordinary `CapabilityVisitor` path from what the module
+  contains - never through `[[vk::ext_capability]]`/`[[vk::ext_extension]]` - so
+  `-fspv-extension=` stays an allow-list. The stage restrictions the capability and
+  the modes have are diagnosed while the shader is lowered (a tile attachment or
+  tile built-in outside compute/fragment, a rate mode outside compute, a
+  non-coherent read outside fragment), as are a tile attachment declared
+  `groupshared`, a tile attachment whose image is not a plain 2D image, a rate that
+  is not a power of 2 and a rate mode without its three operands. Not provided, and
+  documented as such: nothing checks the host side - the
+  `VkPhysicalDeviceTileShadingFeaturesQCOM` bits, `maxTileShadingRate` /
+  `maxApronSize`, `vkCmdDispatchTileQCOM`, the per-tile execution commands, aprons
+  declared through `VkRenderPassTileShadingCreateInfoQCOM`, and which render pass
+  attachment a tile attachment descriptor refers to.
 - Added support for `SPV_EXT_shader_invocation_reorder`
   (`VK_EXT_ray_tracing_invocation_reorder`): hit objects and invocation
   reordering. A ray generation shader can now build the ray it wants to trace as a

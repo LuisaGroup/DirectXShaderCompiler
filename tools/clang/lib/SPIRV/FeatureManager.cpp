@@ -299,6 +299,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
   // HLSL Change - SPV_NV_ray_tracing_motion_blur.
   .Case("SPV_NV_ray_tracing_motion_blur",
         Extension::NV_ray_tracing_motion_blur)
+  // HLSL Change - SPV_QCOM_tile_shading.
+  .Case("SPV_QCOM_tile_shading", Extension::QCOM_tile_shading)
   .Default(Extension::Unknown);
   }
 
@@ -461,6 +463,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
             // HLSL Change - SPV_NV_ray_tracing_motion_blur.
             case Extension::NV_ray_tracing_motion_blur:
               return "SPV_NV_ray_tracing_motion_blur";
+            // HLSL Change - SPV_QCOM_tile_shading.
+            case Extension::QCOM_tile_shading:
+              return "SPV_QCOM_tile_shading";
         default:
     break;
   }
@@ -521,6 +526,11 @@ bool FeatureManager::isExtensionRequiredForTargetEnv(Extension ext) const {
       break;
     }
   }
+
+  // HLSL Change - SPV_QCOM_tile_shading deliberately keeps the default (true)
+  // above: it is not incorporated into Vulkan 1.1/1.3 or SPIR-V 1.5, so
+  // OpExtension "SPV_QCOM_tile_shading" is emitted for every target environment
+  // DXC knows about.
 
   return required;
 }
@@ -876,6 +886,24 @@ bool FeatureManager::enabledByDefault(Extension ext) {
           // a compile error instead of a module with an extension the host never
           // asked for, and no other accessor is affected.
           case Extension::NV_ray_tracing_motion_blur:
+            return false;
+          // HLSL Change - SPV_QCOM_tile_shading. Tile shading is a different
+          // rendering model, not a new spelling of an existing construct: a
+          // shader declares a tile attachment in the TileAttachmentQCOM storage
+          // class, asks for tile-shading execution modes and reads the tile
+          // built-ins, and the resulting module carries the TileShadingQCOM
+          // capability (4495) and OpExtension "SPV_QCOM_tile_shading", which a
+          // driver without VK_QCOM_tile_shading rejects. The capability is also
+          // only legal in a compute or fragment stage (SPIRV-Tools: "The
+          // TileShadingQCOM capability must not be enabled in any stage other
+          // than compute or fragment"), so enabling it by default would turn a
+          // stage mistake into a module the validator refuses instead of a
+          // source diagnostic. Registration is therefore opt-in: without
+          // -fspv-extension=SPV_QCOM_tile_shading the surface in
+          // <vk/qcom/tile_shading.h> and [[vk::ext_storage_class(4491)]] are
+          // rejected with a diagnostic, and no module ever declares the
+          // capability by accident.
+          case Extension::QCOM_tile_shading:
             return false;
       return true;
     }

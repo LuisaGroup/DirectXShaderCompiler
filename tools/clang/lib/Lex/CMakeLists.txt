@@ -64,6 +64,7 @@ vk/arm/tosa.h
  vk/nv/linear_swept_spheres.h
  vk/opcode_selector.h
  vk/qcom/image_processing3.h
+ vk/qcom/tile_shading.h
  vk/spirv.h
  )
 endif()

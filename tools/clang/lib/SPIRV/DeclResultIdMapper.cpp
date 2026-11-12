@@ -4399,6 +4399,12 @@ SpirvVariable *DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn,
   case spv::BuiltIn::ShaderIndexAMDX:
   case spv::BuiltIn::SubgroupId:
   case spv::BuiltIn::NumSubgroups:
+  // HLSL Change - SPV_QCOM_tile_shading. The three tile built-ins are inputs:
+  // where the tile the current fragment or compute invocation belongs to starts,
+  // how large it is, and how wide the apron around it is.
+  case spv::BuiltIn::TileOffsetQCOM:
+  case spv::BuiltIn::TileDimensionQCOM:
+  case spv::BuiltIn::TileApronSizeQCOM:
     sc = spv::StorageClass::Input;
     break;
   case spv::BuiltIn::TaskCountNV:

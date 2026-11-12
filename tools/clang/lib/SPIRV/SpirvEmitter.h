@@ -584,6 +584,40 @@ private:
     /// SPV_EXT_split_barrier).
     SpirvInstruction *processSplitBarrierEXT(const CallExpr *, bool isArrive);
 
+    // HLSL Change Begin - SPV_QCOM_tile_shading.
+    /// Checks that tile shading may be used at the given location: the
+    /// SPV_QCOM_tile_shading extension has to be enabled with
+    /// -fspv-extension=SPV_QCOM_tile_shading, and the TileShadingQCOM
+    /// capability is only legal in a compute or fragment stage. Emits the
+    /// diagnostic and returns false otherwise.
+    bool checkTileShadingQCOM(llvm::StringRef what, SourceLocation loc);
+
+    /// Checks a tile attachment declaration: the storage class is only available
+    /// when the extension is enabled and the stage is compute or fragment, a
+    /// tile attachment cannot be 'groupshared', and the underlying image has to
+    /// be a 2D, non-multisampled image. Emits the diagnostic and returns false
+    /// otherwise.
+    bool checkTileAttachmentQCOM(const VarDecl *decl, SourceLocation loc);
+
+    /// Checks one of the two execution modes defined by SPV_QCOM_tile_shading
+    /// before it is added to the entry point: the extension and the stage are
+    /// checked, TileShadingRateQCOM is restricted to three operands with
+    /// power-of-two x and y rates and to a compute entry point without
+    /// LocalSize/LocalSizeId, and NonCoherentTileAttachmentReadQCOM to a
+    /// fragment entry point without operands. Emits the diagnostic and returns
+    /// false otherwise.
+    bool checkTileShadingExecutionModeQCOM(spv::ExecutionMode mode,
+                                           llvm::ArrayRef<uint32_t> params,
+                                           SourceLocation loc);
+
+    /// Processes the 'vk::qcom::TileOffset', 'vk::qcom::TileDimension' and
+    /// 'vk::qcom::TileApronSize' functions from <vk/qcom/tile_shading.h>. Each
+    /// reads the corresponding Input built-in, whose type is derived from the
+    /// built-in rather than from the declaration.
+    SpirvInstruction *processTileShadingBuiltinQCOM(const CallExpr *,
+                                                    spv::BuiltIn builtin);
+    // HLSL Change End - SPV_QCOM_tile_shading.
+
     // HLSL Change Begin - SPV_KHR_abort.
     /// Processes the 'vk::Abort' function from <vk/ext/abort.h>, which lowers to
     /// the terminator OpAbortKHR.

@@ -179,6 +179,13 @@ enum class Extension {
       // <vk/ext/invocation_reorder.h> that needs it declares both extensions.
       // Opt-in; see enabledByDefault() in FeatureManager.cpp.
       NV_ray_tracing_motion_blur,
+      // HLSL Change - SPV_QCOM_tile_shading. Tile-resident attachments (the
+      // TileAttachmentQCOM storage class), the TileOffsetQCOM /
+      // TileDimensionQCOM / TileApronSizeQCOM built-ins and the
+      // TileShadingRateQCOM / NonCoherentTileAttachmentReadQCOM execution
+      // modes, i.e. the API of <vk/qcom/tile_shading.h>. Opt-in; see
+      // enabledByDefault() in FeatureManager.cpp.
+      QCOM_tile_shading,
       Unknown,
 };
 

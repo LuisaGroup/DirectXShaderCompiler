@@ -140,6 +140,13 @@ public:
 
   // Adds an execution mode to the module.
   void addExecutionMode(SpirvExecutionModeBase *em);
+  // HLSL Change - SPV_QCOM_tile_shading. Removes the execution mode with the
+  // given value from the entry point, if it is present, and returns true in
+  // that case. Used for execution modes that exclude one another: SPIRV-Tools
+  // rejects a compute entry point that declares both TileShadingRateQCOM and
+  // LocalSize/LocalSizeId, and the execution mode reaches CodeGen after the
+  // [numthreads] attribute has already produced LocalSize.
+  bool removeExecutionMode(SpirvFunction *entryPoint, spv::ExecutionMode em);
 
   // Adds an extension to the module. Returns true if the extension was added.
   // Returns false otherwise (e.g. if the extension already existed).

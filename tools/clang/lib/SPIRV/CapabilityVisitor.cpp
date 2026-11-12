@@ -878,6 +878,22 @@ bool CapabilityVisitor::visit(SpirvDecoration *decor) {
       addCapability(spv::Capability::FragmentShadingRateKHR);
       break;
     }
+    // HLSL Change Begin - SPV_QCOM_tile_shading. The three tile built-ins are
+    // defined by SPV_QCOM_tile_shading and require the TileShadingQCOM
+    // capability (4495) plus OpExtension "SPV_QCOM_tile_shading". The emitter
+    // also rejects the accessors in <vk/qcom/tile_shading.h> unless
+    // -fspv-extension=SPV_QCOM_tile_shading was given (see
+    // SpirvEmitter::processTileShadingBuiltinQCOM), so reaching this point
+    // means both are wanted. They are grouped because the three built-ins
+    // always carry the same capability.
+    case spv::BuiltIn::TileOffsetQCOM:
+    case spv::BuiltIn::TileDimensionQCOM:
+    case spv::BuiltIn::TileApronSizeQCOM: {
+      addExtensionAndCapabilitiesIfEnabled(
+          Extension::QCOM_tile_shading, {spv::Capability::TileShadingQCOM});
+      break;
+    }
+    // HLSL Change End - SPV_QCOM_tile_shading.
     default:
       break;
     }
@@ -1145,6 +1161,17 @@ case spv::Op::OpDPdxCoarse:
       addCapability(spv::Capability::ShaderEnqueueAMDX, loc);
       addExtension(Extension::AMD_shader_enqueue, "Vulkan 1.3", loc);
     }
+    // HLSL Change Begin - SPV_QCOM_tile_shading. A variable in the
+    // TileAttachmentQCOM storage class requires the TileShadingQCOM
+    // capability (SPIRV-Tools: "the TileAttachmentQCOM storage class variable
+    // requires TileShadingQCOM capability enabled"). The storage class is what
+    // makes a tile attachment a tile attachment, so it - and not an opcode -
+    // is the thing to infer the capability from.
+    if (storage == spv::StorageClass::TileAttachmentQCOM) {
+      addExtensionAndCapabilitiesIfEnabled(
+          Extension::QCOM_tile_shading, {spv::Capability::TileShadingQCOM});
+    }
+    // HLSL Change End - SPV_QCOM_tile_shading.
     if (spvOptions.enableReflect && !var->getHlslUserType().empty()) {
       addExtension(Extension::GOOGLE_user_type, "HLSL User Type", loc);
       addExtension(Extension::GOOGLE_hlsl_functionality1, "HLSL User Type",
@@ -1834,6 +1861,20 @@ bool CapabilityVisitor::visit(SpirvExecutionModeBase *execMode) {
                       : spv::Capability::DenormFlushToZero,
                   execModeSourceLocation);
     break;
+    // HLSL Change Begin - SPV_QCOM_tile_shading. Both tile-shading execution
+    // modes require the TileShadingQCOM capability (4495) and
+    // OpExtension "SPV_QCOM_tile_shading". They are independent - the rate mode
+    // is compute-only and the non-coherent read mode is fragment-only - so
+    // either one alone has to declare them. SpirvEmitter::
+    // checkTileShadingExecutionModeQCOM also rejects them unless
+    // -fspv-extension=SPV_QCOM_tile_shading was given and the entry point is in
+    // a stage the capability is legal in.
+    case spv::ExecutionMode::TileShadingRateQCOM:
+    case spv::ExecutionMode::NonCoherentTileAttachmentReadQCOM:
+      addExtensionAndCapabilitiesIfEnabled(
+          Extension::QCOM_tile_shading, {spv::Capability::TileShadingQCOM});
+      break;
+    // HLSL Change End - SPV_QCOM_tile_shading.
   default:
     break;
   }

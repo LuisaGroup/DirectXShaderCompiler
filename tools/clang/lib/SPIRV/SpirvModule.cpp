@@ -355,6 +355,23 @@ void SpirvModule::addExecutionMode(SpirvExecutionModeBase *em) {
   executionModes.push_back(em);
 }
 
+// HLSL Change Begin - SPV_QCOM_tile_shading.
+bool SpirvModule::removeExecutionMode(SpirvFunction *entryPoint,
+                                      spv::ExecutionMode em) {
+  for (auto iter = executionModes.begin(); iter != executionModes.end();
+       ++iter) {
+    SpirvExecutionModeBase *cem = *iter;
+    if (cem->getEntryPoint() != entryPoint || cem->getExecutionMode() != em)
+      continue;
+    // The instruction lives in the SpirvContext arena, which is released as a
+    // whole, so it is dropped from the module without being destroyed.
+    executionModes.erase(iter);
+    return true;
+  }
+  return false;
+}
+// HLSL Change End - SPV_QCOM_tile_shading.
+
 bool SpirvModule::addExtension(SpirvExtension *ext) {
   assert(ext && "cannot add null extension");
   return extensions.insert(ext);
