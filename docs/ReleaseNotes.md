@@ -171,6 +171,21 @@ The included licenses apply to the following files:
     compiler cannot check. `docs/SPIR-V.rst` now documents the extension,
     including the conversion model (implicit widening to `float` only, no
     `bfloat16_t`/`float16_t` mixing) and the stage I/O restriction.
+- Added support for `SPV_VALVE_mixed_float_dot_product`: with
+  `-fspv-extension=SPV_VALVE_mixed_float_dot_product`, HLSL's
+  `float dot2add(half2 a, half2 b, float acc)` is emitted as the fused
+  `OpFDot2MixAcc32VALVE` (6916) with `OpCapability
+  DotProductFloat16AccFloat32VALVE` (6912) instead of the unfused
+  `OpFMul`/`OpFConvert`/`OpFAdd` sequence. The result is the same dot product
+  rounded once rather than several times, which is a numeric change for existing
+  shaders, and the extension is therefore opt-in: VALVE extensions are
+  vendor-specific, and a module that declares the capability is only accepted by
+  drivers exposing `VK_VALVE_shader_mixed_float_dot_product`. Without the flag
+  code generation is unchanged. Only the FP16-input/FP32-accumulator form is
+  emitted: `OpFDot2MixAcc16VALVE` has no HLSL call site (`dot2add` always
+  accumulates in `float`), the bfloat16 form needs a `bfloat16_t2` overload of
+  `dot2add` that does not exist, and the FP8 form needs the `SPV_EXT_float8` type
+  system, which this backend does not implement yet.
 
 
 Place release notes for the upcoming release below this line and remove this

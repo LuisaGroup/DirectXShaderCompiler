@@ -15238,6 +15238,35 @@ SpirvInstruction *SpirvEmitter::processIntrinsicDP2a(const CallExpr *callExpr) {
   SpirvInstruction *arg1Instr = doExpr(arg1);
   SpirvInstruction *arg2Instr = doExpr(arg2);
 
+  // HLSL Change Begin - SPV_VALVE_mixed_float_dot_product.
+  // OpFDot2MixAcc32VALVE is the fused form of exactly this shape: a
+  // 2-component dot product of IEEE-754 FP16 vectors accumulated into an FP32
+  // scalar. It is emitted only when the user asked for the extension, because
+  // the instruction declares the vendor-specific
+  // DotProductFloat16AccFloat32VALVE capability. The capability and the
+  // extension travel with the instruction (same pattern as OpSDot for
+  // SPV_KHR_integer_dot_product) so they are emitted exactly when it is used.
+  //
+  // Only the (FP16 input, FP32 accumulator) shape is fused. HLSL has a single
+  // `dot2add` overload -- float dot2add(float16_t<2>, ..., float) -- so there
+  // is no `half`-accumulator call site that could use OpFDot2MixAcc16VALVE
+  // (6917), and `float16_t` is only a 16-bit float in SPIR-V when
+  // -enable-16bit-types is given (otherwise it is an alias for `float`). Both
+  // conditions are checked here; everything else keeps the unfused lowering.
+  if (featureManager.isExtensionEnabled(
+          Extension::VALVE_mixed_float_dot_product) &&
+      componentType->isHalfType() &&
+      arg2->getType()->isSpecificBuiltinType(BuiltinType::Float)) {
+    SpirvInstruction *operands[]{arg0Instr, arg1Instr, arg2Instr};
+    uint32_t capabilities[]{
+        uint32_t(spv::Capability::DotProductFloat16AccFloat32VALVE)};
+    llvm::StringRef extensions[]{"SPV_VALVE_mixed_float_dot_product"};
+    return spvBuilder.createSpirvIntrInstExt(
+        uint32_t(spv::Op::OpFDot2MixAcc32VALVE), arg2->getType(), operands,
+        extensions, /*instSet=*/"", capabilities, loc);
+  }
+  // HLSL Change End - SPV_VALVE_mixed_float_dot_product.
+
   // Multiply the two half2 vectors and convert the result to float2.
   SpirvInstruction *mulInstr = spvBuilder.createBinaryOp(
       spv::Op::OpFMul, vecType, arg0Instr, arg1Instr, loc, range);

@@ -250,6 +250,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
                 Extension::QCOM_multiple_wait_queues)
         // HLSL Change - SPV_NV_push_constant_bank.
         .Case("SPV_NV_push_constant_bank", Extension::NV_push_constant_bank)
+        // HLSL Change - SPV_VALVE_mixed_float_dot_product.
+        .Case("SPV_VALVE_mixed_float_dot_product",
+              Extension::VALVE_mixed_float_dot_product)
         .Default(Extension::Unknown);
 }
 
@@ -355,6 +358,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_NV_push_constant_bank.
     case Extension::NV_push_constant_bank:
       return "SPV_NV_push_constant_bank";
+    // HLSL Change - SPV_VALVE_mixed_float_dot_product.
+    case Extension::VALVE_mixed_float_dot_product:
+      return "SPV_VALVE_mixed_float_dot_product";
     default:
     break;
   }
@@ -520,6 +526,17 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // rejected with a diagnostic instead of silently dropped, and the
     // capability is only ever emitted together with the extension.
     case Extension::NV_push_constant_bank:
+      return false;
+    // HLSL Change - SPV_VALVE_mixed_float_dot_product. Enabling it changes the
+    // code generation for the HLSL dot2add intrinsic (the unfused
+    // OpFMul/OpFConvert/OpFAdd sequence becomes OpFDot2MixAcc32VALVE), and a
+    // module using that instruction declares the
+    // DotProductFloat16AccFloat32VALVE capability, which only drivers exposing
+    // the vendor-specific VK_VALVE_shader_mixed_float_dot_product device
+    // extension accept. Enabling it is therefore opt-in: without
+    // -fspv-extension=SPV_VALVE_mixed_float_dot_product the pre-existing
+    // lowering is kept byte for byte.
+    case Extension::VALVE_mixed_float_dot_product:
       return false;
     default:
     return true;

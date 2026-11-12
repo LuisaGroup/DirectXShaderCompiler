@@ -638,6 +638,20 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
                                          {spv::Capability::FMAKHR});
     break;
   // HLSL Change End - SPV_KHR_fma.
+  // HLSL Change Begin - SPV_VALVE_mixed_float_dot_product. The instruction
+  // already carries its capability and extension (see
+  // SpirvEmitter::processIntrinsicDP2a); stating them here keeps the
+  // requirement visible and ties them to the enabled flag. The capability is
+  // per (input precision, accumulator precision) pair: 6912 for FP16 inputs
+  // with an FP32 accumulator, which is the only shape HLSL's `dot2add`
+  // expresses. A future bfloat16 form would use
+  // DotProductBFloat16AccVALVE (6914) and must not report 6912.
+  case spv::Op::OpFDot2MixAcc32VALVE:
+    addExtensionAndCapabilitiesIfEnabled(
+        Extension::VALVE_mixed_float_dot_product,
+        {spv::Capability::DotProductFloat16AccFloat32VALVE});
+    break;
+  // HLSL Change End - SPV_VALVE_mixed_float_dot_product.
   case spv::Op::OpGroupNonUniformElect:
     addCapability(spv::Capability::GroupNonUniform);
     break;

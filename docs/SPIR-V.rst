@@ -549,6 +549,68 @@ Limitations:
   ``MemberOffsetNV`` has to respect the alignment of the block's first member;
   DXC does not round it and does not diagnose a misaligned base offset.
 
+Mixed-float dot product
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_VALVE_mixed_float_dot_product`` extension adds core instructions that
+multiply corresponding elements of two short vectors of 16-bit floats and add the
+sum into a wider accumulator with a single rounding. HLSL's ``dot2add`` has exactly
+that shape:
+
+.. code:: hlsl
+
+  // float dot2add( half2 a, half2 b, float acc );
+  //   a.x * b.x + a.y * b.y + acc
+
+Without the extension, SPIR-V CodeGen has to rebuild the operation from scalar
+instructions: the products are rounded to 16-bit float by ``OpFMul``, widened with
+``OpFConvert``, and the lanes and the accumulator are added with ``OpFAdd``, so the
+result is rounded several times and is not the same number as a single-rounding
+dot product. With ``-fspv-extension=SPV_VALVE_mixed_float_dot_product`` the whole
+thing becomes one instruction, and the double rounding disappears:
+
+.. code:: spirv
+
+  OpCapability DotProductFloat16AccFloat32VALVE ; 6912
+  OpExtension "SPV_VALVE_mixed_float_dot_product"
+  %res = OpFDot2MixAcc32VALVE %float %a %b %acc
+
+The capability is per (input encoding, accumulator) pair, and DXC only emits the
+pair HLSL can express - IEEE-754 FP16 inputs with an FP32 accumulator,
+``DotProductFloat16AccFloat32VALVE``:
+
+* ``OpFDot2MixAcc16VALVE`` (FP16 inputs, FP16 accumulator,
+  ``DotProductFloat16AccFloat16VALVE``) has no HLSL call site: the single
+  ``dot2add`` overload always accumulates in ``float``.
+* ``OpFDot2MixAcc32VALVE`` with bfloat16 inputs (``DotProductBFloat16AccVALVE``,
+  which depends on the ``BFloat16TypeKHR`` capability of ``SPV_KHR_bfloat16``) is
+  unreachable too: ``dot2add`` takes ``float16_t<2>`` and ``bfloat16_t2`` is not
+  implicitly convertible to it, so a ``bfloat16_t2`` overload of ``dot2add`` -
+  which DXIL does not have either - would be needed first. An explicit ``half2``
+  conversion is not a substitute: bfloat16 and fp16 have different mantissa widths
+  and exponent ranges, so the conversion changes the result.
+* ``OpFDot4MixAcc32VALVE`` (``DotProductFloat8AccFloat32VALVE``, grammar dependency
+  ``Float8EXT``) needs 4-component vectors of 8-bit floats, i.e. the
+  ``SPV_EXT_float8`` type system (``OpTypeFloat 8`` with a Float8E4M3/Float8E5M2
+  encoding), which this backend does not implement yet.
+
+The extension is **not** enabled by default: VALVE extensions are vendor-specific,
+the capability is only implemented by drivers that expose
+``VK_VALVE_shader_mixed_float_dot_product``, and a module that carries it is
+rejected by every other driver. Without
+``-fspv-extension=SPV_VALVE_mixed_float_dot_product`` the generated module is
+unchanged, down to the unfused ``OpFMul`` / ``OpFConvert`` / ``OpFAdd`` sequence
+(``tools/clang/test/CodeGenSPIRV/vk.valve-dot2add.off.hlsl`` pins it). The fused
+form also requires 16-bit ``float16_t``, i.e. ``-enable-16bit-types``: without it
+``half``/``float16_t`` is an alias for 32-bit ``float`` in SPIR-V CodeGen, so the
+operands are not FP16 vectors and the VALVE instruction is not used. (In that
+configuration ``dot2add`` is unusable anyway - the pre-existing unfused lowering
+converts a 32-bit vector to itself and the module fails validation - which is a
+limitation of ``dot2add`` and unrelated to this extension.) Note that the host must
+also enable the device extension and its feature bit; the compiler cannot check
+that, and no CTS or driver in CI implements the extension, so the only validity
+signal is SPIRV-Tools.
+
 Dynamic image offsets and signed remainder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -957,6 +1019,7 @@ Supported extensions
 * SPV_KHR_fma
 * SPV_QCOM_multiple_wait_queues
 * SPV_NV_push_constant_bank
+* SPV_VALVE_mixed_float_dot_product
 
 Vulkan specific attributes
 --------------------------
