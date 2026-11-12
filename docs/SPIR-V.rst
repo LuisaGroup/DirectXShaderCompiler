@@ -549,6 +549,64 @@ Limitations:
   ``MemberOffsetNV`` has to respect the alignment of the block's first member;
   DXC does not round it and does not diagnose a misaligned base offset.
 
+Dynamic image offsets and signed remainder
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VK_KHR_maintenance8`` is a Vulkan maintenance extension - one feature bit,
+``VkPhysicalDeviceMaintenance8FeaturesKHR::maintenance8``, covering a collection
+of small corrections. Two of its items are visible to a SPIR-V module, and DXC
+already emits the encoding they describe:
+
+* **Dynamic image offsets.** The optional ``offset`` argument of the texture
+  sampling and gather methods is a compile-time constant in most HLSL, and DXC
+  then emits the ``ConstOffset`` image operand. When it is *not* a constant, DXC
+  emits ``Offset`` instead: ``ConstOffset`` requires a literal, so a computed
+  offset has no other encoding. Before maintenance8 the Vulkan SPIR-V environment
+  permitted ``Offset`` only on the gather operations, so the sampling forms were
+  restricted to constant offsets; maintenance8 extends it to the sampling, fetch
+  and read/write operations. The ``Offset`` and ``ConstOffset`` enumerants are
+  ``0x0010`` and ``0x0008``, and the mask is a single word, so which one is
+  present is the whole question. Both enumerants require the
+  ``ImageGatherExtended`` capability, which DXC declares when it emits them.
+  ``.Load()`` is the exception on the HLSL side: it rejects a non-constant offset
+  with ``Offsets to texture access operations must be immediate values`` before
+  any SPIR-V is produced, so ``OpImageFetch`` never carries a dynamic ``Offset``.
+
+* **Signed remainder.** HLSL ``%`` on signed integers is truncating remainder, so
+  the sign of a non-zero result follows the dividend. DXC therefore translates it
+  to ``OpSRem``, never to ``OpSMod``, which takes the sign from the divisor; the
+  same applies at 64-bit width and to ``/`` (``OpSDiv``). Before maintenance8 the
+  Vulkan environment said the result of ``OpSRem`` and ``OpSMod`` is undefined if
+  either operand is negative; maintenance8 adopts the SPIR-V definition, which is
+  the one HLSL relies on.
+
+Neither item is module surface, so **nothing is emitted for maintenance8**: the
+extension adds no instruction, no capability, no ``OpExtension`` string and no new
+target environment. There is no ``SPV_KHR_maintenance8`` in the Khronos SPIR-V
+registry, and ``-fspv-extension=SPV_KHR_maintenance8`` is consequently an
+``unknown SPIR-V extension`` error rather than a switch; there is no
+``vulkan1.4`` in the ``-fspv-target-env`` list either, and the relaxation is
+available to a Vulkan 1.1/1.2/1.3 device that enables the extension, so it is a
+property of the device rather than of the target environment. What the rule
+governs is validation, and DXC validates with the relaxation in effect
+(``SetAllowOffsetTextureOperand`` in ``SpirvEmitter::spirvToolsValidate``):
+without it, spirv-val applied the pre-maintenance8 rule and rejected the very
+module DXC had just generated from legal HLSL with
+``[VUID-RuntimeSpirv-Offset-10213] Image Operand Offset can only be used with
+OpImage*Gather operations``.
+
+In HLSL nothing has to change - no intrinsic, no attribute, no define - because
+the encoding was always the maintenance8-correct one. What the shader author has
+to arrange is the host side: Vulkan 1.4, or Vulkan 1.1+ with
+``VK_KHR_maintenance8`` enabled at ``vkCreateDevice``, and the ``maintenance8``
+feature bit set. Without it, a pipeline whose shader uses ``Offset`` on a sampling
+instruction is rejected, and remainder results for negative operands are
+undefined. The compiler cannot check either condition, since it does not know
+which device will run the shader.
+
+See ``examples/spirv-extensions/khr-maintenance8.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/maintenance8.*.hlsl`` for the tests
+that pin the encoding of both items.
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 

@@ -93,6 +93,23 @@ The included licenses apply to the following files:
   descriptor heaps with a literal `ArrayStride`. The value must be a power of
   two in `[8, 256]`. Both flags require `-spirv` and
   `-fspv-use-descriptor-heap` and are rejected otherwise.
+- Added support for `VK_KHR_maintenance8`, the Vulkan maintenance extension whose
+  `maintenance8` feature bit adopts two SPIR-V definitions that DXC already
+  generated: the `Offset` image operand (0x0010) as an alternative to
+  `ConstOffset` (0x0008) for texture sampling and fetch, and the
+  `OpSRem`/`OpSMod` result for negative operands. HLSL needs no change - a
+  non-constant texture offset has no encoding other than `Offset`, and HLSL `%`
+  is truncating remainder, which is `OpSRem` - and the module is unchanged: the
+  extension adds no instruction, capability, `OpExtension` or target environment,
+  so there is no `SPV_KHR_maintenance8` to request with `-fspv-extension` and no
+  new `-fspv-target-env`. What was missing was the validator side: DXC validated
+  its own output against the pre-maintenance8 Vulkan rule, so a shader using a
+  computed texture offset failed to compile with
+  `[VUID-RuntimeSpirv-Offset-10213] Image Operand Offset can only be used with
+  OpImage*Gather operations` unless `-fcgl` was passed. DXC now validates with the
+  relaxation in effect. The host must still provide Vulkan 1.4, or Vulkan 1.1+
+  with `VK_KHR_maintenance8` enabled and the `maintenance8` feature bit set; the
+  compiler cannot check that.
 
 Place release notes for the upcoming release below this line and remove this
 line upon naming the release. Refer to previous for appropriate section names.

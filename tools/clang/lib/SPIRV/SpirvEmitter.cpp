@@ -18414,6 +18414,25 @@ bool SpirvEmitter::spirvToolsValidate(std::vector<uint32_t> *mod,
 
   spvtools::ValidatorOptions options;
   options.SetBeforeHlslLegalization(beforeHlslLegalization);
+  // HLSL Change Begin - VK_KHR_maintenance8.
+  // A non-constant HLSL texture offset can only be encoded as the Offset image
+  // operand: ConstOffset requires a constant. Before VK_KHR_maintenance8 the
+  // Vulkan SPIR-V environment allowed Offset only on OpImage*Gather, so
+  // spirv-val rejected every other image instruction that carried one
+  // (VUID-RuntimeSpirv-Offset-10213) - including the module DXC had just
+  // generated from legal HLSL. maintenance8 lifts that restriction, and the
+  // relaxation is a property of the target environment, not of the module: it
+  // adds no instruction, capability or OpExtension, and it is requested from
+  // the device with VkPhysicalDeviceMaintenance8FeaturesKHR::maintenance8.
+  // There is consequently nothing to emit and nothing to gate at emission time;
+  // what the environment rule governs is validation, so the compiler has to
+  // validate the module under the rule it just emitted it for. Until the
+  // -fspv-target-env list grows a Vulkan 1.4 environment there is no target at
+  // which DXC could refuse the operand and still compile the shader, so the
+  // relaxation is unconditional; the host requirement is documented in
+  // docs/SPIR-V.rst ("Dynamic image offsets and signed remainder").
+  options.SetAllowOffsetTextureOperand(true);
+  // HLSL Change End - VK_KHR_maintenance8.
   // GL: strict block layout rules
   // VK: relaxed block layout rules
   // DX: Skip block layout rules
