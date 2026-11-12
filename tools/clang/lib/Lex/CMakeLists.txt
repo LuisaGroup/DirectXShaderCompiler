@@ -50,7 +50,8 @@ if (ENABLE_SPIRV_CODEGEN)
   list(APPEND hlsl_embedded_inputs
        vk/arm/cooperative_matrix_layouts.h
        vk/ext/abort.h
- vk/ext/split_barrier.h
+   vk/ext/long_vector.h
+   vk/ext/split_barrier.h
  vk/khr/cooperative_matrix.h
  vk/khr/cooperative_matrix.impl
  vk/nv/cluster_as.h

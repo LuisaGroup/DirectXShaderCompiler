@@ -843,6 +843,47 @@ const SpirvType *LowerTypeVisitor::lowerInlineSpirvType(
           << arg.getKind();
     }
   }
+  // HLSL Change Begin - SPV_EXT_long_vector.
+  // OpTypeVector writes its component count as a LiteralInteger, and the front
+  // end rejects vector<T, N> for N > 4, so a vk::SpirvOpaqueType with the
+  // OpTypeVector opcode is the only way an HLSL shader can name a vector with
+  // more than four components (vk::ext::LongVector in
+  // <vk/ext/long_vector.h>). Two spellings of it cannot produce the module the
+  // author is asking for, so reject them here instead of emitting an operation
+  // that SPIRV-Tools rejects or, worse, a second encoding of a type that
+  // already exists:
+  // - a component count of four or less describes an ordinary vector, which
+  //   this backend already lowers to a VectorType, and
+  // - a count that is not wrapped in vk::Literal would be written as an id
+  //   where OpTypeVector requires a literal.
+  // The capability and the extension are added by CapabilityVisitor, which
+  // sees the resulting SpirvIntrinsicType; this function only validates the
+  // spelling of the type.
+  if (static_cast<spv::Op>(opcode) == spv::Op::OpTypeVector) {
+    if (operands.size() != 2 || !operands.front().isTypeOperand ||
+        operands.back().isTypeOperand) {
+      emitError("OpTypeVector requires a component type and a component count",
+                srcLoc);
+    } else {
+      auto *count =
+          dyn_cast<SpirvConstantInteger>(operands.back().operand_as_inst);
+      if (!count || !count->isLiteral()) {
+        emitError("the component count of a vk::SpirvOpaqueType with the "
+                  "OpTypeVector opcode must be a "
+                  "vk::Literal<vk::integral_constant<uint, N>>, so that it is "
+                  "written as a literal of the instruction; use "
+                  "vk::ext::LongVector<T, N> from <vk/ext/long_vector.h>",
+                  srcLoc);
+      } else if (count->getValue().getLimitedValue() <= 4) {
+        emitError("a vector with %0 components is an ordinary vector, which "
+                  "vk::ext::LongVector does not provide; use a native HLSL "
+                  "vector type (float2/float3/float4 or vector<T, N>) instead",
+                  srcLoc)
+            << static_cast<unsigned>(count->getValue().getLimitedValue());
+      }
+    }
+  }
+  // HLSL Change End - SPV_EXT_long_vector.
   return spvContext.getOrCreateSpirvIntrinsicType(opcode, operands);
 }
 

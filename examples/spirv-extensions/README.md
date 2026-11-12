@@ -37,6 +37,7 @@ features.
 | `ext-shader-float8.hlsl` | `VK_EXT_shader_float8` → `float8_e4m3_t` / `float8_e5m2_t` | `-HV 2021` |
 | `arm-cooperative-matrix-layouts.hlsl` | `VK_ARM_cooperative_matrix_layouts` → blocked-interleaved cooperative matrix layouts | `-fspv-target-env=vulkan1.3 -HV 2021` |
 | `ext-cooperative-matrix-maintenance1.hlsl` | `VK_EXT_cooperative_matrix_maintenance1` → convert-use / reduce / per-element / get-coordinate | `-fspv-target-env=vulkan1.3 -HV 2021` |
+| `ext-long-vector.hlsl` | `VK_EXT_shader_long_vector` → `OpTypeVector` with 8/16 components, `OpCompositeConstruct`/`Extract`/`Insert` | `-fspv-target-env=vulkan1.1 -fspv-extension=SPV_EXT_long_vector` |
 | `khr-constant-data.hlsl` | `VK_KHR_shader_constant_data` → `OpConstantDataKHR` for a lookup table | `-fspv-constant-data -fspv-extension=SPV_KHR_constant_data` |
 | `khr-shader-abort.hlsl` | `VK_KHR_shader_abort` → `OpAbortKHR` | `-fspv-extension=SPV_KHR_abort` |
 | `khr-opacity-micromap.hlsl` | `VK_KHR_opacity_micromap` → `OpacityMicromapIdKHR` execution mode | `-fspv-extension=SPV_KHR_opacity_micromap` |

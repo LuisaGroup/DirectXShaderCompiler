@@ -94,6 +94,12 @@ private:
   SpirvBuilder &spvBuilder;        ///< SPIR-V builder
   spv::ExecutionModel shaderModel; ///< Execution model
   FeatureManager featureManager;   ///< SPIR-V version/extension manager.
+  // HLSL Change Begin - SPV_EXT_long_vector. Set once the corresponding
+  // diagnostic has been reported, so that a long vector type reachable from
+  // several instructions does not repeat it.
+  bool reportedLongVectorStageIO = false;
+  bool reportedLongVectorTargetEnv = false;
+  // HLSL Change End - SPV_EXT_long_vector.
 };
 
 } // end namespace spirv

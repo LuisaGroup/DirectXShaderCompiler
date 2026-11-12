@@ -276,6 +276,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
           // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1.
           .Case("SPV_EXT_cooperative_matrix_maintenance1",
                 Extension::EXT_cooperative_matrix_maintenance1)
+          // HLSL Change - SPV_EXT_long_vector.
+          .Case("SPV_EXT_long_vector", Extension::EXT_long_vector)
 .Default(Extension::Unknown);
 }
 
@@ -411,6 +413,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
       // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1.
       case Extension::EXT_cooperative_matrix_maintenance1:
         return "SPV_EXT_cooperative_matrix_maintenance1";
+      // HLSL Change - SPV_EXT_long_vector.
+      case Extension::EXT_long_vector:
+        return "SPV_EXT_long_vector";
       default:
     break;
   }
@@ -701,6 +706,19 @@ bool FeatureManager::enabledByDefault(Extension ext) {
       // missing capability.
       case Extension::EXT_cooperative_matrix_maintenance1:
         return true;
+      // HLSL Change - SPV_EXT_long_vector. Opt-in. A module that uses
+      // vk::ext::LongVector declares the LongVectorEXT capability and
+      // OpExtension "SPV_EXT_long_vector", and a driver that does not expose
+      // VK_EXT_shader_long_vector rejects it. The type is new surface - no
+      // existing HLSL spelling reaches a long vector, because the front end
+      // rejects vector<T, N> for N > 4 - so making the extension opt-in does not
+      // change the code generation of any existing shader; it only means the
+      // extension has to be named on the command line, and an explicit
+      // -fspv-extension list can leave it out. Without the flag every use is a
+      // diagnostic instead of a module that declares an extension the host never
+      // asked for. See CapabilityVisitor::addCapabilityForType.
+      case Extension::EXT_long_vector:
+        return false;
       default:
     return true;
   }
@@ -713,6 +731,28 @@ bool FeatureManager::isTargetEnvVulkan1p1OrAbove() const {
 bool FeatureManager::isTargetEnvSpirv1p4OrAbove() const {
   return targetEnv >= SPV_ENV_UNIVERSAL_1_4;
 }
+
+// HLSL Change Begin - SPV_EXT_long_vector.
+bool FeatureManager::isTargetEnvSpirv1p3OrAbove() const {
+  // Compare the SPIR-V version the environment emits rather than the
+  // spv_target_env enumerators: every Vulkan environment sorts above every
+  // universal one, so "targetEnv >= SPV_ENV_UNIVERSAL_1_3" would also be true
+  // for vulkan1.0, which emits SPIR-V 1.0.
+  return getSpirvVersion(targetEnv) >= clang::VersionTuple(1, 3);
+}
+
+bool FeatureManager::requestTargetEnvSpirv1p3(llvm::StringRef target,
+                                             SourceLocation loc) {
+  if (isTargetEnvSpirv1p3OrAbove())
+    return true;
+  emitError("SPIR-V 1.3 is required for %0 but not permitted to use", loc)
+      << target;
+  emitNote("please specify your target environment via command line option "
+           "-fspv-target-env=",
+           {});
+  return false;
+}
+// HLSL Change End - SPV_EXT_long_vector.
 
 bool FeatureManager::isTargetEnvVulkan1p1Spirv1p4OrAbove() const {
   return targetEnv >= SPV_ENV_VULKAN_1_1_SPIRV_1_4;

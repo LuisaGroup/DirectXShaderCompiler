@@ -20,6 +20,27 @@ The included licenses apply to the following files:
 ### Upcoming Release
 
 #### SPIR-V
+- Added support for `SPV_EXT_long_vector` (`VK_EXT_shader_long_vector`): the
+  new `<vk/ext/long_vector.h>` header provides `vk::ext::LongVector<T, N>`, a
+  SPIR-V vector with more than four components, lowered to a single
+  `OpTypeVector` with N components instead of an array or a struct of
+  `float4`s. A module that contains one declares `OpCapability LongVectorEXT`
+  (5425) and `OpExtension "SPV_EXT_long_vector"`; both are emitted from the type
+  itself, so `-fspv-extension=SPV_EXT_long_vector` can select and refuse the
+  extension, and the extension is opt-in because a driver without
+  `VK_EXT_shader_long_vector` rejects the module. The target environment must emit
+  SPIR-V 1.3 or later (`-fspv-target-env=vulkan1.1`), because the extension is
+  specified as modifications to SPIR-V 1.3. The header is a type plus element
+  access, not an arithmetic system: `vk::ext::Concat` builds a value out of
+  ordinary vectors with `OpCompositeConstruct`, `vk::ext::Get<index>` reads a
+  component with `OpCompositeExtract` and `vk::ext::Set<index>` writes one with
+  `OpCompositeInsert`, since HLSL's operators and swizzles are defined on ordinary
+  vectors only. A component count of four or less, a component count that is not a
+  compile-time constant, a long vector in stage input/output and a target
+  environment older than SPIR-V 1.3 are all diagnostics rather than invalid
+  SPIR-V. `OpTypeVectorIdEXT` (5288) and per-storage-class buffer layout are not
+  implemented yet. See `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/ext-long-vector.hlsl`.
 - Added support for `SPV_EXT_float8` (`VK_EXT_shader_float8`): the HLSL types
   `float8_e4m3_t` and `float8_e5m2_t` lower to `OpTypeFloat 8` with the
   `Float8E4M3EXT` (4214) and `Float8E5M2EXT` (4215) encodings, declare

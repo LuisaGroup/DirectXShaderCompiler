@@ -325,6 +325,61 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
         }
       }
     }
+    // HLSL Change Begin - SPV_EXT_long_vector.
+    // vk::ext::LongVector<T, N> in <vk/ext/long_vector.h> is lowered to a
+    // vk::SpirvOpaqueType with the OpTypeVector opcode and the component count
+    // as a literal, so this visitor sees a SpirvIntrinsicType rather than a
+    // VectorType. A count above four is only valid SPIR-V with the
+    // LongVectorEXT capability, which only exists from SPIR-V 1.3 on, and
+    // SPV_EXT_long_vector permits long vectors in a fixed set of storage
+    // classes. Both are checked here rather than in the header, because only
+    // this visitor knows the storage class the type is used in, and a module
+    // that violates either rule is rejected by SPIRV-Tools.
+    if (intrinsicType->getOpCode() == uint32_t(spv::Op::OpTypeVector)) {
+      const auto operands = intrinsicType->getOperands();
+      // A missing or non-literal count is diagnosed while the type is lowered
+      // (LowerTypeVisitor); such a type is not a long vector.
+      auto *count =
+          (operands.size() == 2 && !operands.back().isTypeOperand)
+              ? dyn_cast<SpirvConstantInteger>(operands.back().operand_as_inst)
+              : nullptr;
+      if (count && count->isLiteral() &&
+          count->getValue().getLimitedValue() > 4) {
+        if (sc == spv::StorageClass::Input ||
+            sc == spv::StorageClass::Output) {
+          if (!reportedLongVectorStageIO) {
+            reportedLongVectorStageIO = true;
+            featureManager.reportError(
+                "a long vector (vk::ext::LongVector) cannot be used as "
+                "stage input or output: SPV_EXT_long_vector only allows "
+                "vectors with more than four components in Function, "
+                "Private, UniformConstant, Uniform, Workgroup, "
+                "StorageBuffer, PhysicalStorageBuffer, PushConstant and "
+                "ShaderRecordBuffer storage",
+                loc);
+          }
+          return;
+        }
+        // SPV_EXT_long_vector is specified against SPIR-V 1.3, so a target
+        // environment that emits SPIR-V 1.0 cannot use it. Reported once;
+        // every later use takes the same early exit.
+        if (!featureManager.isTargetEnvSpirv1p3OrAbove()) {
+          if (!reportedLongVectorTargetEnv) {
+            reportedLongVectorTargetEnv = true;
+            featureManager.requestTargetEnvSpirv1p3("long vector types", loc);
+          }
+          return;
+        }
+        addExtension(Extension::EXT_long_vector, "long vector types", loc);
+        addCapability(spv::Capability::LongVectorEXT);
+        // The component type is an operand of the intrinsic type rather than
+        // its result type, so the generic handling above never visits it: a
+        // vk::ext::LongVector<half, N> would otherwise lose Float16.
+        if (operands.front().isTypeOperand)
+          addCapabilityForType(operands.front().operand_as_type, loc, sc);
+      }
+    }
+    // HLSL Change End - SPV_EXT_long_vector.
   }
   // HLSL Change End
   }

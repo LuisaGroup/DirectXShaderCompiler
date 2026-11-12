@@ -125,6 +125,10 @@ enum class Extension {
     // <vk/khr/cooperative_matrix.h>). Enabled by default; see
     // enabledByDefault() in FeatureManager.cpp.
     EXT_cooperative_matrix_maintenance1,
+    // HLSL Change - SPV_EXT_long_vector (OpTypeVector with more than four
+    // components, the vk::ext::LongVector type in <vk/ext/long_vector.h>).
+    // Opt-in; see enabledByDefault() in FeatureManager.cpp.
+    EXT_long_vector,
     Unknown,
 };
 
@@ -202,6 +206,30 @@ public:
   /// Returns true if the target environment is SPIR-V 1.4 or above.
   /// Returns false otherwise.
   bool isTargetEnvSpirv1p4OrAbove() const;
+
+  // HLSL Change Begin - SPV_EXT_long_vector.
+  /// Returns true if the target environment emits SPIR-V 1.3 or above, the
+  /// SPIR-V version SPV_EXT_long_vector is specified against.
+  ///
+  /// Unlike the isTargetEnvVulkan*OrAbove() predicates this one compares the
+  /// SPIR-V version the target environment emits, because spv_target_env orders
+  /// the Vulkan environments after every universal one: vulkan1.0 is SPIR-V 1.0
+  /// even though the enumerator sorts above SPV_ENV_UNIVERSAL_1_3.
+  bool isTargetEnvSpirv1p3OrAbove() const;
+
+  /// Requires a SPIR-V 1.3 target environment for the given feature. Emits an
+  /// error and returns false if the target environment emits an earlier SPIR-V
+  /// version.
+  bool requestTargetEnvSpirv1p3(llvm::StringRef target, SourceLocation);
+
+  /// Emits an error with the given message at the given source location. Used by
+  /// CapabilityVisitor, which has no DiagnosticsEngine of its own.
+  template <unsigned N>
+  void reportError(const char (&message)[N], SourceLocation loc) {
+    diags.Report(loc, diags.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                            message));
+  }
+  // HLSL Change End - SPV_EXT_long_vector.
 
   /// Returns true if the target environment is Vulkan 1.1 with SPIR-V 1.4 or
   /// above. Returns false otherwise.

@@ -460,6 +460,125 @@ Limitations:
   more queues than ``maxShaderWaitQueues`` reports. The compiler cannot check
   either of these; an argument above the device limit is at best ignored.
 
+Long vectors
+~~~~~~~~~~~~
+The ``SPV_EXT_long_vector`` extension lifts the 1..4 component limit on
+``OpTypeVector``. With the ``LongVectorEXT`` (5425) capability a vector may have an
+arbitrary positive number of components, and the instructions that already accept
+vector types accept those vectors as well - the arithmetic instructions,
+``OpLoad`` / ``OpStore``, ``OpCompositeConstruct`` / ``Extract`` / ``Insert`` and
+``OpVectorShuffle`` - but only in a fixed set of storage classes: Function,
+Private, UniformConstant, Uniform, Workgroup, StorageBuffer,
+PhysicalStorageBuffer, PushConstant, ShaderRecordBufferKHR, CrossWorkgroup and
+Generic. It is gated by the Vulkan ``VK_EXT_shader_long_vector`` device extension,
+whose feature struct carries the ``longVector`` feature bit and whose properties
+struct reports the device's component-count limit, which a shader has to stay
+within. The extension is the compilation target for GLSL's ``GL_EXT_long_vector``
+and for the HLSL long vector proposal.
+
+HLSL has no type of its own for a long vector: the front end rejects
+``vector<T, N>`` for ``N > 4`` with "invalid value, valid range is between 1 and 4
+inclusive", and the DXIL long vector feature is a different target. DXC names the
+type through an inline SPIR-V type in ``<vk/ext/long_vector.h>``:
+
+.. code:: hlsl
+
+  #include <vk/ext/long_vector.h>
+
+  vk::ext::LongVector<float, 8>  v8;      // OpTypeVector %float 8
+  vk::ext::LongVector<float, 16> v16;     // OpTypeVector %float 16
+
+  v8 = vk::ext::Concat(lo, hi);           // OpCompositeConstruct
+  v8 = vk::ext::Set<5>(v8, x);            // OpCompositeInsert
+  float y = vk::ext::Get<7>(v8);          // OpCompositeExtract
+
+``vk::ext::Concat`` concatenates its constituents in order and has overloads for
+two and four ordinary 4-component vectors as well as for two 8-component long
+vectors, so 8- and 16-component values can be built out of what HLSL can express.
+``Get<index>`` and ``Set<index>`` take the component index as a template argument,
+which keeps it a compile-time constant for the ``LiteralInteger`` operand of
+``OpCompositeExtract`` / ``OpCompositeInsert``; the low-level ``Concat`` /
+``Extract`` / ``Insert`` declarations take it as an ``[[vk::ext_literal]]``
+parameter. The operand order of ``OpCompositeInsert`` is the instruction's - the
+new component ("Object") first, the vector it is inserted into ("Composite")
+second - and ``Set<index>(value, component)`` wraps that in the order an HLSL
+author expects.
+
+This is a type plus element access, not an arithmetic system. HLSL's operators,
+swizzles and implicit conversions are defined on ordinary vectors and do not apply
+to a long vector, so a value is built from, and decomposed into, ``float2`` /
+``float3`` / ``float4`` values and the arithmetic happens on those.
+
+A module containing a long vector declares ``OpCapability LongVectorEXT`` and
+``OpExtension "SPV_EXT_long_vector"``. Both are added by SPIR-V CodeGen from the
+type itself (the ``SpirvIntrinsicType`` case of
+``CapabilityVisitor::addCapabilityForType``), not by ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]`` on the header's declarations, which is what lets
+``-fspv-extension`` both select and refuse the extension. The extension is **not**
+enabled by default: a driver that does not expose ``VK_EXT_shader_long_vector``
+rejects a module that declares the capability, so without
+``-fspv-extension=SPV_EXT_long_vector`` every use is a compile error instead of a
+module the host never asked for. The target environment must also emit SPIR-V 1.3
+or later - ``SPV_EXT_long_vector`` is specified as modifications to SPIR-V 1.3 - so
+``-fspv-target-env=vulkan1.1`` (or ``vulkan1.1spirv1.4``, ``vulkan1.2``,
+``vulkan1.3``, ``universal1.5``) is required; the default, ``vulkan1.0``, emits
+SPIR-V 1.0. The environment check compares the SPIR-V version the environment
+emits (``FeatureManager::isTargetEnvSpirv1p3OrAbove``) rather than the
+``spv_target_env`` enumerators, because every Vulkan environment sorts above every
+universal one.
+
+The extension also removes the "at least two constituents" rule of
+``OpCompositeConstruct`` and allows ``OpTypeVector`` with a single component.
+Neither changes DXC's pre-existing code generation: ``Concat`` emits the
+four-constituent form for a 16-component vector, and a one-component vector is
+still spelled as the scalar itself.
+
+Restrictions, each diagnosed rather than miscompiled:
+
+* A component count of four or less is an ordinary vector and is rejected with a
+  diagnostic that points at the native HLSL vector types. Those already have a
+  dedicated encoding (``SpirvType::VectorType``); a second, indistinguishable
+  ``OpTypeVector %float 4`` with the capability attached to it is not what the
+  author wants.
+* A component count that is not a compile-time constant is rejected by the front
+  end. A count taken from a specialization constant is a *different* instruction,
+  ``OpTypeVectorIdEXT`` (5288), whose *Component Count* is an ``<id>`` of a 32-bit
+  integer constant instruction instead of a ``LiteralInteger``. DXC does not
+  implement it yet: the type would have to be keyed on a specialization constant id
+  in ``SpirvContext``'s structural uniquing, and spec-constant-sized vectors are
+  additionally restricted in explicitly laid out storage classes. Until then
+  ``OpTypeVectorIdEXT`` is not emitted for any HLSL source.
+* A long vector in stage input or output is an error. ``SPV_EXT_long_vector`` lists
+  the storage classes long vectors may be allocated in and Input/Output are not
+  among them; SPIRV-Tools rejects such a module with "Long vector types with more
+  than 4 components (or types containing them) not supported in storage class
+  Input".
+* A long vector cannot be the column type of a matrix; the extension keeps
+  ``OpTypeVector`` at 2, 3 or 4 components there.
+
+Limitations:
+
+* **No buffer layout.** A long vector in Function, Private or Workgroup storage
+  works - a local variable, a private global, or a ``groupshared`` variable. A long
+  vector as a *member* of a struct in ``Uniform`` / ``StorageBuffer`` storage does
+  not: DXC computes member offsets from the AST record shape rather than from the
+  long vector's SPIR-V type, so the module declares an overlapping member and
+  SPIRV-Tools rejects it. Laying long vectors out per storage class is a separate
+  piece of work; until then keep long vectors in Function/Private/Workgroup storage
+  and move values in and out through ordinary vectors.
+* The compiler cannot check the device's component-count limit or the ``longVector``
+  feature bit, and no test can prove how a driver executes a long vector. A shader
+  that uses more components than the device reports still compiles and validates;
+  creating the pipeline then fails.
+* No arithmetic, comparison or swizzle surface is provided for long vectors. A
+  component-wise operation is written on the ordinary vectors a value is built
+  from and decomposed into.
+
+See ``examples/spirv-extensions/ext-long-vector.hlsl`` for a self-contained example
+and ``tools/clang/test/CodeGenSPIRV/vk.long-vector*.hlsl`` for the tests that pin
+the capability, the type encoding, the composite instructions, the
+optimizer-survival path and the diagnostics.
+
 Push constant banks
 ~~~~~~~~~~~~~~~~~~~
 
@@ -2250,6 +2369,7 @@ Supported extensions
 * SPV_EXT_fragment_invocation_density
 * SPV_EXT_fragment_shader_interlock
 * SPV_EXT_float8
+* SPV_EXT_long_vector
 * SPV_EXT_mesh_shader
 * SPV_EXT_shader_stencil_support
 * SPV_EXT_shader_subgroup_partitioned
