@@ -516,6 +516,119 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
     addCapability(spv::Capability::TensorAddressingNV);
   }
   // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
+  // HLSL Change Begin - SPV_ARM_tensors.
+  // vk::arm::Tensor<ElementType, Rank> in <vk/arm/tensors.h> is lowered to a
+  // vk::SpirvOpaqueType with the OpTypeTensorARM opcode (4163), whose Element
+  // Type is a type operand and whose Rank is the <id> of a 32-bit integer
+  // constant, so this visitor sees a SpirvIntrinsicType rather than a scalar
+  // type. OpTypeTensorARM is defined by SPV_ARM_tensors, so the *type* - not any
+  // particular instruction - is what makes a module require TensorsARM (4174) and
+  // OpExtension "SPV_ARM_tensors", the same way OpTypeTensorLayoutNV does for
+  // SPV_NV_tensor_addressing above. This is also the only place where the rules
+  // SPV_ARM_tensors places on the type can be checked, because the element type
+  // and the rank are operands of the type rather than its result type, and
+  // because the storage class a tensor ends up in is known only here:
+  //
+  // * The element type must be a scalar. SPIRV-Tools rejects anything else
+  //   ("OpTypeTensorARM Element Type <id> is not a scalar type"), and a tensor of
+  //   vectors has no encoding in the extension.
+  // * The rank must be greater than 0 (SPIRV-Tools: "OpTypeTensorARM Rank <id>
+  //   ... must define a value greater than 0") and at most 4. Vulkan requires
+  //   every implementation that supports VK_ARM_tensors to report a
+  //   maxTensorDimensionCount of at least 4, so 4 is the only rank range a shader
+  //   can rely on; a higher rank would compile here and then fail at pipeline
+  //   creation on a device that reports exactly the guaranteed minimum.
+  // * A tensor is a descriptor type. SPIRV-Tools lists OpTypeTensorARM next to
+  // OpTypeImage and OpTypeAccelerationStructureKHR as a type a UniformConstant
+  // variable may have ("Variables identified with the UniformConstant storage
+  // class are used only as handles to refer to opaque resources"), and it also
+  // lets a tensor through unchecked in Function, Private and Workgroup storage
+  // (of which HLSL can produce only the first: a handle loaded in a function).
+  // What it does *not* catch is a tensor in a stage interface, or a tensor as a
+  // member of a uniform / storage buffer block - and the block one is exactly
+  // what HLSL produces for a global of tensor type, which is placed in
+  // $Globals, an OpTypeStruct in Uniform storage. Both are diagnosed here
+  // instead of producing a module that validates and that no host can bind.
+  //
+  // The capability and the extension are added after the checks, so a rejected
+  // type does not also change the capability block of the module.
+  if (intrinsicType->getOpCode() == uint32_t(spv::Op::OpTypeTensorARM)) {
+    const auto operands = intrinsicType->getOperands();
+    const SpirvType *elementType =
+        (!operands.empty() && operands.front().isTypeOperand)
+            ? operands.front().operand_as_type
+            : nullptr;
+    if (!elementType || !isa<ScalarType>(elementType)) {
+      if (!reportedTensorElementType) {
+        reportedTensorElementType = true;
+        featureManager.reportError(
+            "the element type of a tensor (vk::arm::Tensor) must be a scalar "
+            "type: SPV_ARM_tensors has no encoding for a tensor of a vector, "
+            "matrix or struct element type, and SPIRV-Tools rejects an "
+            "OpTypeTensorARM whose Element Type is not a scalar",
+            loc);
+      }
+      return;
+    }
+    // The rank is optional: an unranked OpTypeTensorARM (the spelling
+    // <vk/arm/tosa.h> uses for the TOSA operand type) has no rank to check, and
+    // only the reading operations require one.
+    const auto *rankConstant =
+        (operands.size() > 1 && !operands[1].isTypeOperand)
+            ? dyn_cast<SpirvConstantInteger>(operands[1].operand_as_inst)
+            : nullptr;
+    if (rankConstant) {
+      const uint64_t rank = rankConstant->getValue().getLimitedValue();
+      if (rank == 0 || rank > 4) {
+        if (!reportedTensorRank) {
+          reportedTensorRank = true;
+          featureManager.reportError(
+              "the rank of a tensor (vk::arm::Tensor) must be between 1 and 4: "
+              "SPIR-V requires a rank greater than 0, and Vulkan only "
+              "guarantees a maxTensorDimensionCount of 4, so a higher rank "
+              "cannot be shown to be supported by the device",
+              loc);
+        }
+        return;
+      }
+    }
+    if (sc == spv::StorageClass::Input || sc == spv::StorageClass::Output) {
+      if (!reportedTensorStorageClass) {
+        reportedTensorStorageClass = true;
+        featureManager.reportError(
+            "a tensor (vk::arm::Tensor) cannot be used as stage input or "
+            "output: SPV_ARM_tensors makes a tensor an opaque descriptor "
+            "handle, which has no varying encoding",
+            loc);
+      }
+      return;
+    }
+    if (sc == spv::StorageClass::Uniform ||
+        sc == spv::StorageClass::StorageBuffer ||
+        sc == spv::StorageClass::PushConstant) {
+      if (!reportedTensorBlockStorage) {
+        reportedTensorBlockStorage = true;
+        featureManager.reportError(
+            "a tensor (vk::arm::Tensor) cannot be a member of a uniform, "
+            "storage buffer or push constant block: a tensor is a descriptor "
+            "in SPV_ARM_tensors, so it can only be a UniformConstant resource "
+            "of its own, a handle loaded in a function, or a Private or "
+            "Workgroup variable. An HLSL global of tensor type is placed in "
+            "$Globals, which is a uniform block, and no host can bind a tensor "
+            "to it",
+            loc);
+      }
+      return;
+    }
+    addExtension(Extension::ARM_tensors, "tensor types", loc);
+    addCapability(spv::Capability::TensorsARM);
+    // The element type is an operand of the intrinsic type rather than its
+    // result type, so the generic handling above never visits it: a
+    // vk::arm::Tensor<half, N> would otherwise lose Float16.
+    if (elementType)
+      addCapabilityForType(elementType, loc, sc);
+  }
+  // HLSL Change End - SPV_ARM_tensors.
     // HLSL Change End - SPV_NV_cooperative_vector.
   }
   // HLSL Change End

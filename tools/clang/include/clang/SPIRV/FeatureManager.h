@@ -156,6 +156,11 @@ enum class Extension {
       // <vk/nv/cooperative_matrix_decode_vector.h>). Opt-in; see
       // enabledByDefault() in FeatureManager.cpp.
       NV_cooperative_matrix_decode_vector,
+      // HLSL Change - SPV_ARM_tensors (OpTypeTensorARM, the OpTensorReadARM /
+      // OpTensorWriteARM / OpTensorQuerySizeARM operations, and the
+      // vk::arm::Tensor type with its accessors in <vk/arm/tensors.h>). Enabled
+      // by default; see enabledByDefault() in FeatureManager.cpp.
+      ARM_tensors,
     Unknown,
 };
 

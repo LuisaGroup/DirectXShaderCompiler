@@ -1,7 +1,7 @@
 // RUN: not %dxc -T cs_6_0 -E main -fcgl -DWRONG_VERSION %s -spirv 2>&1 | FileCheck %s --check-prefix=VERSION
 // RUN: not %dxc -T cs_6_0 -E main -fcgl -DWRONG_CASE %s -spirv 2>&1 | FileCheck %s --check-prefix=CASE
 // RUN: not %dxc -T cs_6_0 -E main -fcgl -DADHOC_OPCODE %s -spirv 2>&1 | FileCheck %s --check-prefix=OPCODE
-// RUN: not %dxc -T cs_6_0 -E main -fcgl -fspv-extension=SPV_ARM_tensors %s -spirv 2>&1 | FileCheck %s --check-prefix=ALLOWLIST
+// RUN: not %dxc -T cs_6_0 -E main -fcgl -DALLOWLIST -fspv-extension=SPV_KHR_8bit_storage %s -spirv 2>&1 | FileCheck %s --check-prefix=ALLOWLIST
 
 // L4 diagnostic gate: the three module-level identifiers a TOSA call depends on -
 // the set name, the opcode number and the extension that the operand type needs -
@@ -109,10 +109,15 @@ using namespace vk::arm::tosa;
 #endif
 
 #ifdef ALLOWLIST
-// SPV_ARM_tensors is not a registered extension, so -fspv-extension cannot name it.
+// SPV_ARM_tensors *is* a registered extension (FeatureManager), so -fspv-extension
+// can name it, and an explicit -fspv-extension list is an allow-list: a list that
+// omits it refuses the tensor type that the TOSA operand type requires. The RUN
+// line therefore passes a list without SPV_ARM_tensors, and the diagnostic names
+// the extension the module needs instead of the extension that did not exist. The
+// three cases above are still validator diagnostics that no flag can silence; this
+// one is what a -fspv-extension list can and does refuse.
 //
-// ALLOWLIST: error: unknown SPIR-V extension 'SPV_ARM_tensors'
-// ALLOWLIST: note: known extensions are
+// ALLOWLIST: error: SPIR-V extension 'SPV_ARM_tensors' required for tensor types but not permitted to use
 [[vk::ext_extension("SPV_ARM_tensors")]]
 [[vk::ext_capability(/* TensorsARM */ 4174)]]
 [[vk::ext_instruction(/* ADD */ 14, "TOSA.001000.1")]] Tensor<float> AddAllowlisted(

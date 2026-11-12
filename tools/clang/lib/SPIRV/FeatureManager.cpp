@@ -289,6 +289,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
       // HLSL Change - SPV_NV_cooperative_matrix_decode_vector.
       .Case("SPV_NV_cooperative_matrix_decode_vector",
             Extension::NV_cooperative_matrix_decode_vector)
+// HLSL Change - SPV_ARM_tensors.
+.Case("SPV_ARM_tensors", Extension::ARM_tensors)
 .Default(Extension::Unknown);
 }
 
@@ -439,6 +441,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
         // HLSL Change - SPV_NV_cooperative_matrix_decode_vector.
         case Extension::NV_cooperative_matrix_decode_vector:
           return "SPV_NV_cooperative_matrix_decode_vector";
+          // HLSL Change - SPV_ARM_tensors.
+          case Extension::ARM_tensors:
+            return "SPV_ARM_tensors";
       default:
     break;
   }
@@ -791,6 +796,27 @@ bool FeatureManager::enabledByDefault(Extension ext) {
         case Extension::NV_cooperative_matrix_decode_vector:
           return false;
       default:
+        // HLSL Change - SPV_ARM_tensors. Deliberately *not* opt-in, for two
+        // reasons.
+        //
+        // First, an explicit -fspv-extension list stays an allow-list: leaving
+        // SPV_ARM_tensors out of it makes every use of a tensor type a
+        // diagnostic ("SPIR-V extension 'SPV_ARM_tensors' required for tensor
+        // types but not permitted to use"), which is the L4 gate in
+        // arm.tensors.extension.error.hlsl, and naming it in the list is
+        // accepted instead of being reported as an unknown extension.
+        //
+        // Second, and decisively, the tensor type already ships: <vk/arm/tosa.h>
+        // declares every TOSA operation over OpTypeTensorARM, and those
+        // declarations request TensorsARM (4174) themselves. Making
+        // SPV_ARM_tensors opt-in would turn every TOSA shader - which passes no
+        // -fspv-extension today, and which has passing tests - into that
+        // diagnostic, because CapabilityVisitor now also derives the extension
+        // from the type. Enabled by default, a shader that uses a tensor in no
+        // way changes; the capability and OpExtension "SPV_ARM_tensors" appear
+        // only in a module that actually contains an OpTypeTensorARM.
+        case Extension::ARM_tensors:
+          return true;
     return true;
   }
 }

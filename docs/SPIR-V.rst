@@ -2720,13 +2720,18 @@ once each, and only when an operation is used. Including the header and using
 nothing from it adds nothing to the module, and there is no import until the first
 TOSA call (``SpirvBuilder::getExtInstSet``).
 
-``SPV_ARM_tensors`` is deliberately **not** a ``FeatureManager`` allow-list entry -
-``-fspv-extension=SPV_ARM_tensors`` is "error: unknown SPIR-V extension" - so the
-header requests the pair with ``[[vk::ext_capability]]`` / ``[[vk::ext_extension]]``
-instead of letting ``CapabilityVisitor`` infer it. There is consequently no flag that
-turns a TOSA body off while leaving the shader intact, which is the right behaviour
-for a graph instruction set: the alternative would be a module whose instructions
-need a capability that the command line had just removed.
+``SPV_ARM_tensors`` is a ``FeatureManager`` allow-list entry (see the "Arm tensors"
+section below), so ``-fspv-extension=SPV_ARM_tensors`` is accepted and the capability and the
+extension are also inferred from the ``OpTypeTensorARM`` type itself. The header still
+requests the pair on every declaration with ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]``: both paths produce the same single
+``OpCapability``/``OpExtension`` pair, and the explicit request is what makes a
+declaration that forgot one impossible, including for the unranked type the header
+uses. Registration also means an explicit ``-fspv-extension`` list that omits
+``SPV_ARM_tensors`` refuses a TOSA body with "SPIR-V extension 'SPV_ARM_tensors'
+required for tensor types but not permitted to use", which is the right behaviour for
+a graph instruction set: the alternative would be a module whose instructions need a
+capability that the command line had just removed.
 
 Operand order is the instructions' and not the mnemonics': ``MAXIMUM`` and
 ``MINIMUM`` take ``nan_mode`` first, ``TRANSPOSE`` takes its permutation first,
@@ -2801,6 +2806,135 @@ string, the capability and extension pair, the operand order of 47 operations, t
 ranked-tensor spelling, the off path, the optimizer-survival path and the two
 element-type and set-string diagnostics.
 
+Arm tensors (``SPV_ARM_tensors``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The ``SPV_ARM_tensors`` extension adds a *tensor* type and three operations over it.
+A tensor is a handle to a multi-dimensional array of one scalar element type that the
+host creates, binds to memory and hands to the shader as a descriptor - the same shape
+as an image or an acceleration structure, with a rank and an element type instead of a
+format and a dimensionality. It is gated by the Vulkan ``VK_ARM_tensors`` device
+extension, whose ``VkPhysicalDeviceTensorPropertiesARM`` structure carries the rank,
+element-count, stride and descriptor-count limits.
+
+.. code:: hlsl
+
+  #include <vk/arm/tensors.h>
+  using namespace vk::arm;
+
+  Tensor<float, 2> t = ...; // the handle; see "Where the value comes from" below
+  Coordinates<2> c = MakeCoordinates(0, 1);
+  float v = TensorRead(t, c); // OpTensorReadARM
+  TensorWrite(t, c, v + 1.0); // OpTensorWriteARM
+  uint w = TensorSize<1>(t); // OpTensorQuerySizeARM
+
+.. code:: text
+
+  OpCapability TensorsARM
+  OpExtension "SPV_ARM_tensors"
+  %tensor = OpTypeTensorARM %float %uint_2
+  %coords = OpTypeArray %uint %uint_2
+  %c0 = OpCompositeConstruct %coords %uint_0 %uint_1
+  %v = OpTensorReadARM %float %tensor %c0
+  OpTensorWriteARM %tensor %c0 %sum        ; no result id
+  %n = OpTensorQuerySizeARM %uint %tensor %uint_1
+
+The instructions are ``OpTypeTensorARM`` (4163), ``OpTensorReadARM`` (4164),
+``OpTensorWriteARM`` (4165) and ``OpTensorQuerySizeARM`` (4166), and the capability is
+``TensorsARM`` (4174). Four details of that encoding are worth spelling out, because
+none of them is what the names suggest:
+
+* ``OpTypeTensorARM``'s *Element Type* is a type operand (not a result type) and its
+  *Rank* is the id of a 32-bit integer constant, not a literal. Its third operand,
+  *Shape* - the id of an ``OpConstantComposite`` of an integer array whose length
+  equals Rank - is not expressible through the ``vk::`` template-argument machinery,
+  which carries types and integer constants but not composite constants, so
+  ``vk::arm::Tensor`` is ranked and unshaped. Only the reading operations need the
+  rank: SPIRV-Tools rejects an unranked tensor for them ("Expected Tensor to be an
+  ``OpTypeTensorARM`` whose Rank is specified"), which is why ``<vk/arm/tosa.h>``'s
+  unranked operand type cannot be read with them.
+* *Coordinates* is one operand: an id of an ``OpTypeArray`` whose element type is an
+  integer and whose length equals the tensor's rank. Not a vector, and not one operand
+  per dimension. ``Coordinates<Rank>`` is that array type and ``MakeCoordinates``
+  builds one with ``OpCompositeConstruct``; SPIRV-Tools checks the length against the
+  rank.
+* ``OpTensorWriteARM`` has **no result id** and takes the value written as its third
+  operand, after the tensor and the coordinates - not as an out-parameter pointer.
+* The *Dimension* operand of ``OpTensorQuerySizeARM`` must name a constant
+  instruction, so ``TensorSize<dimension>()`` takes it as a template argument; it also
+  rejects a dimension that is not smaller than the rank.
+
+``SPV_ARM_tensors`` is registered in ``FeatureManager`` and **enabled by default**. It
+is not part of any Vulkan version, so no target environment implies it, and a module
+that declares ``TensorsARM`` validates for ``vulkan1.0``. Registration buys three
+things: ``-fspv-extension=SPV_ARM_tensors`` is accepted instead of being reported as an
+unknown extension, it is listed by the ``-fspv-extension`` diagnostics, and the
+capability and the extension are emitted through the same ``CapabilityVisitor`` path as
+every other extension - inferred from the tensor *type*, so they cannot appear without
+it. An explicit ``-fspv-extension`` list remains an allow-list: omitting
+``SPV_ARM_tensors`` from it makes every use of a tensor type a compile error ("SPIR-V
+extension 'SPV_ARM_tensors' required for tensor types but not permitted to use"). The
+extension is enabled by default because the tensor type already ships: every TOSA
+operation in ``<vk/arm/tosa.h>`` is declared over ``OpTypeTensorARM``, so opting in
+would turn every existing TOSA shader - which passes no flag - into that error.
+
+Diagnosed rather than miscompiled:
+
+* A non-scalar element type (``Tensor<float2, 2>``) and a rank outside 1..4. A rank of
+  0 is invalid SPIR-V; a rank above 4 is outside the range every implementation
+  supports, because Vulkan requires ``maxTensorDimensionCount`` to be at least 4 and
+  the compiler cannot query the device.
+* A tensor in stage input or output, and a tensor as a member of a uniform, storage
+  buffer or push constant block. SPIRV-Tools happens to accept both, so this diagnostic
+  is the only thing between the shader and a module no host can bind. Note that an
+  HLSL *global* of tensor type is placed in ``$Globals``, which is a uniform block, and
+  that ``[vk::binding]`` on such a global is refused earlier ("variable 'x' will be
+  placed in $Globals so cannot have vk::binding attribute").
+* Use under an explicit ``-fspv-extension`` list that omits the extension.
+
+Where the value comes from - and the limit of this landing
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+``SPV_ARM_tensors`` makes ``OpTypeTensorARM`` a descriptor type: SPIRV-Tools lists it
+next to ``OpTypeImage`` and ``OpTypeAccelerationStructureKHR`` among the types a
+``UniformConstant`` variable may have, and next to them in the ``ResourceHeapEXT`` type
+list. HLSL has no resource-object spelling for it, and no way to ask for a
+``UniformConstant`` variable of an arbitrary opaque type, so a tensor **resource** is
+not expressible from HLSL today. That is a front-end feature - a resource type like
+``RaytracingAccelerationStructure``, or the data-graph entry point of
+``SPV_ARM_graph`` - and not something a header can supply.
+
+Until then a tensor handle comes from one of two places:
+
+* a TOSA operation. An ``[[vk::ext_instruction(<opcode>, "TOSA.001000.1")]]``
+  declaration whose result type is ``vk::arm::Tensor<T, Rank>`` produces a ranked
+  tensor, which can then be read.
+* an uninitialized local. ``OpVariable`` in ``Function`` storage, ``OpLoad``\ ed once,
+  is a structurally valid module; what the handle points at is whatever the
+  implementation put there, so a shader that does this and runs is reading an undefined
+  resource. It is what the tests compile.
+
+What the host has to do - none of it is checkable here:
+
+* enable the ``VK_ARM_tensors`` device extension and its tensor features, and query
+  ``VkPhysicalDeviceTensorPropertiesARM`` for the limits;
+* create the tensor with ``vkCreateTensorARM``, bind memory, and write the descriptor; a
+  ``VkTensorDescriptionARM`` whose element type or ``dimensionCount`` does not match the
+  type in the module, or a descriptor that is never written, fails at pipeline creation
+  or reads garbage;
+* keep the descriptor within ``maxDescriptorSetStorageTensors`` and
+  ``maxPerStageDescriptor*StorageTensors``, each dimension within
+  ``maxPerDimensionTensorElements``, and the rank within ``maxTensorDimensionCount`` (at
+  least 4 everywhere, which is the largest rank the header accepts);
+* ``shaderTensorSupportedStages`` requires ``VK_SHADER_STAGE_COMPUTE_BIT`` for the
+  tensor features implemented here, so a module that uses a tensor belongs to a compute
+  pipeline;
+* numeric conformance is the implementation's: no CI in this repository executes a
+  tensor instruction, so the tests pin the encoding, not the arithmetic.
+
+See ``examples/spirv-extensions/arm-tensors.hlsl`` for a self-contained example and
+``tools/clang/test/CodeGenSPIRV/arm.tensors*.hlsl`` for the tests that pin the capability
+and extension pair, the type with its rank, the operand order of the three instructions,
+the off path, the optimizer-survival path and the five diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -2856,6 +2990,7 @@ Supported extensions
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product
 * SPV_ARM_cooperative_matrix_layouts
+* SPV_ARM_tensors
 * SPV_NV_cooperative_vector
 * SPV_NV_cooperative_matrix2
 * SPV_NV_tensor_addressing

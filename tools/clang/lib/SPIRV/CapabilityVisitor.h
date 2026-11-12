@@ -115,6 +115,16 @@ private:
   // diagnostic.
   bool reportedTensorLayoutDimension = false;
   bool reportedTensorLayoutClampMode = false;
+  // HLSL Change Begin - SPV_ARM_tensors. Set once the corresponding
+  // diagnostic has been reported, so that a tensor type reachable from
+  // several instructions does not repeat it. Each message is one per
+  // module: the same wrong element type, rank or storage class usually
+  // comes from one declaration with several uses.
+  bool reportedTensorElementType = false;
+  bool reportedTensorRank = false;
+  bool reportedTensorStorageClass = false;
+  bool reportedTensorBlockStorage = false;
+  // HLSL Change End - SPV_ARM_tensors.
   // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
     /// Checks that every operand of \p inst at \p indices names a constant
     /// instruction, the requirement SPV_NV_cooperative_vector places on the

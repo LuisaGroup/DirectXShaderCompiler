@@ -83,21 +83,23 @@
 // OpTypeTensorARM is in SPV_ARM_tensors, so the *type* requires
 // OpCapability TensorsARM (4174) and OpExtension "SPV_ARM_tensors". Both are
 // attached to every declaration below with [[vk::ext_extension]] and
-// [[vk::ext_capability]] rather than inferred, because:
+// [[vk::ext_capability]] rather than left to be inferred, because:
 //
 //  * TOSA has no capability and no extension string of its own - the grammar
 //    (external/SPIRV-Headers/include/spirv/unified1/
 //     extinst.tosa.001000.1.grammar.json) names neither, and SPIRV-Tools
 //    recognizes the set purely by the import string (spvExtInstImportTypeGet).
-//  * FeatureManager has no SPIR-V-side entry for SPV_ARM_tensors - naming it on
-//    the command line is "error: unknown SPIR-V extension 'SPV_ARM_tensors'" - so
-//    CodeGen has nothing to infer the capability from. [[vk::ext_capability]]
-//    writes it directly, which means -fspv-extension cannot select or refuse it.
-//    That is the intended contract for this header: TOSA is a graph instruction
-//    set that only makes sense in a module that already committed to the Arm
-//    tensor model, so the capability is unconditional and the deviation is
-//    recorded rather than papered over (tosa.identifiers.error.hlsl pins the
-//    "unknown SPIR-V extension" diagnostic).
+//    The pair belongs to the operand type, so writing it on every declaration
+//    is what makes a declaration that forgot it impossible.
+//  * SPV_ARM_tensors is registered in FeatureManager and enabled by default
+//    (see <vk/arm/tensors.h> and docs/SPIR-V.rst, "Arm tensors"), so the
+//    capability is also inferred from the OpTypeTensorARM type itself. Both
+//    paths produce the same single OpCapability/OpExtension pair, so the
+//    explicit request is redundant but harmless, and -fspv-extension can
+//    refuse the extension: an explicit -fspv-extension list that omits
+//    SPV_ARM_tensors turns every use into "SPIR-V extension SPV_ARM_tensors
+//    required for tensor types but not permitted to use"
+//    (tosa.identifiers.error.hlsl pins that diagnostic).
 //
 // The OpExtInstImport is emitted lazily, by the first TOSA call in the module
 // (SpirvBuilder::getExtInstSet); including the header and using nothing from it

@@ -20,6 +20,30 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_ARM_tensors` (`VK_ARM_tensors`): the tensor type and the
+  three operations that read, write and measure one. Tensors are a new kind of
+  resource - a handle to a multi-dimensional array of one scalar element type that
+  the host creates and binds, like an image or an acceleration structure with a rank
+  and an element type instead of a format and a dimensionality. The new
+  `<vk/arm/tensors.h>` header provides `vk::arm::Tensor<ElementType, Rank>` (which
+  lowers to `OpTypeTensorARM`, 4163, with the element type and the rank as operands),
+  `vk::arm::Coordinates<Rank>` and `vk::arm::MakeCoordinates` (the coordinate operand
+  is an `OpTypeArray` of integers whose length equals the rank, built with
+  `OpCompositeConstruct`), `TensorRead` (`OpTensorReadARM`, 4164), `TensorWrite`
+  (`OpTensorWriteARM`, 4165 - no result id, the value is an ordinary operand) and
+  `TensorSize<dimension>` (`OpTensorQuerySizeARM`, 4166). `SPV_ARM_tensors` is now a
+  registered, enabled-by-default `FeatureManager` extension, so
+  `-fspv-extension=SPV_ARM_tensors` is accepted, the extension is emitted from the
+  tensor type through the same `CapabilityVisitor` path as every other extension, and
+  an explicit `-fspv-extension` list that omits it is a compile error. A non-scalar
+  element type, a rank outside 1..4 (Vulkan only guarantees a `maxTensorDimensionCount`
+  of 4), a tensor in stage input/output and a tensor as a member of a uniform, storage
+  buffer or push constant block - which is what an HLSL global of tensor type becomes,
+  `$Globals` - are diagnosed instead of producing SPIR-V that SPIRV-Tools accepts and
+  no host can bind. Not provided: a tensor *resource*, because HLSL has no
+  resource-object spelling for a descriptor type; a tensor value currently comes from
+  a TOSA operation or an uninitialized local. See `docs/SPIR-V.rst` ("Arm tensors")
+  and `examples/spirv-extensions/arm-tensors.hlsl`.
 - Added support for the `TOSA.001000.1` extended instruction set: TOSA (Tensor
   Operator Set Architecture) is Arm's operator set for the tensor graphs of the
   ARM data-graph ecosystem, and it is an extended instruction *set* rather than a
