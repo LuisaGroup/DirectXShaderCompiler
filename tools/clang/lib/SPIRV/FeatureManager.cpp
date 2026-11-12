@@ -261,6 +261,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_NV_linear_swept_spheres.
         .Case("SPV_NV_linear_swept_spheres",
               Extension::NV_linear_swept_spheres)
+        // HLSL Change - SPV_QCOM_image_processing3.
+        .Case("SPV_QCOM_image_processing3",
+              Extension::QCOM_image_processing3)
         .Default(Extension::Unknown);
 }
 
@@ -378,6 +381,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_NV_linear_swept_spheres.
     case Extension::NV_linear_swept_spheres:
       return "SPV_NV_linear_swept_spheres";
+    // HLSL Change - SPV_QCOM_image_processing3.
+    case Extension::QCOM_image_processing3:
+      return "SPV_QCOM_image_processing3";
     default:
     break;
   }
@@ -592,6 +598,18 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // instead of a module that declares an extension the host never asked
     // for, and a module that does not touch sphere geometry is unchanged.
     case Extension::NV_linear_swept_spheres:
+      return false;
+    // HLSL Change - SPV_QCOM_image_processing3. A module that gathers with one of
+    // the modes in <vk/qcom/image_processing3.h> declares the
+    // ImageGatherLinearQCOM or the ImageGatherExtendedModesQCOM capability and
+    // OpExtension "SPV_QCOM_image_processing3", which a driver without
+    // VK_QCOM_image_processing3 rejects. The extension is therefore opt-in:
+    // without -fspv-extension=SPV_QCOM_image_processing3 every gather call is a
+    // compile error (see the OpImageGatherQCOM case in CapabilityVisitor)
+    // instead of a module that declares an extension the host never asked for,
+    // and a shader that does not gather with one of the modes - including one
+    // that includes the header - is unchanged.
+    case Extension::QCOM_image_processing3:
       return false;
     default:
     return true;

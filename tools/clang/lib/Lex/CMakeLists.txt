@@ -54,6 +54,7 @@ if (ENABLE_SPIRV_CODEGEN)
  vk/nv/cluster_as.h
  vk/nv/linear_swept_spheres.h
  vk/opcode_selector.h
+ vk/qcom/image_processing3.h
  vk/spirv.h
  )
 endif()

@@ -792,6 +792,58 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     break;
   // HLSL Change End - SPV_NV_linear_swept_spheres.
 
+  // HLSL Change Begin - SPV_QCOM_image_processing3.
+  // OpImageGatherQCOM gathers one component of the four texels whose footprint
+  // is picked by its Mode operand, and the extension spreads the modes over two
+  // capabilities:
+  //   Gather4x1QCOM (0)                   -> ImageGatherLinearQCOM
+  //   GatherDQCOM (1), GatherH2QCOM (2),
+  //   GatherV2QCOM (3)                    -> ImageGatherExtendedModesQCOM
+  // (SPV_QCOM_image_processing3, "Image Gather Modes"; SPIRV-Tools enforces the
+  // pairing with "Mode GatherModesGather4x1QCOM (== 0) requires capability
+  // ImageGatherLinearQCOM" and "Mode ... requires capability
+  // ImageGatherExtendedModesQCOM"). The capability is therefore selected from
+  // the instruction's Mode operand, i.e. per call shape, instead of once for the
+  // extension: a module that only uses the linear (4x1) mode has to stay
+  // acceptable on a device that does not enable the extended modes, and one
+  // capability must never imply the other. The mode is an ordinary argument of
+  // the declarations in <vk/qcom/image_processing3.h>, so it reaches this
+  // visitor as a constant instruction - the header bakes it in, one declaration
+  // per mode. If it cannot be resolved (a specialization constant, or a call that
+  // passed the mode explicitly to something the constant evaluation did not fold)
+  // both capabilities are declared: that is a legal superset and keeps the module
+  // valid whichever mode the host picks, since SPIRV-Tools only checks the pairing
+  // when the mode is a non-specialization constant.
+  // The extension is emitted here, from the instruction, through the ordinary
+  // registration path (and not through [[vk::ext_capability]] /
+  // [[vk::ext_extension]] on the header declarations) so that
+  // -fspv-extension= stays an effective allow-list: addExtension() reports
+  // "SPIR-V extension 'SPV_QCOM_image_processing3' required for
+  // OpImageGatherQCOM but not permitted to use" when the extension is not
+  // enabled, and neither capability is ever emitted without the extension Vulkan
+  // requires of it (SPIRV-Tools: "Capability ImageGatherExtendedModesQCOM is not
+  // allowed by Vulkan 1.0 specification (or requires extension)").
+  case spv::Op::OpImageGatherQCOM: {
+    addExtension(Extension::QCOM_image_processing3, "OpImageGatherQCOM", loc);
+    // Operands in declaration order: sampled image, coordinate, component,
+    // mode. Only the mode selects the capability.
+    const auto *intrInst = dyn_cast<SpirvIntrinsicInstruction>(instr);
+    const SpirvConstantInteger *mode = nullptr;
+    if (intrInst && intrInst->getOperands().size() > 3)
+      mode = dyn_cast<SpirvConstantInteger>(intrInst->getOperands()[3]);
+    // Gather4x1QCOM (0) is the linear mode; 1..3 are the extended modes.
+    if (mode && !mode->isSpecConstant() && mode->getValue().ult(4)) {
+      if (mode->getValue().getZExtValue() == 0)
+        addCapability(spv::Capability::ImageGatherLinearQCOM, loc);
+      else
+        addCapability(spv::Capability::ImageGatherExtendedModesQCOM, loc);
+    } else {
+      addCapability(spv::Capability::ImageGatherLinearQCOM, loc);
+      addCapability(spv::Capability::ImageGatherExtendedModesQCOM, loc);
+    }
+    break;
+  }
+  // HLSL Change End - SPV_QCOM_image_processing3.
 
   case spv::Op::OpReportIntersectionKHR:
   case spv::Op::OpIgnoreIntersectionKHR:

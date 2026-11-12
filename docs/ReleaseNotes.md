@@ -21,6 +21,30 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_QCOM_image_processing3`: with
+  `-fspv-extension=SPV_QCOM_image_processing3`, the entry points in
+  `<vk/qcom/image_processing3.h>` gather with a footprint chosen by a mode operand
+  instead of the fixed 2x2 quad of `OpImageGather`, emitting `OpImageGatherQCOM`
+  (4545) as `(Result Type, Result, Sampled Image, Coordinate, Component, Mode)`:
+  `vk::qcom::ImageGather4x1()` (`Gather4x1QCOM`, four horizontally adjacent
+  texels), `vk::qcom::ImageGatherD()` (`GatherDQCOM`, the four cardinal
+  neighbours), `vk::qcom::ImageGatherH2()` (`GatherH2QCOM`, two 2x1 pairs) and
+  `vk::qcom::ImageGatherV2()` (`GatherV2QCOM`, two 1x2 pairs) - plus `...Array`
+  variants that take the array layer as the third coordinate component - with the
+  gathered channel chosen by the template argument
+  (`vk::qcom::ImageGatherD<2>(image, coord)` gathers blue). The capability is
+  selected per call shape from the mode operand, because the two Vulkan feature
+  bits behind it are independent: `ImageGatherLinearQCOM` (4543) for
+  `Gather4x1QCOM` and `ImageGatherExtendedModesQCOM` (4544) for the other three.
+  The component and the mode are constants in the module, which is what SPIRV-Tools
+  requires of a Vulkan module; the extension is opt-in like the rest of the family,
+  so without `-fspv-extension=SPV_QCOM_image_processing3` every call is a compile
+  error, and the module also needs a SPIR-V 1.4 target environment
+  (`-fspv-target-env=vulkan1.1spirv1.4` or newer). The surface is SPIR-V only -
+  there is no DXIL instruction for a mode-selected gather - and covers combined
+  image samplers (`vk::SampledTexture2D`), not a `Texture2D` plus a separate
+  `SamplerState`. See the "Image gather modes" section of `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/qcom-image-processing3.hlsl`.
 - Added support for `SPV_NV_linear_swept_spheres`: with
   `-fspv-extension=SPV_NV_linear_swept_spheres`, the accessors in
   `<vk/nv/linear_swept_spheres.h>` read the analytic geometry of a ray query

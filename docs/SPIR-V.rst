@@ -1330,6 +1330,147 @@ example and ``tools/clang/test/CodeGenSPIRV/maintenance12.*.hlsl`` for the tests
 that pin the decoration, its absence for uniform indices, the nested
 struct-of-arrays shape, and its survival through spirv-opt.
 
+Image gather modes
+~~~~~~~~~~~~~~~~~~
+
+``VK_QCOM_image_processing3`` adds ``OpImageGatherQCOM``: a texture gather whose
+footprint is chosen by a *mode* operand instead of being fixed to the 2x2 quad
+that ``OpImageGather`` (what ``Texture2D::Gather*`` lowers to) always reads. The
+Adreno GPUs the extension was written for implement the four footprints as
+dedicated instructions, so an upscaling or sharpening kernel that needs exactly
+those taps gets one hardware gather instead of four taps or a gather reprogrammed
+with ``ConstOffsets``:
+
+* ``Gather4x1QCOM`` (0) - four horizontally adjacent texels: vectorised loads with
+  linear cache locality, or a 4-tap horizontal kernel.
+* ``GatherDQCOM`` (1) - the four cardinal neighbours around the coordinate (a
+  diamond). With a point sample of the centre texel this is the 5-tap kernel of
+  contrast adaptive sharpening.
+* ``GatherH2QCOM`` (2) - two 2x1 pairs, one row above and one row below the
+  coordinate.
+* ``GatherV2QCOM`` (3) - two 1x2 pairs, one column left and one column right. With
+  ``GatherH2QCOM`` and an ordinary 2x2 gather this builds the 12 taps of a
+  separable upscaling filter.
+
+The entry points live in ``<vk/qcom/image_processing3.h>``:
+
+.. code:: hlsl
+
+  #include <vk/qcom/image_processing3.h>
+
+  vk::SampledTexture2D<float4> Input : register(t0);
+
+  // one instruction, four texels: OpImageGatherQCOM %v4float %input %uv
+  //                                  %int_0 %int_1   (component 0, mode 1)
+  float4 neighbours = vk::qcom::ImageGatherD(Input, uv);
+
+  // the fourth channel of four horizontally adjacent texels: the template
+  // argument is the component, so this is %int_3 %int_0
+  float4 alpha = vk::qcom::ImageGather4x1<3>(Input, uv);
+
+  // arrayed image: three coordinate components, the third is the array layer
+  float4 row = vk::qcom::ImageGatherH2Array(InputArray, float3(uv, layer));
+
+The instruction is ``OpImageGatherQCOM`` (4545) with the operands ``(IdResultType,
+IdResult, Sampled Image, Coordinate, Component, Mode [, Image Operands])``. The
+result is a four-component vector of the image's sampled type, *Sampled Image*
+must be an ``OpTypeSampledImage`` whose ``OpTypeImage`` has a ``Dim`` of 2D and
+``MS = 0``, the coordinate is a floating-point vector, *Component* selects the
+channel gathered from all four texels and *Mode* the footprint. Component and Mode
+are ids but must be 32-bit integer **constants**: SPIRV-Tools rejects a
+non-constant component in a Vulkan environment, and the mode is what selects the
+capability. That is why the header takes the component as a template argument and
+bakes the mode into one declaration per mode instead of exposing either as an
+ordinary parameter, and why the two trailing parameters of each declaration (whose
+defaults carry those constants into the instruction) are not part of the surface.
+Passing a runtime value as the component is possible but defeats that guarantee:
+the module is then invalid for Vulkan and SPIRV-Tools rejects it ("Expected
+Component Operand to be a const object for Vulkan environment"), which is the only
+diagnostic DXC gives for it.
+
+**Two capabilities, selected per call shape.** ``ImageGatherLinearQCOM`` (4543)
+covers ``Gather4x1QCOM`` and ``ImageGatherExtendedModesQCOM`` (4544) covers
+``GatherDQCOM``, ``GatherH2QCOM`` and ``GatherV2QCOM``; both are introduced by the
+same extension and a module declares only the ones its modes need:
+
+.. code:: hlsl
+
+  // ImageGatherLinearQCOM (4543) + OpExtension "SPV_QCOM_image_processing3"
+  float4 row = vk::qcom::ImageGather4x1(Input, uv);
+
+  // ImageGatherExtendedModesQCOM (4544) + the same OpExtension
+  float4 diamond = vk::qcom::ImageGatherD(Input, uv);
+
+The capability is picked in ``CapabilityVisitor`` from the *Mode* operand of the
+instruction, not once for the extension, because the two Vulkan feature bits that
+back them are independent: a shader that only uses the linear mode has to stay
+acceptable on a device that does not enable the extended modes, and one capability
+must never imply the other. A mode that cannot be resolved to a constant (a
+specialization constant, say) declares both, which is a legal superset; SPIRV-Tools
+only checks the pairing for a non-specialization constant. The extension itself is
+emitted through the ordinary registration path as well, from the instruction
+(``FeatureManager``/``CapabilityVisitor``) rather than through
+``[[vk::ext_capability]]``/``[[vk::ext_extension]]`` on the header declarations,
+which write the capability and the extension string unconditionally and would let a
+shader bypass the allow-list.
+
+The extension is **not** enabled by default. A module that gathers with one of the
+modes declares the capability and ``OpExtension "SPV_QCOM_image_processing3"``,
+which a driver without ``VK_QCOM_image_processing3`` rejects, so the entry points
+are only accepted with ``-fspv-extension=SPV_QCOM_image_processing3``. Without that
+flag every call is a compile error (``SPIR-V extension
+'SPV_QCOM_image_processing3' required for OpImageGatherQCOM but not permitted to
+use``) instead of a module that declares an extension the host never asked for, and
+a shader that does not gather with one of the modes - including one that includes
+the header - is unchanged.
+
+Like the rest of the family, the extension requires **SPIR-V 1.4**, so the module
+needs ``-fspv-target-env=vulkan1.1spirv1.4`` or a newer target environment. DXC
+does not enforce that: the vendored SPIRV-Tools does not check the SPIR-V version an
+extension requires, and a module below 1.4 that carries the extension is a
+validation and driver question rather than a compile error here.
+
+Limitations:
+
+* **These are gathers, not filters.** No weights are applied, no derivatives are
+  taken and the level of detail is the base level, exactly as for
+  ``OpImageGather``. A kernel still does its own multiply-accumulate on the four
+  returned texels.
+* **The lane order depends on the mode**, and the four modes order their texels
+  differently (the extension's instruction table draws the footprint of each),
+  so the kernel has to read the lanes in the order its mode produces. The compiler
+  cannot check that, and there is no execution coverage for this extension in the
+  test suite.
+* The image must already be a combined image sampler: ``vk::SampledTexture2D`` or
+  ``vk::SampledTexture2DArray`` (an ``OpTypeSampledImage``). A ``Texture2D`` plus a
+  separate ``SamplerState`` is not accepted, because whether an image and a sampler
+  may be combined is a host decision and DXC would otherwise open-code
+  ``OpSampledImage`` behind the shader author's back. Only ``Dim`` 2D images are
+  covered, arrayed or not.
+* The gather restrictions of the extension apply and are not diagnosed: no cube map
+  views, no depth comparison (``OpImageDrefGather``), no ``ConstOffsets`` and no
+  sparse residency. A mismatched image view is a validation or runtime problem, not
+  a compile-time one.
+* The host must enable the feature of the capability the mode declares -
+  ``VkPhysicalDeviceImageProcessing3FeaturesQCOM::imageGatherLinear`` for
+  ``Gather4x1QCOM``, ``::imageGatherExtendedModes`` for
+  ``GatherDQCOM``/``H2``/``V2`` - on top of ``VK_QCOM_image_processing`` and create
+  the combined image sampler as an image processing sampler
+  (``VK_SAMPLER_CREATE_IMAGE_PROCESSING_BIT_QCOM``). The compiler cannot check any
+  of that.
+* This is a SPIR-V only surface: there is no DXIL instruction for a gather with a
+  mode operand, and the ``vk::SampledTexture*`` types the entry points take only
+  exist in a SPIR-V compile, so including the header in a DXIL compile fails on the
+  type name (``no type named 'SampledTexture2D' in namespace 'vk'``).
+
+See ``examples/spirv-extensions/qcom-image-processing3.hlsl`` for a self-contained
+example (contrast adaptive sharpening with ``GatherDQCOM`` and a 4-tap horizontal
+kernel with ``Gather4x1QCOM``) and
+``tools/clang/test/CodeGenSPIRV/qcom.image-processing3*.hlsl`` for the tests that
+pin the capability of each mode, the extension, the instruction with its result
+type and operand order, the unchanged off path, the survival of the gathers through
+spirv-opt, and the diagnostic for a missing ``-fspv-extension``.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1375,6 +1516,7 @@ Supported extensions
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap
 * SPV_KHR_fma
+* SPV_QCOM_image_processing3
 * SPV_QCOM_multiple_wait_queues
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product

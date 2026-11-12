@@ -103,6 +103,9 @@ enum class Extension {
   // HLSL Change - SPV_NV_linear_swept_spheres (the OpRayQuery*Sphere*NV /
   // OpRayQuery*LSS*NV accessors in <vk/nv/linear_swept_spheres.h>).
   NV_linear_swept_spheres,
+  // HLSL Change - SPV_QCOM_image_processing3 (OpImageGatherQCOM, the gather
+  // entry points in <vk/qcom/image_processing3.h>).
+  QCOM_image_processing3,
   Unknown,
 };
 
