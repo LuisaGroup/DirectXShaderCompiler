@@ -291,6 +291,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
             Extension::NV_cooperative_matrix_decode_vector)
 // HLSL Change - SPV_ARM_tensors.
 .Case("SPV_ARM_tensors", Extension::ARM_tensors)
+// HLSL Change - SPV_ARM_graph.
+.Case("SPV_ARM_graph", Extension::ARM_graph)
 .Default(Extension::Unknown);
 }
 
@@ -444,6 +446,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
           // HLSL Change - SPV_ARM_tensors.
           case Extension::ARM_tensors:
             return "SPV_ARM_tensors";
+          // HLSL Change - SPV_ARM_graph.
+          case Extension::ARM_graph:
+            return "SPV_ARM_graph";
       default:
     break;
   }
@@ -816,6 +821,26 @@ bool FeatureManager::enabledByDefault(Extension ext) {
         // way changes; the capability and OpExtension "SPV_ARM_tensors" appear
         // only in a module that actually contains an OpTypeTensorARM.
         case Extension::ARM_tensors:
+          return true;
+        // HLSL Change - SPV_ARM_graph. Enabled by default, like
+        // SPV_ARM_tensors above, and for the same first reason: an explicit
+        // -fspv-extension list stays an allow-list, so leaving SPV_ARM_graph
+        // out of it turns every graph declaration into
+        // "SPIR-V extension 'SPV_ARM_graph' required for data graph types but
+        // not permitted to use" (arm.graph.extension.error.hlsl), and naming
+        // it in the list is accepted rather than reported as unknown.
+        //
+        // The second reason is stronger here than for the tensor type: the
+        // graph is not reachable from any pre-existing HLSL spelling at all.
+        // Nothing emits OpGraphARM unless the shader calls the declaration-only
+        // entry points of <vk/arm/graph.h>, so enabling the extension by
+        // default cannot change the code generation of a single existing
+        // shader - it only means a graph shader does not need a command-line
+        // flag in addition to the API call that already opted in. Nothing in
+        // the extension is part of any Vulkan version, so
+        // isExtensionRequiredForTargetEnv() keeps the default (true) and
+        // OpExtension is emitted for every target environment.
+        case Extension::ARM_graph:
           return true;
     return true;
   }

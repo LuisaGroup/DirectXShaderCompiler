@@ -13,6 +13,8 @@
 #include "clang/SPIRV/SpirvBasicBlock.h"
 #include "clang/SPIRV/SpirvContext.h"
 #include "clang/SPIRV/SpirvFunction.h"
+// HLSL Change - SPV_ARM_graph.
+#include "clang/SPIRV/SpirvGraph.h"
 #include "clang/SPIRV/SpirvInstruction.h"
 #include "clang/SPIRV/SpirvModule.h"
 
@@ -65,6 +67,59 @@ public:
 
   /// Returns the SPIR-V module being built.
   SpirvModule *getModule() { return mod.get(); }
+
+    // === SPV_ARM_graph ===
+    // HLSL Change Begin - SPV_ARM_graph.
+    /// \brief Opens the module's data graph, emitting nothing yet: the graph
+    /// type is only known once every input and output has been declared, so it
+    /// is built by endGraph(). `name` is the name OpGraphEntryPointARM gives the
+    /// graph. Returns false (and reports nothing) if a graph is already open or
+    /// the module already has one - one module has at most one graph.
+    bool beginGraph(llvm::StringRef name);
+    /// \brief True between beginGraph() and endGraph().
+    bool isInGraph() const { return currentGraph != nullptr; }
+    /// \brief True if the module declares a graph, closed or not.
+    bool hasGraph() const { return mod->getGraph() != nullptr; }
+    /// \brief Returns the module's graph, or nullptr.
+    SpirvGraphARM *getGraph() const { return mod->getGraph(); }
+    /// \brief Creates the value of an OpGraphInputARM read: an instruction that
+    /// carries the input's tensor type but is not part of any basic block, so
+    /// that addGraphInput() can record it as part of the graph region. The type
+    /// is lowered here, because the instruction never reaches the module tree
+    /// LowerTypeVisitor walks.
+    SpirvInstruction *createGraphInputValue(QualType tensorType,
+                                           SourceLocation loc);
+    /// \brief Records an OpGraphInputARM read of graph input `index` whose value
+    /// is the given instruction.
+    void addGraphInput(SpirvInstruction *value, uint32_t index);
+    /// \brief Resolves a value (or a read of a local) inside a graph declaration
+    /// to the graph value it stands for.
+    SpirvInstruction *resolveGraphValue(SpirvInstruction *value) const;
+    /// \brief Records an OpGraphSetOutputARM of `value` to output `index`.
+    void addGraphOutput(SpirvInstruction *value, uint32_t index);
+    /// \brief Closes the graph: builds OpTypeGraphARM from the declared inputs
+    /// and outputs, adds the UniformConstant interface variables
+    /// OpGraphEntryPointARM names (DescriptorSet 0, Binding = the position in
+    /// the graph type's I/O list) and leaves the two for EmitVisitor::emitGraph.
+    /// Returns false if the graph has no output (SPIRV-Tools: "A graph type must
+    /// have at least one output.").
+    bool endGraph(SourceLocation loc);
+    /// \brief Returns the name of the function currently being built, which is
+    /// the shader entry point's name while an entry point is emitted.
+    llvm::StringRef getCurrentFunctionName() const;
+    /// \brief Decorates one of the graph's UniformConstant interface variables
+    /// with DescriptorSet 0 and the given Binding. Vulkan requires both on every
+    /// UniformConstant variable, and the compiler assigns them because HLSL has
+    /// no way to declare one of these variables itself.
+    void decorateGraphInterface(SpirvVariable *var, uint32_t binding,
+                                SourceLocation loc);
+    /// \brief Creates one of the graph's UniformConstant interface variables, a
+    /// pointer to the graph I/O type `ioType`.
+    SpirvVariable *addGraphInterfaceVar(const SpirvType *ioType,
+                                        uint32_t binding, llvm::StringRef name,
+                                        SourceLocation loc);
+    // HLSL Change End - SPV_ARM_graph.
+
 
   // === Function and Basic Block ===
 
@@ -1012,10 +1067,25 @@ private:
   ASTContext &astContext;
   SpirvContext &context; ///< From which we allocate various SPIR-V object
   FeatureManager &featureManager;
-
   std::unique_ptr<SpirvModule> mod; ///< The current module being built
-  SpirvFunction *function;          ///< The current function being built
-  SpirvBasicBlock *insertPoint;     ///< The current basic block being built
+  SpirvFunction *function; ///< The current function being built
+  SpirvBasicBlock *insertPoint; ///< The current basic block being built
+  /// HLSL Change - SPV_ARM_graph. The data graph being declared, or nullptr
+  /// when the shader is not inside a graph declaration (i.e. almost always).
+  /// Between beginGraph() and endGraph() the graph is the *destination* of
+  /// the shader body: local variables, loads and stores are not emitted as
+  /// instructions (a graph body may contain none) but renamed, and extended
+  /// instructions become the graph body.
+  SpirvGraphARM *currentGraph;
+  /// HLSL Change - SPV_ARM_graph. The function that declared the module's
+  /// graph, used by endFunction() to reject a graph declaration that also
+  /// produces instructions.
+  SpirvFunction *graphFunction;
+  /// HLSL Change - SPV_ARM_graph. Maps a variable or a load inside a graph
+  /// declaration to the value it holds: `Tensor t = GraphInput(0);` records
+  /// the input and never emits an OpVariable or an OpStore, and a later read
+  /// of `t` yields the input's value.
+  llvm::DenseMap<SpirvInstruction *, SpirvInstruction *> graphValues;
 
   SpirvFunction *moduleInit;              ///< The module initialization
                                           ///< function

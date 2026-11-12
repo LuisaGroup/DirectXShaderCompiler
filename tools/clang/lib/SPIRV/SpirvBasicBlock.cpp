@@ -29,6 +29,16 @@ bool SpirvBasicBlock::hasTerminator() const {
          isa<SpirvTerminator>(instructions.back().instruction);
 }
 
+// HLSL Change Begin - SPV_ARM_graph.
+llvm::SmallVector<SpirvInstruction *, 8>
+SpirvBasicBlock::getInstructionList() const {
+  llvm::SmallVector<SpirvInstruction *, 8> result;
+  for (auto instructionNode : instructions)
+    result.push_back(instructionNode.instruction);
+  return result;
+}
+// HLSL Change End - SPV_ARM_graph.
+
 bool SpirvBasicBlock::invokeVisitor(
     Visitor *visitor, llvm::ArrayRef<SpirvVariable *> vars,
     SpirvDebugScope *functionScope,

@@ -30,6 +30,7 @@ SpirvBuilder::SpirvBuilder(ASTContext &ac, SpirvContext &ctx,
                            FeatureManager &featureMgr)
     : astContext(ac), context(ctx), featureManager(featureMgr),
       mod(llvm::make_unique<SpirvModule>()), function(nullptr),
+      insertPoint(nullptr), currentGraph(nullptr), graphFunction(nullptr),
       moduleInit(nullptr), moduleInitInsertPoint(nullptr), spirvOptions(opt),
       builtinVars(), debugNone(nullptr), nullDebugExpr(nullptr),
       stringLiterals(), emptyString(nullptr) {}
@@ -106,16 +107,207 @@ SpirvVariable *SpirvBuilder::addFnVar(QualType valueType, SourceLocation loc,
                                     isPrecise, isNointerp, init);
   }
   var->setDebugName(name);
+  // HLSL Change Begin - SPV_ARM_graph. A graph body may not contain an
+  // OpVariable, so a local of a shader that declares a graph is a name for a
+  // value and not a memory object: createStore() records the value the name
+  // gets and createLoad() returns it. Registering the variable with the
+  // function would emit an OpVariable in the entry block.
+  if (currentGraph) {
+    graphValues[var] = nullptr;
+    return var;
+  }
+  // HLSL Change End - SPV_ARM_graph.
   function->addVariable(var);
   return var;
 }
 
 void SpirvBuilder::endFunction() {
   assert(function && "no active function");
+  // HLSL Change Begin - SPV_ARM_graph. A function that declares a data graph
+  // is a declaration, not code: SPV_ARM_graph's graph region may contain only
+  // extended instructions, and every value the graph consumes has to come from
+  // OpGraphInputARM or from another graph operation. Anything the emitter put
+  // into the function's basic blocks other than the terminator is therefore
+  // code that cannot become part of the graph, and silently leaving it in the
+  // module would produce a compute shader next to a graph that ignores it.
+  // Locals, loads and stores never reach this check: they are renamed away by
+  // addFnVar/createLoad/createStore while the graph is open.
+  if (mod->getGraph() && graphFunction == function) {
+    for (auto *bb : function->getBasicBlocks()) {
+      for (auto *inst : bb->getInstructionList()) {
+        if (isa<SpirvTerminator>(inst) || isa<SpirvDebugInstruction>(inst))
+          continue;
+        featureManager.reportError(
+            "a data graph is declared, not executed: the entry point that "
+            "declares a graph may not contain any other instruction "
+            "(SPV_ARM_graph allows only extended instructions inside a graph, "
+            "and every graph value must come from a graph input or another "
+            "graph operation)",
+            inst->getSourceLocation());
+      }
+    }
+  }
+  // HLSL Change End - SPV_ARM_graph.
   mod->addFunctionToListOfSortedModuleFunctions(function);
   function = nullptr;
   insertPoint = nullptr;
 }
+
+// HLSL Change Begin - SPV_ARM_graph.
+bool SpirvBuilder::beginGraph(llvm::StringRef name) {
+  if (mod->getGraph() || currentGraph)
+    return false;
+  currentGraph = new (context) SpirvGraphARM(name);
+  mod->setGraph(currentGraph);
+  graphFunction = function;
+  graphValues.clear();
+  return true;
+}
+
+llvm::StringRef SpirvBuilder::getCurrentFunctionName() const {
+  return function ? function->getFunctionName() : llvm::StringRef();
+}
+
+SpirvInstruction *SpirvBuilder::createGraphInputValue(QualType tensorType,
+                                                      SourceLocation loc) {
+  assert(currentGraph && "no data graph being declared");
+  // OpGraphInputARM is an instruction with a result type and a result <id>, and
+  // its value is what the graph body operates on. It is deliberately *not*
+  // added to any basic block: EmitVisitor::emitGraph writes it as part of the
+  // graph region, which lives after every function in the module. Its result
+  // type is lowered here for the same reason createSpirvIntrInstExt() does it:
+  // LowerTypeVisitor walks the module tree, and this instruction is not in it.
+  auto *inst = new (context) SpirvIntrinsicInstruction(
+      tensorType, uint32_t(spv::Op::OpGraphInputARM),
+      llvm::ArrayRef<SpirvInstruction *>(), llvm::ArrayRef<llvm::StringRef>(),
+      /*set*/ nullptr, llvm::ArrayRef<uint32_t>(), loc);
+  LowerTypeVisitor lowerTypeVisitor(astContext, context, spirvOptions, *this);
+  lowerTypeVisitor.visitInstruction(inst);
+  context.addToInstructionsWithLoweredType(inst);
+  return inst;
+}
+
+void SpirvBuilder::addGraphInput(SpirvInstruction *value, uint32_t index) {
+  assert(currentGraph && "no data graph being declared");
+  currentGraph->addInput(value, index);
+}
+
+SpirvInstruction *
+SpirvBuilder::resolveGraphValue(SpirvInstruction *value) const {
+  // A local inside a graph declaration (or a read of one) is a name for a
+  // value: the chain `Tensor t = GraphInput(0); f(t);` records the input, then
+  // the load of `t` and finally the operation, and what the operation consumes
+  // is the input itself.
+  for (unsigned depth = 0; value && depth < 8; ++depth) {
+    const auto it = graphValues.find(value);
+    if (it == graphValues.end() || !it->second)
+      break;
+    value = it->second;
+  }
+  return value;
+}
+
+void SpirvBuilder::addGraphOutput(SpirvInstruction *value, uint32_t index) {
+  assert(currentGraph && "no data graph being declared");
+  currentGraph->addOutput(value, index);
+}
+
+bool SpirvBuilder::endGraph(SourceLocation loc) {
+  assert(currentGraph && "no data graph being declared");
+  SpirvGraphARM *graph = currentGraph;
+  currentGraph = nullptr;
+  graphValues.clear();
+
+  // SPIRV-Tools: "A graph type must have at least one output." The type is
+  // checked and reported by SpirvEmitter::processArmGraphIntrinsic, which knows
+  // the source location of the declaration; this is the last line of defence.
+  if (graph->getNumOutputs() == 0)
+    return false;
+
+  // OpTypeGraphARM: "IdResult, LiteralInteger NumInputs, IdRef... InOutTypes".
+  // The number of inputs is a literal integer, every other operand is a type:
+  // the NumInputs input types followed by the output types, which is also the
+  // order OpGraphEntryPointARM's interface list has to use.
+  llvm::SmallVector<SpvIntrinsicTypeOperand, 4> operands;
+  llvm::SmallVector<const SpirvType *, 4> ioTyes;
+  auto *numInputs = new (context) SpirvConstantInteger(
+      astContext.UnsignedIntTy, llvm::APInt(32, graph->getNumInputs()));
+  numInputs->setLiteral(true);
+  operands.push_back(SpvIntrinsicTypeOperand(numInputs));
+  for (const auto &input : graph->getInputs()) {
+    const SpirvType *type = input.getValue()->getResultType();
+    assert(type && "a graph input has no SPIR-V type");
+    operands.push_back(SpvIntrinsicTypeOperand(type));
+    ioTyes.push_back(type);
+  }
+  for (const auto &output : graph->getOutputs()) {
+    const SpirvType *type = output.getValue()->getResultType();
+    if (!type)
+      return false;
+    operands.push_back(SpvIntrinsicTypeOperand(type));
+    ioTyes.push_back(type);
+  }
+  graph->setGraphType(
+      context.getOrCreateSpirvIntrinsicType(uint32_t(spv::Op::OpTypeGraphARM),
+                                            operands));
+
+  // One UniformConstant variable per graph I/O, in graph type order. SPIRV-Tools
+  // checks that each one is an OpVariable in UniformConstant storage whose
+  // pointee type is exactly the graph type's I/O type at the same position, and
+  // Vulkan requires DescriptorSet and Binding on every UniformConstant
+  // variable. The compiler assigns them: set 0 and binding = position in the
+  // graph type's I/O list (input i -> binding i, output j -> binding
+  // NumInputs + j), which is what a host has to bind the tensor descriptors to.
+  uint32_t binding = 0;
+  for (uint32_t i = 0; i < graph->getNumInputs(); ++i) {
+    std::string name = "graph.input" + std::to_string(i);
+    graph->addInterface(
+        addGraphInterfaceVar(ioTyes[i], binding++, name, loc));
+  }
+  for (uint32_t i = 0; i < graph->getNumOutputs(); ++i) {
+    std::string name = "graph.output" + std::to_string(i);
+    graph->addInterface(addGraphInterfaceVar(
+        ioTyes[graph->getNumInputs() + i], binding++, name, loc));
+  }
+  return true;
+}
+
+SpirvVariable *SpirvBuilder::addGraphInterfaceVar(const SpirvType *ioType,
+                                                  uint32_t binding,
+                                                  llvm::StringRef name,
+                                                  SourceLocation loc) {
+  // The variable's result type is the pointer type and not the pointee type,
+  // and the instruction is marked as already lowered: LowerTypeVisitor's
+  // OpVariable case would otherwise wrap the type again - and would have to
+  // lower an OpTypeTensorARM that is already lowered, which it has no case for.
+  auto *var = addModuleVar(
+      context.getPointerType(ioType, spv::StorageClass::UniformConstant),
+      spv::StorageClass::UniformConstant, /*isPrecise*/ false,
+      /*isNointerp*/ false, name, llvm::None, loc);
+  context.addToInstructionsWithLoweredType(var);
+  decorateGraphInterface(var, binding, loc);
+  return var;
+}
+
+void SpirvBuilder::decorateGraphInterface(SpirvVariable *var,
+                                          uint32_t binding,
+                                          SourceLocation loc) {
+  // The graph's interface variables are synthesized by the compiler, so their
+  // descriptor set and binding are the compiler's: set 0, and the position in
+  // the graph type's I/O list.
+  const uint32_t descriptorSet = 0;
+  const uint32_t setParam[] = {descriptorSet};
+  const uint32_t bindingParam[] = {binding};
+  mod->addDecoration(new (context) SpirvDecoration(
+      loc, var, spv::Decoration::DescriptorSet,
+      llvm::ArrayRef<uint32_t>(setParam, 1)));
+  var->setDescriptorSetNo(descriptorSet);
+  mod->addDecoration(new (context) SpirvDecoration(
+      loc, var, spv::Decoration::Binding,
+      llvm::ArrayRef<uint32_t>(bindingParam, 1)));
+  var->setBindingNo(binding);
+}
+// HLSL Change End - SPV_ARM_graph.
 
 SpirvBasicBlock *SpirvBuilder::createBasicBlock(llvm::StringRef name) {
   assert(function && "found detached basic block");
@@ -199,6 +391,28 @@ SpirvInstruction *SpirvBuilder::createLoad(QualType resultType,
                                            SourceLocation loc,
                                            SourceRange range) {
   assert(insertPoint && "null insert point");
+  // HLSL Change Begin - SPV_ARM_graph. Same renaming as the SpirvType overload
+  // below: a read of a local inside a graph declaration is the value the local
+  // stands for, and no OpLoad is emitted, because a graph body may contain none.
+  if (currentGraph) {
+    auto *graphLoad = new (context) SpirvLoad(resultType, loc, pointer, range);
+    graphLoad->setStorageClass(pointer->getStorageClass());
+    graphLoad->setRValue(true);
+    const auto it = graphValues.find(pointer);
+    SpirvInstruction *value = (it != graphValues.end()) ? it->second : nullptr;
+    if (!value) {
+      featureManager.reportError(
+          "a value is read in a data graph declaration before it is given one: "
+          "every tensor a graph operates on has to be produced by "
+          "vk::arm::GraphInput or by another graph operation, because a graph "
+          "body may not contain an OpVariable, an OpLoad or an OpStore",
+          loc);
+      return graphLoad;
+    }
+    graphValues[graphLoad] = value;
+    return graphLoad;
+  }
+  // HLSL Change End - SPV_ARM_graph.
   auto *instruction = new (context) SpirvLoad(resultType, loc, pointer, range);
   instruction->setStorageClass(pointer->getStorageClass());
   instruction->setLayoutRule(pointer->getLayoutRule());
@@ -272,6 +486,32 @@ SpirvLoad *SpirvBuilder::createLoad(const SpirvType *resultType,
                                     SpirvInstruction *pointer,
                                     SourceLocation loc, SourceRange range) {
   assert(insertPoint && "null insert point");
+  // HLSL Change Begin - SPV_ARM_graph. Reading a local inside a graph
+  // declaration reads the value the local currently stands for; no OpLoad is
+  // emitted (the graph region may contain none) and the load instruction is
+  // only a placeholder that records the renaming until the value is used as an
+  // operand of a graph operation.
+  if (currentGraph) {
+    auto *instruction = new (context) SpirvLoad(QualType{}, loc, pointer, range);
+    instruction->setResultType(resultType);
+    instruction->setStorageClass(pointer->getStorageClass());
+    instruction->setRValue(true);
+    const auto it = graphValues.find(pointer);
+    SpirvInstruction *value =
+        (it != graphValues.end()) ? it->second : nullptr;
+    if (!value) {
+      featureManager.reportError(
+          "a value is read in a data graph declaration before it is given "
+          "one: every tensor a graph operates on has to be produced by "
+          "vk::arm::GraphInput or by another graph operation, because a graph "
+          "body may not contain an OpVariable, an OpLoad or an OpStore",
+          loc);
+      return instruction;
+    }
+    graphValues[instruction] = value;
+    return instruction;
+  }
+  // HLSL Change End - SPV_ARM_graph.
   auto *instruction =
       new (context) SpirvLoad(/*QualType*/ {}, loc, pointer, range);
   instruction->setResultType(resultType);
@@ -297,6 +537,36 @@ SpirvStore *SpirvBuilder::createStore(SpirvInstruction *address,
                                       SpirvInstruction *value,
                                       SourceLocation loc, SourceRange range) {
   assert(insertPoint && "null insert point");
+  // HLSL Change Begin - SPV_ARM_graph. Writing a local inside a graph
+  // declaration renames it: the cluster of `Tensor t = <operation>;`,
+  // addFnVar/createLoad/createStore is the same three-instruction sequence
+  // SPIR-V would use for a memory object, and a graph region has no memory
+  // objects (SPIRV-Tools: "OpStore cannot appear in the graph definitions
+  // section"). Writing anything that is not one of the graph's own variables -
+  // a group-shared array, a resource - is left alone so that endFunction()
+  // reports it rather than dropping it silently.
+  if (currentGraph) {
+    if (graphValues.find(address) != graphValues.end()) {
+      graphValues[address] = value;
+      // A graph declaration can only carry tensor values. Anything else - a
+      // float local, a counter, a resource handle - has no encoding inside a
+      // graph region, which holds no OpVariable and no OpStore, so it is
+      // diagnosed here instead of being dropped.
+      const auto *type =
+          value ? dyn_cast_or_null<SpirvIntrinsicType>(value->getResultType())
+                : nullptr;
+      if (!type || type->getOpCode() != uint32_t(spv::Op::OpTypeTensorARM)) {
+        featureManager.reportError(
+            "a local variable in a data graph declaration must hold a tensor "
+            "produced by a graph operation: a graph region has no OpVariable "
+            "and no OpStore, so a value of any other type cannot be part of "
+            "the graph",
+            loc);
+      }
+      return new (context) SpirvStore(loc, address, value, llvm::None, range);
+    }
+  }
+  // HLSL Change End - SPV_ARM_graph.
   // Safeguard. If this happens, it means we leak non-extracted bitfields.
   assert(false == value->getBitfieldInfo().hasValue());
 
@@ -1437,6 +1707,39 @@ SpirvInstruction *SpirvBuilder::createSpirvIntrInstExt(
     retType = QualType();
   }
 
+  // HLSL Change Begin - SPV_ARM_graph. Inside a graph declaration an extended
+  // instruction is an operation *of the graph* and not of the shader: it is
+  // recorded in the graph's body instead of being added to the basic block, its
+  // operands are resolved through the local renaming createLoad/createStore
+  // maintain, and its result type is lowered here because LowerTypeVisitor
+  // walks the module tree and this instruction is not in it.
+  if (currentGraph) {
+    if (!set) {
+      featureManager.reportError(
+          "only extended instructions can appear in a data graph body: "
+          "SPV_ARM_graph has no encoding for a plain instruction inside a "
+          "graph, so a graph operation has to be declared with "
+          "[[vk::ext_instruction(<opcode>, \"<set>\")]] (for example one of "
+          "the TOSA operations in <vk/arm/tosa.h>)",
+          loc);
+      return nullptr;
+    }
+    llvm::SmallVector<SpirvInstruction *, 4> resolvedOperands;
+    for (auto *operand : operands) {
+      const auto it = graphValues.find(operand);
+      resolvedOperands.push_back((it != graphValues.end()) ? it->second
+                                                           : operand);
+    }
+    auto *graphInst = new (context) SpirvIntrinsicInstruction(
+        retType, opcode, resolvedOperands, extensions, set, capablities, loc);
+    LowerTypeVisitor lowerTypeVisitor(astContext, context, spirvOptions, *this);
+    lowerTypeVisitor.visitInstruction(graphInst);
+    context.addToInstructionsWithLoweredType(graphInst);
+    currentGraph->addBodyInstruction(graphInst);
+    return graphInst;
+  }
+  // HLSL Change End - SPV_ARM_graph.
+
   auto *inst = new (context) SpirvIntrinsicInstruction(
       retType, opcode, operands, extensions, set, capablities, loc);
   insertPoint->addInstruction(inst);
@@ -2469,6 +2772,11 @@ std::vector<uint32_t> SpirvBuilder::takeModule() {
 
   // Emit SPIR-V
   mod->invokeVisitor(&emitVisitor);
+
+    // HLSL Change - SPV_ARM_graph. The graph region comes after every function,
+    // so it is not part of the tree the visitor above walks. This has to happen
+    // before takeBinary(), which assembles the sections.
+    emitVisitor.emitGraph(mod->getGraph());
 
   return emitVisitor.takeBinary();
 }

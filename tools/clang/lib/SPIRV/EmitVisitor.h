@@ -24,6 +24,8 @@ namespace spirv {
 class SpirvFunction;
 class SpirvBasicBlock;
 class SpirvType;
+// HLSL Change - SPV_ARM_graph.
+class SpirvGraphARM;
 
 class EmitTypeHandler {
 public:
@@ -343,6 +345,18 @@ public:
 
   using Visitor::visit;
 
+    // HLSL Change Begin - SPV_ARM_graph.
+    /// Emits the module's graph region into its own binary section, which
+    /// takeBinary() appends after every function (SPIR-V logical layout section
+    /// 13, kLayoutGraphDefinitions). Called once, after the module tree has been
+    /// visited: the region is not part of any function, so no visitor that walks
+    /// the tree can reach it. Does nothing for a module without a graph. The
+    /// instructions are emitted in the only order SPIRV-Tools accepts:
+    /// OpGraphEntryPointARM, OpGraphARM, the inputs, the body, the outputs and
+    /// OpGraphEndARM.
+    void emitGraph(SpirvGraphARM *graph);
+    // HLSL Change End - SPV_ARM_graph.
+
   // Returns the assembled binary built up in this visitor.
   std::vector<uint32_t> takeBinary();
 
@@ -482,6 +496,11 @@ private:
   std::vector<uint32_t> richDebugInfo;
   // All other instructions
   std::vector<uint32_t> mainBinary;
+    // HLSL Change - SPV_ARM_graph. The graph region: OpGraphEntryPointARM,
+    // OpGraphARM, OpGraphInputARM, the graph body, OpGraphSetOutputARM and
+    // OpGraphEndARM. The last section of the module (SPIR-V logical layout
+    // section 13).
+    std::vector<uint32_t> graphBinary;
   // String literals to SpirvString objects
   llvm::StringMap<uint32_t> stringIdMap;
   // String literals to SpirvConstantString objects

@@ -21,6 +21,7 @@ namespace clang {
 namespace spirv {
 
 class SpirvFunction;
+class SpirvGraphARM;
 class SpirvVisitor;
 
 struct ExtensionComparisonInfo {
@@ -203,6 +204,16 @@ public:
   llvm::ArrayRef<SpirvEntryPoint *> getEntryPoints() const {
     return entryPoints;
   }
+  // HLSL Change Begin - SPV_ARM_graph.
+  /// Sets the module's data graph (SPV_ARM_graph). A module has at most one:
+  /// one OpGraphEntryPointARM names one graph.
+  void setGraph(SpirvGraphARM *g) { graph = g; }
+  /// Returns the module's data graph, or nullptr if it has none. The graph region
+  /// is emitted after every function (SPIR-V logical layout section 13,
+  /// kLayoutGraphDefinitions), so it is not part of any function and not visited
+  /// by the visitors that walk the module tree: EmitVisitor::emitGraph writes it.
+  SpirvGraphARM *getGraph() const { return graph; }
+  // HLSL Change End - SPV_ARM_graph.
 
   void setPerVertexInterpMode(bool b) { perVertexInterp = b; }
 
@@ -255,6 +266,10 @@ private:
 
   // Keep all rich DebugInfo instructions.
   llvm::SmallVector<SpirvDebugInstruction *, 32> debugInstructions;
+
+  // HLSL Change - SPV_ARM_graph. The module's data graph, or nullptr. Emitted
+  // after the functions, in the graph-definitions section of the module.
+  SpirvGraphARM *graph;
 
   // There is one debugCompilationUnit per module
   SpirvDebugCompilationUnit *debugCompilationUnit;

@@ -596,6 +596,26 @@ bool isVkAbortIntrinsic(const FunctionDecl *fd) {
   return fd->getName().equals("Abort");
 }
 // HLSL Change End - SPV_KHR_abort.
+// HLSL Change Begin - SPV_ARM_graph.
+// Returns true if the given function is one of the four declaration-only entry
+// points of <vk/arm/graph.h>: 'vk::arm::GraphBegin', 'vk::arm::GraphInput',
+// 'vk::arm::GraphSetOutput' and 'vk::arm::GraphEnd'. They are dispatched here
+// by name, like the split-barrier and abort entry points, because they have no
+// definition anywhere: the whole encoding comes from SpirvBuilder's graph API
+// and from EmitVisitor::emitGraph.
+bool isVkArmGraphIntrinsic(const FunctionDecl *fd) {
+  const auto *armNs = dyn_cast<NamespaceDecl>(fd->getDeclContext());
+  if (!armNs || !armNs->getName().equals("arm"))
+    return false;
+  const auto *vkNs = dyn_cast<NamespaceDecl>(armNs->getDeclContext());
+  if (!vkNs || !vkNs->getName().equals("vk"))
+    return false;
+  return fd->getName().equals("GraphBegin") ||
+         fd->getName().equals("GraphInput") ||
+         fd->getName().equals("GraphSetOutput") ||
+         fd->getName().equals("GraphEnd");
+}
+// HLSL Change End - SPV_ARM_graph.
 bool isCooperativeMatrixBitCastQCOMIntrinsic(const FunctionDecl *f) {
   return f->getName().equals("__builtin_spv_BitCastArrayQCOM");
 }
@@ -3728,6 +3748,13 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
       return processAbortKHR(callExpr);
     }
     // HLSL Change End - SPV_KHR_abort.
+    // HLSL Change Begin - SPV_ARM_graph.
+    // Handle 'vk::arm::GraphBegin()', 'GraphInput()', 'GraphSetOutput()' and
+    // 'GraphEnd()'.
+    if (isVkArmGraphIntrinsic(funcDecl)) {
+      return processArmGraphIntrinsic(callExpr);
+    }
+    // HLSL Change End - SPV_ARM_graph.
 
   // Normal standalone functions
   return processCall(callExpr);
@@ -13773,6 +13800,183 @@ SpirvInstruction *SpirvEmitter::processAbortKHR(const CallExpr *callExpr) {
   return nullptr;
 }
 // HLSL Change End - SPV_KHR_abort.
+// HLSL Change Begin - SPV_ARM_graph.
+SpirvInstruction *
+SpirvEmitter::processArmGraphIntrinsic(const CallExpr *callExpr) {
+  const auto loc = callExpr->getExprLoc();
+  const llvm::StringRef name = callExpr->getDirectCallee()->getName();
+
+  // A graph is a module-scope region - OpGraphARM ... OpGraphEndARM - in the
+  // last section of the module (SPIR-V logical layout section 13, after every
+  // function), so none of these four entry points emits an instruction of the
+  // shader body. What they do is record the region; EmitVisitor::emitGraph
+  // writes it.
+  if (name.equals("GraphBegin")) {
+      // Every failure below leaves the module without a graph; mark the
+      // declaration as failed so that the entry points that follow do not
+      // repeat "open the graph with GraphBegin first", which would be false
+      // advice - the shader did open one.
+      auto fail = [this]() {
+        armGraphFailed = true;
+        return nullptr;
+      };
+    // The extension is registered in FeatureManager and enabled by default, so
+    // an explicit -fspv-extension list is still an allow-list: leaving
+    // SPV_ARM_graph out of it is an error here, and naming it in the list is
+    // accepted instead of being rejected as an unknown extension.
+    if (!featureManager.requestExtension(Extension::ARM_graph, "data graphs",
+                                         loc))
+      return fail();
+    // VK_ARM_data_graph pipelines are compute pipelines, and the module this
+    // landing emits keeps the shader's entry point, so a fragment or vertex
+    // "graph" would be a module whose entry point belongs to a stage no graph
+    // pipeline can be created from. Library targets are accepted because the
+    // stage of an exported function is not known while it is emitted. (The
+    // graph itself has no execution model: OpGraphEntryPointARM has none.)
+    if (!spvContext.isCS() && !spvContext.isLib()) {
+      emitError("'vk::arm::GraphBegin' is only available in compute shaders: "
+                "a VK_ARM_data_graph pipeline is a compute pipeline, and a "
+                "module that declares a graph keeps the entry point it was "
+                "compiled for",
+                loc);
+      return fail();
+    }
+    if (callExpr->getNumArgs() != 0) {
+      emitError("'vk::arm::GraphBegin' takes no arguments: the graph type is "
+                "derived from the inputs and outputs the graph declares",
+                loc);
+      return fail();
+    }
+    // The graph is named after the HLSL entry function. DXC emits that function
+ // next to its entry-point wrapper under the internal name "src.<name>", so the
+ // prefix is dropped: OpGraphEntryPointARM names the graph "main", not
+ // "src.main".
+ llvm::StringRef graphName = spvBuilder.getCurrentFunctionName();
+ if (graphName.startswith("src."))
+ graphName = graphName.drop_front(4);
+ if (!spvBuilder.beginGraph(graphName)) {
+      emitError("a module may declare at most one data graph: "
+                "SPV_ARM_graph's OpGraphEntryPointARM names one graph, and a "
+                "graph region cannot be nested inside another graph",
+                loc);
+      return fail();
+    }
+    spvBuilder.requireCapability(spv::Capability::GraphARM, loc);
+    spvBuilder.requireExtension("SPV_ARM_graph", loc);
+    return nullptr;
+  }
+
+  // After a 'GraphBegin' that failed there is no graph to add to, and the reason
+ // has already been reported.
+ if (armGraphFailed)
+ return nullptr;
+
+ // The other three are only meaningful inside a graph declaration.
+  if (!spvBuilder.isInGraph()) {
+    emitError("'vk::arm::%0' can only appear inside a data graph "
+              "declaration: open the graph with 'vk::arm::GraphBegin' first",
+              loc)
+        << name;
+    return nullptr;
+  }
+
+  if (name.equals("GraphInput")) {
+    llvm::APSInt indexValue;
+    if (callExpr->getNumArgs() != 1 ||
+        !callExpr->getArg(0)->EvaluateAsInt(indexValue, astContext)) {
+      emitError("the index of 'vk::arm::GraphInput' must be a compile-time "
+                "constant: OpGraphInputARM's InputIndex is the <id> of a "
+                "32-bit integer constant instruction",
+                loc);
+      return nullptr;
+    }
+    const uint32_t index = static_cast<uint32_t>(indexValue.getZExtValue());
+    // The index is not free: OpTypeGraphARM's NumInputs input types are matched
+    // against the index each OpGraphInputARM reads, and the same position picks
+    // the interface variable OpGraphEntryPointARM names. Requiring the inputs to
+    // be declared in order is what makes a transposed index a diagnostic rather
+    // than a silently different graph.
+    if (index != spvBuilder.getGraph()->getNumInputs()) {
+      emitError("data graph input %0 is out of order: the inputs of a graph "
+                "must be declared in order starting from 0, because the input "
+                "index also selects the input type of OpTypeGraphARM and the "
+                "interface variable of OpGraphEntryPointARM",
+                loc)
+          << index;
+      return nullptr;
+    }
+    auto *value = spvBuilder.createGraphInputValue(callExpr->getType(), loc);
+    const auto *type = dyn_cast<SpirvIntrinsicType>(value->getResultType());
+    if (!type || type->getOpCode() != uint32_t(spv::Op::OpTypeTensorARM)) {
+      emitError("the type of a data graph input must be a tensor type "
+                "(vk::arm::tensors::Tensor<ElementType, Rank>, which lowers to "
+                "OpTypeTensorARM): SPV_ARM_graph requires every graph input and "
+                "output type to be OpTypeTensorARM or an array of it",
+                loc);
+      return nullptr;
+    }
+    spvBuilder.addGraphInput(value, index);
+    value->setRValue();
+    return value;
+  }
+
+  if (name.equals("GraphSetOutput")) {
+    llvm::APSInt indexValue;
+    if (callExpr->getNumArgs() != 2 ||
+        !callExpr->getArg(1)->EvaluateAsInt(indexValue, astContext)) {
+      emitError("'vk::arm::GraphSetOutput' takes a value and a compile-time "
+                "constant output index: OpGraphSetOutputARM's OutputIndex is "
+                "the <id> of a 32-bit integer constant instruction",
+                loc);
+      return nullptr;
+    }
+    const uint32_t index = static_cast<uint32_t>(indexValue.getZExtValue());
+    if (index != spvBuilder.getGraph()->getNumOutputs()) {
+      emitError("data graph output %0 is out of order: the outputs of a graph "
+                "must be set in order starting from 0, because the output "
+                "index also selects the output type of OpTypeGraphARM and the "
+                "interface variable of OpGraphEntryPointARM",
+                loc)
+          << index;
+      return nullptr;
+    }
+    SpirvInstruction *value =
+        spvBuilder.resolveGraphValue(doExpr(callExpr->getArg(0)));
+    if (!value)
+      return nullptr;
+    const auto *type =
+        dyn_cast_or_null<SpirvIntrinsicType>(value->getResultType());
+    if (!type || type->getOpCode() != uint32_t(spv::Op::OpTypeTensorARM)) {
+      emitError("the value of a data graph output must be a tensor: "
+                "SPV_ARM_graph requires every graph input and output type to "
+                "be OpTypeTensorARM or an array of it",
+                loc);
+      return nullptr;
+    }
+    spvBuilder.addGraphOutput(value, index);
+    return nullptr;
+  }
+
+  // GraphEnd
+  if (callExpr->getNumArgs() != 0) {
+    emitError("'vk::arm::GraphEnd' takes no arguments", loc);
+    return nullptr;
+  }
+  if (spvBuilder.getGraph()->getNumOutputs() == 0) {
+    emitError("a data graph must set at least one output before "
+              "'vk::arm::GraphEnd': every OpTypeGraphARM has at least one "
+              "output type, and OpGraphEndARM must be preceded by an "
+              "OpGraphSetOutputARM",
+              loc);
+    return nullptr;
+  }
+  if (!spvBuilder.endGraph(loc))
+    emitError("failed to build the data graph type: a graph input or output "
+              "has no SPIR-V type",
+              loc);
+  return nullptr;
+}
+// HLSL Change End - SPV_ARM_graph.
 
 SpirvInstruction *SpirvEmitter::processNonFpMatrixTranspose(
     QualType matType, SpirvInstruction *matrix, SourceLocation loc,

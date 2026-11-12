@@ -98,6 +98,11 @@ public:
 
   /// Return true if instructions is empty. Otherwise, return false.
   bool empty() { return instructions.empty(); }
+    // HLSL Change - SPV_ARM_graph. Returns the instructions of this block in
+    // order, terminators included, so that SpirvBuilder::endFunction can verify
+    // that the body of a function that declares a data graph contains nothing
+    // but the terminator.
+    llvm::SmallVector<SpirvInstruction *, 8> getInstructionList() const;
 
   /// Returns true if the last instruction in this basic block is a termination
   /// instruction.

@@ -2935,6 +2935,122 @@ See ``examples/spirv-extensions/arm-tensors.hlsl`` for a self-contained example 
 and extension pair, the type with its rank, the operand order of the three instructions,
 the off path, the optimizer-survival path and the five diagnostics.
 
+Arm data graphs (``SPV_ARM_graph``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_ARM_graph`` extension describes *dataflow over complete tensors* instead of
+per-invocation code. It is gated by the Vulkan ``VK_ARM_data_graph`` device extension,
+which adds a pipeline type of its own: the host creates a graph pipeline from the module,
+having created one tensor per graph input and output, and the graph is executed by an
+accelerator rather than once per invocation.
+
+The extension defines the *structure* of a graph, not its operations. A module gains
+
+.. code:: spirv
+
+  OpCapability GraphARM
+  OpExtension "SPV_ARM_graph"
+  %t = OpTypeTensorARM %float            ; the I/O type
+  %g = OpTypeGraphARM 2 %t %t %t         ; NumInputs 2, then 2 inputs and 1 output
+  OpGraphEntryPointARM %g "main" %in0 %in1 %out0
+  %g   = OpGraphARM %g
+  %v0  = OpGraphInputARM %t %uint_0
+  %v1  = OpGraphInputARM %t %uint_1
+  %r   = OpExtInst %t %tosa ADD %v0 %v1   ; the body: extended instructions only
+  OpGraphSetOutputARM %r %uint_0
+  OpGraphEndARM
+
+and the operations *inside* the graph come from an extended instruction set - here
+``TOSA.001000.1`` (see the "TOSA tensor operations" section above) - while the I/O types
+come from ``SPV_ARM_tensors`` (see the "Arm tensors" section above), so a graph module
+declares both capabilities and both extension strings.
+
+The entry points live in ``<vk/arm/graph.h>``:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Entry point
+     - Lowers to
+     - Note
+   * - ``vk::arm::GraphBegin()``
+     - ``OpGraphARM``
+     - Opens the module's graph region; the graph is named after the function that
+       declares it.
+   * - ``vk::arm::GraphInput<T>(index)``
+     - ``OpGraphInputARM``
+     - The index is a compile-time constant; it also selects the input type of
+       ``OpTypeGraphARM`` and the interface variable, so inputs are declared in order
+       from 0.
+   * - ``vk::arm::GraphSetOutput(value, index)``
+     - ``OpGraphSetOutputARM``
+     - Same ordering rule; at least one output is required.
+   * - ``vk::arm::GraphEnd()``
+     - ``OpGraphEndARM``
+     - Closes the region. Nothing of the graph may follow it.
+
+The order of those groups is not a convention. SPIR-V puts the graph region in the *last*
+section of the module, after every function, and SPIRV-Tools validates the region with a
+state machine: ``OpGraphInputARM`` may only follow ``OpGraphARM`` or another graph input,
+``OpGraphSetOutputARM`` must come after the body, ``OpGraphEndARM`` must be preceded by at
+least one output, and ``OpGraphEntryPointARM`` may not appear inside a body - so the region
+is exactly entry point, graph, inputs, body, outputs, end.
+
+A graph body may contain **only extended instructions** (and ``OpCompositeExtract``);
+every other opcode is rejected with "``Op...`` cannot appear in the graph definitions
+section". The declaring entry point is therefore a declaration and not code:
+
+* A local in it is a *name for a graph value*, not a memory object. ``Tens a =
+  vk::arm::GraphInput<Tens>(0);`` records the input; no ``OpVariable`` and no ``OpStore``
+  is emitted for ``a``, and a later use of ``a`` is the input's value. Reading a local
+  before it is given a value is an error, and a local whose value is not a tensor is an
+  error too (a graph region has no place to put it).
+* Any other instruction the body would produce - a branch, an arithmetic operation, a
+  call, a store to a real resource - is reported at the end of the function rather than
+  left in an empty compute shader next to a graph that ignores it.
+
+``SPV_ARM_graph`` is registered in ``FeatureManager`` and **enabled by default**. Nothing
+emits ``OpGraphARM`` unless the shader calls ``vk::arm::GraphBegin``, so no existing shader
+changes. An explicit ``-fspv-extension`` list stays an allow-list: leaving
+``SPV_ARM_graph`` out of it is an error, and because a graph's I/O are tensors such a list
+has to name **both** extensions:
+
+.. code:: bash
+
+  dxc -T cs_6_0 -E main -spirv -fspv-extension=SPV_ARM_graph \
+                            -fspv-extension=SPV_ARM_tensors graph.hlsl
+
+**What is not expressible through this landing**, and is diagnosed rather than
+miscompiled:
+
+* An *array*-of-tensors input or output. ``SPV_ARM_graph`` allows one, with an
+  ``ElementIndex`` operand on ``OpGraphInputARM``/``OpGraphSetOutputARM``, but HLSL has no
+  way to spell an array of an opaque type.
+* ``OpGraphConstantARM``. A graph constant is a tensor of literals, which needs the
+  ``Shape`` operand that the tensor type cannot carry (see `Arm tensors`_).
+* More than one graph per module, and a graph in a non-compute stage. The graph itself has
+  no execution model (``OpGraphEntryPointARM`` has none), so the stage rule is a policy
+  decision: ``VK_ARM_data_graph`` pipelines are compute pipelines, and the module keeps the
+  shader's own ``OpEntryPoint``.
+* A "pure" graph module. The module keeps the shader's ``OpEntryPoint`` and its empty entry
+  function, which SPIRV-Tools accepts (a module with ``GraphARM`` does not need an
+  ``OpEntryPoint``), but a host that consumes the graph should read the graph.
+
+The compiler also cannot check what the host has to do: enable ``VK_ARM_data_graph`` and
+``VK_ARM_tensors`` with their feature bits, create one tensor per graph I/O with
+``vkCreateTensorARM``, bind its descriptor to ``DescriptorSet 0`` and ``Binding 0..N-1`` for
+the inputs followed by ``N..`` for the outputs - the compiler assigns those numbers because
+HLSL cannot declare the interface variables - and create a graph pipeline with
+``vkCreateDataGraphPipelinesARM``. Numeric conformance is the implementation's: no CI in
+this repository executes a single graph operation, so the tests pin the encoding, not the
+arithmetic.
+
+See ``examples/spirv-extensions/arm-data-graph.hlsl`` for a self-contained example and
+``tools/clang/test/CodeGenSPIRV/arm.graph*.hlsl`` for the tests that pin the capability and
+extension pair, the graph type with its input and output types, the interface list and its
+bindings, the instruction order, the off path, the optimizer-survival path and the six
+diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -2991,6 +3107,7 @@ Supported extensions
 * SPV_VALVE_mixed_float_dot_product
 * SPV_ARM_cooperative_matrix_layouts
 * SPV_ARM_tensors
+* SPV_ARM_graph
 * SPV_NV_cooperative_vector
 * SPV_NV_cooperative_matrix2
 * SPV_NV_tensor_addressing

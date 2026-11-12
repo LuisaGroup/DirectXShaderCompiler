@@ -49,6 +49,7 @@ set(hlsl_embedded_inputs
 if (ENABLE_SPIRV_CODEGEN)
   list(APPEND hlsl_embedded_inputs
        vk/arm/cooperative_matrix_layouts.h
+ vk/arm/graph.h
        vk/arm/tensors.h
 vk/arm/tosa.h
        vk/ext/abort.h

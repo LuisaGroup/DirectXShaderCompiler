@@ -52,6 +52,7 @@ features.
 | `khr-maintenance12.hlsl` | `VK_KHR_maintenance12` (non-uniform push-constant indexing) | — |
 | `ext-descriptor-heap.hlsl` | `VK_EXT_descriptor_heap` + `SPV_KHR_untyped_pointers` → `ResourceDescriptorHeap` / `SamplerDescriptorHeap` heaps | `-fspv-use-descriptor-heap` |
 | `arm-tensors.hlsl` | `VK_ARM_tensors` → `OpTypeTensorARM` + `OpTensorReadARM`/`WriteARM`/`QuerySizeARM`; a tensor *resource* is not expressible from HLSL yet | `-HV 2021 -fspv-extension=SPV_ARM_tensors` |
+| `arm-data-graph.hlsl` | `VK_ARM_data_graph` → `OpGraphARM` / `OpGraphEntryPointARM` / `OpGraphInputARM` / `OpGraphSetOutputARM` / `OpGraphEndARM` around a TOSA body; the module keeps its (empty) shader entry point, and the host creates a graph pipeline, not a compute pipeline | `-fspv-extension=SPV_ARM_graph -fspv-extension=SPV_ARM_tensors` |
 
 One already-supported feature is not covered here: `SPV_QCOM_cooperative_matrix_conversion` is
 raw-intrinsic only (`__builtin_spv_BitCastArrayQCOM`,

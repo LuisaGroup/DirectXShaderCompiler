@@ -18,6 +18,8 @@
 #include "clang/SPIRV/BitwiseCast.h"
 #include "clang/SPIRV/SpirvBasicBlock.h"
 #include "clang/SPIRV/SpirvFunction.h"
+// HLSL Change - SPV_ARM_graph.
+#include "clang/SPIRV/SpirvGraph.h"
 #include "clang/SPIRV/SpirvInstruction.h"
 #include "clang/SPIRV/SpirvType.h"
 #include "clang/SPIRV/String.h"
@@ -506,6 +508,10 @@ std::vector<uint32_t> EmitVisitor::takeBinary() {
   result.insert(result.end(), globalVarsBinary.begin(), globalVarsBinary.end());
   result.insert(result.end(), richDebugInfo.begin(), richDebugInfo.end());
   result.insert(result.end(), mainBinary.begin(), mainBinary.end());
+    // HLSL Change - SPV_ARM_graph. The graph region is the last section of the
+    // module: SPIRV-Tools only accepts the OpGraph*ARM instructions after every
+    // function (kLayoutGraphDefinitions, section 13 of the logical layout).
+    result.insert(result.end(), graphBinary.begin(), graphBinary.end());
   return result;
 }
 
@@ -513,6 +519,94 @@ void EmitVisitor::encodeString(llvm::StringRef value) {
   const auto &words = string::encodeSPIRVString(value);
   curInst.insert(curInst.end(), words.begin(), words.end());
 }
+
+// HLSL Change Begin - SPV_ARM_graph.
+void EmitVisitor::emitGraph(SpirvGraphARM *graph) {
+  if (!graph)
+    return;
+
+  // OpTypeGraphARM belongs to the types section, which takeBinary() inserts
+  // before mainBinary, so asking for it here is early enough: the whole module
+  // is assembled once, after this function returns.
+  const uint32_t graphTypeId = typeHandler.emitType(graph->getGraphType());
+  const auto *uintType = context.getUIntType(32);
+
+  // The <id> of OpGraphARM has to exist before the graph is emitted, because
+  // OpGraphEntryPointARM names it and SPIRV-Tools only accepts
+  // OpGraphEntryPointARM outside a graph body - either before OpGraphARM or
+  // after OpGraphEndARM - so the entry point is emitted first and the graph id
+  // is a forward reference, exactly like the SPIRV-Tools graph tests spell it.
+  if (!graph->getGraphId())
+    graph->setGraphId(takeNextId());
+
+  // OpGraphEntryPointARM %graph "<name>" %interface...
+  initInstruction(spv::Op::OpGraphEntryPointARM, /*loc*/ {});
+  curInst.push_back(graph->getGraphId());
+  encodeString(graph->getEntryPointName());
+  for (auto *var : graph->getInterfaces())
+    curInst.push_back(getOrAssignResultId<SpirvInstruction>(var));
+  finalizeInstruction(&graphBinary);
+
+  // %graph = OpGraphARM %graphtype
+  initInstruction(spv::Op::OpGraphARM, /*loc*/ {});
+  curInst.push_back(graphTypeId);
+  curInst.push_back(graph->getGraphId());
+  finalizeInstruction(&graphBinary);
+
+  // %v = OpGraphInputARM %tensortype %uint_<index>. SPIRV-Tools requires the
+  // index to be the <id> of a 32-bit integer constant instruction and the
+  // result type to be the graph type's input type at that index, both of which
+  // the builder has already checked.
+  for (const auto &input : graph->getInputs()) {
+    const auto *value =
+        llvm::cast<SpirvIntrinsicInstruction>(input.getValue());
+    initInstruction(spv::Op::OpGraphInputARM, /*loc*/ {});
+    curInst.push_back(typeHandler.emitType(value->getResultType()));
+    curInst.push_back(getOrAssignResultId<SpirvInstruction>(input.getValue()));
+    curInst.push_back(typeHandler.getOrCreateConstantInt(
+        llvm::APInt(32, input.getIndex()), uintType,
+        /*isSpecConst*/ false));
+    finalizeInstruction(&graphBinary);
+  }
+
+  // The graph body: extended instructions only, which is all SPIRV-Tools
+  // accepts in the graph-definitions section.
+  for (auto *inst : graph->getBody()) {
+    auto *intrinsic = llvm::cast<SpirvIntrinsicInstruction>(inst);
+    initInstruction(spv::Op::OpExtInst, intrinsic->getSourceLocation());
+    curInst.push_back(typeHandler.emitType(intrinsic->getResultType()));
+    curInst.push_back(getOrAssignResultId<SpirvInstruction>(intrinsic));
+    curInst.push_back(
+        getOrAssignResultId<SpirvInstruction>(intrinsic->getInstructionSet()));
+    curInst.push_back(intrinsic->getInstruction());
+    for (auto *operand : intrinsic->getOperands()) {
+      auto *literalOperand = dyn_cast<SpirvConstant>(operand);
+      if (literalOperand && literalOperand->isLiteral()) {
+        typeHandler.emitLiteral(literalOperand, curInst);
+      } else {
+        curInst.push_back(getOrAssignResultId<SpirvInstruction>(operand));
+      }
+    }
+    finalizeInstruction(&graphBinary);
+  }
+
+  // OpGraphSetOutputARM %value %uint_<index>
+  for (const auto &output : graph->getOutputs()) {
+    initInstruction(spv::Op::OpGraphSetOutputARM, /*loc*/ {});
+    curInst.push_back(
+        getOrAssignResultId<SpirvInstruction>(output.getValue()));
+    curInst.push_back(typeHandler.getOrCreateConstantInt(
+        llvm::APInt(32, output.getIndex()), uintType,
+        /*isSpecConst*/ false));
+    finalizeInstruction(&graphBinary);
+  }
+
+  // OpGraphEndARM
+  initInstruction(spv::Op::OpGraphEndARM, /*loc*/ {});
+  finalizeInstruction(&graphBinary);
+}
+// HLSL Change End - SPV_ARM_graph.
+
 
 bool EmitVisitor::visit(SpirvModule *, Phase) {
   // No pre-visit operations needed for SpirvModule.

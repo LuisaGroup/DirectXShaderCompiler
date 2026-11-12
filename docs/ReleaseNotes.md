@@ -20,6 +20,32 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_ARM_graph` (`VK_ARM_data_graph`): the module-scope data
+  graph. A graph describes dataflow over complete tensors instead of per-invocation
+  code - inputs, a body of tensor operations and outputs - and `VK_ARM_data_graph`
+  creates a graph pipeline from it rather than executing it. The extension defines the
+  *structure* of a graph and not its operations, so a graph module combines it with
+  `SPV_ARM_tensors` (the I/O types) and an extended instruction set (the operations;
+  `TOSA.001000.1` in the example). The new `<vk/arm/graph.h>` header provides the four
+  declaration-only entry points that declare the region -
+  `vk::arm::GraphBegin()` (`OpGraphARM`, 4183), `GraphInput<T>(index)`
+  (`OpGraphInputARM`, 4184), `GraphSetOutput(value, index)` (`OpGraphSetOutputARM`,
+  4185) and `GraphEnd()` (`OpGraphEndARM`, 4186) - and the compiler builds
+  `OpTypeGraphARM` (4190) from the inputs and outputs they declare, synthesizes the
+  `UniformConstant` interface variables `OpGraphEntryPointARM` (4182) names (set 0,
+  binding = position in the graph's I/O list), and emits the region in the last module
+  section, in the only order SPIRV-Tools accepts. `SPV_ARM_graph` is a registered,
+  enabled-by-default `FeatureManager` extension, so `-fspv-extension=SPV_ARM_graph` is
+  accepted, and an explicit `-fspv-extension` list that omits it is a compile error.
+  Because a graph body may contain only extended instructions, the declaring entry
+  point is a declaration and not code: a local in it is a name for a graph value (no
+  `OpVariable`, `OpLoad` or `OpStore` is emitted), and anything else - an arithmetic
+  operation, a branch, a non-tensor local, a non-tensor I/O type, an out-of-order input
+  or output index, a second graph, a non-compute stage - is diagnosed instead of
+  producing a module that validates and means something else. The module keeps the
+  shader's own (empty) entry point next to the graph, which SPIRV-Tools accepts;
+  removing it would be a follow-up. See `docs/SPIR-V.rst` ("Arm data graphs") and
+  `examples/spirv-extensions/arm-data-graph.hlsl`.
 - Added support for `SPV_ARM_tensors` (`VK_ARM_tensors`): the tensor type and the
   three operations that read, write and measure one. Tensors are a new kind of
   resource - a handle to a multi-dimensional array of one scalar element type that

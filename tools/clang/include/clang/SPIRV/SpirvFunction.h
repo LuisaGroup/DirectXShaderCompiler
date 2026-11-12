@@ -61,6 +61,10 @@ public:
 
   // Gets the vector of variables.
   std::vector<SpirvVariable *> getVariables() { return variables; }
+  // HLSL Change - SPV_ARM_graph. Returns the basic blocks of this function, so
+  // that SpirvBuilder::endFunction can verify that the body of a function that
+  // declares a data graph contains no other instruction.
+  llvm::ArrayRef<SpirvBasicBlock *> getBasicBlocks() const { return basicBlocks; }
 
   // Sets the SPIR-V type of the function
   void setFunctionType(SpirvType *type) { fnType = type; }

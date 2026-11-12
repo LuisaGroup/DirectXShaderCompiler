@@ -161,6 +161,12 @@ enum class Extension {
       // vk::arm::Tensor type with its accessors in <vk/arm/tensors.h>). Enabled
       // by default; see enabledByDefault() in FeatureManager.cpp.
       ARM_tensors,
+      // HLSL Change - SPV_ARM_graph (the module-scope graph region of
+      // VK_ARM_data_graph: OpGraphARM, OpGraphEntryPointARM, OpGraphInputARM,
+      // OpGraphSetOutputARM and OpGraphEndARM, declared by the entry points in
+      // <vk/arm/graph.h>). Enabled by default; see enabledByDefault() in
+      // FeatureManager.cpp.
+      ARM_graph,
     Unknown,
 };
 

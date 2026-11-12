@@ -588,6 +588,22 @@ private:
     /// the terminator OpAbortKHR.
     SpirvInstruction *processAbortKHR(const CallExpr *);
     // HLSL Change End - SPV_KHR_abort.
+      // HLSL Change Begin - SPV_ARM_graph.
+      /// Processes the four declaration-only entry points of <vk/arm/graph.h>:
+      /// vk::arm::GraphBegin, GraphInput, GraphSetOutput and GraphEnd. None of
+      /// them emits an instruction of the shader body: they record the module's
+      /// graph region (OpGraphARM ... OpGraphEndARM), which EmitVisitor::emitGraph
+      /// writes after every function because SPIR-V's logical layout puts the
+      /// graph in the last section of the module. Returns the value of a graph
+      /// input and nullptr for the other three.
+      SpirvInstruction *processArmGraphIntrinsic(const CallExpr *);
+      /// HLSL Change - SPV_ARM_graph. Set when 'vk::arm::GraphBegin' could not
+      /// open the graph (wrong stage, extension refused, a graph already
+      /// declared). The graph entry points that follow it are then skipped
+      /// silently instead of repeating "open the graph first", which would be
+      /// false advice: the shader did open one.
+      bool armGraphFailed = false;
+      // HLSL Change End - SPV_ARM_graph.
 
 
   /// Processes the 'GetRemainingRecursionLevels' intrinsic function.

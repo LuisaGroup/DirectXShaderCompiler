@@ -9,6 +9,8 @@
 
 #include "clang/SPIRV/SpirvModule.h"
 #include "clang/SPIRV/SpirvFunction.h"
+// HLSL Change - SPV_ARM_graph.
+#include "clang/SPIRV/SpirvGraph.h"
 #include "clang/SPIRV/SpirvVisitor.h"
 
 namespace clang {
@@ -18,9 +20,15 @@ SpirvModule::SpirvModule()
     : capabilities({}), extensions({}), extInstSets({}), memoryModel(nullptr),
       entryPoints({}), executionModes({}), moduleProcesses({}), decorations({}),
       constants({}), specConstantOps({}), undefs({}), variables({}),
-      functions({}), debugInstructions({}), perVertexInterp(false) {}
+      functions({}), debugInstructions({}), graph(nullptr),
+      perVertexInterp(false) {}
 
 SpirvModule::~SpirvModule() {
+  // HLSL Change - SPV_ARM_graph. The graph object is allocated out of the
+  // SpirvContext arena like every other module entity, so only its destructor
+  // runs here.
+  if (graph)
+    graph->~SpirvGraphARM();
   for (auto *cap : capabilities)
     cap->releaseMemory();
   for (auto *ext : extensions)
