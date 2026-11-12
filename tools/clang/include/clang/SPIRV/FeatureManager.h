@@ -96,6 +96,10 @@ enum class Extension {
   // HLSL Change - SPV_KHR_opacity_micromap (the OpacityMicromapIdKHR execution
   // mode derived from the HLSL opacity-micromap ray flags).
   KHR_opacity_micromap,
+  // HLSL Change - SPV_NV_cluster_acceleration_structure
+  // (OpRayQueryGetIntersectionClusterIdNV, the cluster-ID accessors in
+  // <vk/nv/cluster_as.h>).
+  NV_cluster_acceleration_structure,
   Unknown,
 };
 

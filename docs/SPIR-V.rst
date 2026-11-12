@@ -613,109 +613,206 @@ signal is SPIRV-Tools.
 
 Opacity micromaps
 ~~~~~~~~~~~~~~~~~
-  The ``SPV_KHR_opacity_micromap`` extension lets ray query traversal evaluate
-  opacity micromaps: per-micro-triangle opacity state stored in the acceleration
-  structure, which makes a triangle opaque or transparent at a resolution finer
-  than the triangle itself instead of treating it as a single opacity value. It
-  is gated by the Vulkan ``VK_KHR_opacity_micromap`` device extension, whose
-  ``VkPhysicalDeviceOpacityMicromapFeaturesEXT`` structure carries the
-  ``micromap`` feature bit (and ``micromapCaptureReplay`` for tools).
+The ``SPV_KHR_opacity_micromap`` extension lets ray query traversal evaluate
+opacity micromaps: per-micro-triangle opacity state stored in the acceleration
+structure, which makes a triangle opaque or transparent at a resolution finer
+than the triangle itself instead of treating it as a single opacity value. It
+is gated by the Vulkan ``VK_KHR_opacity_micromap`` device extension, whose
+``VkPhysicalDeviceOpacityMicromapFeaturesEXT`` structure carries the
+``micromap`` feature bit (and ``micromapCaptureReplay`` for tools).
 
-  HLSL spells the opt-in as a ray flag while SPIR-V spells it as a module-level
-  execution mode, so the two are not a translation of each other:
+HLSL spells the opt-in as a ray flag while SPIR-V spells it as a module-level
+execution mode, so the two are not a translation of each other:
 
-  * ``RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`` is the second template argument of
-    ``RayQuery``, ``RayQuery<RayFlags, RayQueryFlags>``. It has no SPIR-V ray flag
-    at all and does not reach the module otherwise.
-  * ``RAY_FLAG_FORCE_OMM_2_STATE`` is the ``RAY_FLAG_*`` spelling. It is passed
-    through as part of the ray-flags operand of ``OpRayQueryInitializeKHR`` /
-    ``OpTraceRayKHR``, where the same 0x400 bit is
-    ``ForceOpacityMicromap2StateKHR``.
-  * ``RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS`` is the host-side
-    ``VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR`` pipeline
-    creation flag; a pipeline-only workload needs no shader change for it.
+* ``RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`` is the second template argument of
+  ``RayQuery``, ``RayQuery<RayFlags, RayQueryFlags>``. It has no SPIR-V ray flag
+  at all and does not reach the module otherwise.
+* ``RAY_FLAG_FORCE_OMM_2_STATE`` is the ``RAY_FLAG_*`` spelling. It is passed
+  through as part of the ray-flags operand of ``OpRayQueryInitializeKHR`` /
+  ``OpTraceRayKHR``, where the same 0x400 bit is
+  ``ForceOpacityMicromap2StateKHR``.
+* ``RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS`` is the host-side
+  ``VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR`` pipeline
+  creation flag; a pipeline-only workload needs no shader change for it.
 
-  With ``-fspv-extension=SPV_KHR_opacity_micromap``, DXC derives the execution
-  mode from either ray flag:
+With ``-fspv-extension=SPV_KHR_opacity_micromap``, DXC derives the execution
+mode from either ray flag:
 
-  .. code:: hlsl
+.. code:: hlsl
 
-    RayQuery<RAY_FLAG_NONE, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS> q;
-    q.TraceRayInline(accel, RAY_FLAG_FORCE_OMM_2_STATE, 0xFF, ray);
+  RayQuery<RAY_FLAG_NONE, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS> q;
+  q.TraceRayInline(accel, RAY_FLAG_FORCE_OMM_2_STATE, 0xFF, ray);
 
-  .. code:: spirv
+.. code:: spirv
 
-    OpCapability RayTracingOpacityMicromapExecutionModeKHR ; 6032
-    ; 5381, only when RAY_FLAG_FORCE_OMM_2_STATE reaches a ray-flags operand:
-    OpCapability RayTracingOpacityMicromapKHR
-    OpExtension "SPV_KHR_opacity_micromap"
-    OpEntryPoint RayGenerationKHR %main "main" ...
-    OpExecutionModeId %main OpacityMicromapIdKHR %opacityMicromapEnable ; 6031
-    OpDecorate %opacityMicromapEnable SpecId 0
-    %bool = OpTypeBool
-    %opacityMicromapEnable = OpSpecConstantTrue %bool
+  OpCapability RayTracingOpacityMicromapExecutionModeKHR ; 6032
+  ; 5381, only when RAY_FLAG_FORCE_OMM_2_STATE reaches a ray-flags operand:
+  OpCapability RayTracingOpacityMicromapKHR
+  OpExtension "SPV_KHR_opacity_micromap"
+  OpEntryPoint RayGenerationKHR %main "main" ...
+  OpExecutionModeId %main OpacityMicromapIdKHR %opacityMicromapEnable ; 6031
+  OpDecorate %opacityMicromapEnable SpecId 0
+  %bool = OpTypeBool
+  %opacityMicromapEnable = OpSpecConstantTrue %bool
 
-  ``OpacityMicromapIdKHR`` takes an id operand, so it is emitted with
-  ``OpExecutionModeId``; the literal-operand ``OpExecutionMode`` form is not
-  valid for it and SPIRV-Tools rejects it. The operand is a boolean
-  specialization constant - the extension specifies "the id of a constant
-  instruction of ``OpTypeBool`` which may be a specialization constant" - and not
-  an id that selects a micromap array. It is emitted as ``OpSpecConstantTrue``
-  and is never folded to ``OpConstantTrue``, so the host can still specialize it:
-  the default is true, which means a pipeline that opts in with
-  ``VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR`` and enables the
-  ``micromap`` feature gets opacity micromaps without specializing anything, and
-  a host that wants them off specializes the constant to ``VK_FALSE``.
-  ``-fvk-opacity-micromap-spec-id=N`` picks the ``SpecId`` (default 0) so that it
-  does not collide with the ``SpecId`` of a ``[[vk::constant_id(N)]]`` constant
-  in the same shader. The constant is only emitted when the extension is enabled
-  *and* an entry point requests opacity micromaps.
+``OpacityMicromapIdKHR`` takes an id operand, so it is emitted with
+``OpExecutionModeId``; the literal-operand ``OpExecutionMode`` form is not
+valid for it and SPIRV-Tools rejects it. The operand is a boolean
+specialization constant - the extension specifies "the id of a constant
+instruction of ``OpTypeBool`` which may be a specialization constant" - and not
+an id that selects a micromap array. It is emitted as ``OpSpecConstantTrue``
+and is never folded to ``OpConstantTrue``, so the host can still specialize it:
+the default is true, which means a pipeline that opts in with
+``VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR`` and enables the
+``micromap`` feature gets opacity micromaps without specializing anything, and
+a host that wants them off specializes the constant to ``VK_FALSE``.
+``-fvk-opacity-micromap-spec-id=N`` picks the ``SpecId`` (default 0) so that it
+does not collide with the ``SpecId`` of a ``[[vk::constant_id(N)]]`` constant
+in the same shader. The constant is only emitted when the extension is enabled
+*and* an entry point requests opacity micromaps.
 
-  The mode is emitted once per entry point, and only for the entry points that
-  request it: an entry point whose ray queries do not set the flag keeps its
-  previous output. Per the extension, the execution mode only affects ray query
-  traversal. A ``TraceRay()``-only shader declares it as well, because the ray
-  flag is where DXC learns about the opt-in, but for such a shader the mode is
-  inert and the pipeline creation flag is what enables opacity micromaps.
+The mode is emitted once per entry point, and only for the entry points that
+request it: an entry point whose ray queries do not set the flag keeps its
+previous output. Per the extension, the execution mode only affects ray query
+traversal. A ``TraceRay()``-only shader declares it as well, because the ray
+flag is where DXC learns about the opt-in, but for such a shader the mode is
+inert and the pipeline creation flag is what enables opacity micromaps.
 
-  The extension is **not** enabled by default: a module that carries
-  ``RayTracingOpacityMicromapExecutionModeKHR`` is rejected by a driver without
-  ``VK_KHR_opacity_micromap``, and the module interface grows a specialization
-  constant. Without ``-fspv-extension=SPV_KHR_opacity_micromap`` - and without
-  the ``-fspv-extension=KHR`` wildcard, which enables every KHR extension - the
-  generated module is byte-identical to before this support was added and the ray
-  flags keep their flag-only code generation; DXC reports a warning
-  (``opacity micromap ray flag ignored``) instead of dropping the opt-in
-  silently. Two consequences of that pass-through are worth knowing:
+The extension is **not** enabled by default: a module that carries
+``RayTracingOpacityMicromapExecutionModeKHR`` is rejected by a driver without
+``VK_KHR_opacity_micromap``, and the module interface grows a specialization
+constant. Without ``-fspv-extension=SPV_KHR_opacity_micromap`` - and without
+the ``-fspv-extension=KHR`` wildcard, which enables every KHR extension - the
+generated module is byte-identical to before this support was added and the ray
+flags keep their flag-only code generation; DXC reports a warning
+(``opacity micromap ray flag ignored``) instead of dropping the opt-in
+silently. Two consequences of that pass-through are worth knowing:
 
-  * ``RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`` has no SPIR-V ray flag, so bit 0 of
-    the ``RayQuery`` ray flags would be encoded as ``OpaqueKHR`` if it reached
-    the ray-flags operand. The ``RayQueryFlags`` template argument does not reach
-    the operand, so the supported spelling is unaffected; the execution mode, not
-    the flag, is what enables opacity micromaps.
-  * A shader that passes ``RAY_FLAG_FORCE_OMM_2_STATE`` without the extension
-    produces a ray-flags operand with the ``ForceOpacityMicromap2StateKHR`` bit
-    but no ``RayTracingOpacityMicromapKHR`` capability, which SPIRV-Tools
-    rejects: for that flag the extension is required, not optional.
-  * Only compile-time constant ray flags can be recognized. The
-    ``RayQueryFlags`` template argument always is one; a ``RayFlags`` argument
-    that is a variable or any other runtime expression is passed through
-    unchanged and cannot trigger the execution mode, so pass a constant such as
-    ``RAY_FLAG_FORCE_OMM_2_STATE``.
+* ``RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`` has no SPIR-V ray flag, so bit 0 of
+  the ``RayQuery`` ray flags would be encoded as ``OpaqueKHR`` if it reached
+  the ray-flags operand. The ``RayQueryFlags`` template argument does not reach
+  the operand, so the supported spelling is unaffected; the execution mode, not
+  the flag, is what enables opacity micromaps.
+* A shader that passes ``RAY_FLAG_FORCE_OMM_2_STATE`` without the extension
+  produces a ray-flags operand with the ``ForceOpacityMicromap2StateKHR`` bit
+  but no ``RayTracingOpacityMicromapKHR`` capability, which SPIRV-Tools
+  rejects: for that flag the extension is required, not optional.
+* Only compile-time constant ray flags can be recognized. The
+  ``RayQueryFlags`` template argument always is one; a ``RayFlags`` argument
+  that is a variable or any other runtime expression is passed through
+  unchanged and cannot trigger the execution mode, so pass a constant such as
+  ``RAY_FLAG_FORCE_OMM_2_STATE``.
 
-  Only the ``SPV_KHR_opacity_micromap`` spelling is emitted. The
-  pre-ratification ``SPV_EXT_opacity_micromap`` names the same capabilities but
-  has no execution mode - the part that needs compiler support - and the
-  extension text requires the KHR spelling in a module that uses
-  ``OpacityMicromapIdKHR``.
+Only the ``SPV_KHR_opacity_micromap`` spelling is emitted. The
+pre-ratification ``SPV_EXT_opacity_micromap`` names the same capabilities but
+has no execution mode - the part that needs compiler support - and the
+extension text requires the KHR spelling in a module that uses
+``OpacityMicromapIdKHR``.
 
-  See ``examples/spirv-extensions/khr-opacity-micromap.hlsl`` for a
-  self-contained example and
-  ``tools/clang/test/CodeGenSPIRV/vk.opacity-micromap*.hlsl`` for the tests that
-  pin the capability and the extension, the ``OpExecutionModeId`` encoding with
-  its specialization constant, the ``SpecId`` override, the per-entry-point
-  attachment, the unchanged output when the flag or the extension is absent, and
-  the survival of the mode through spirv-opt.
+See ``examples/spirv-extensions/khr-opacity-micromap.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/vk.opacity-micromap*.hlsl`` for the tests that
+pin the capability and the extension, the ``OpExecutionModeId`` encoding with
+its specialization constant, the ``SpecId`` override, the per-entry-point
+attachment, the unchanged output when the flag or the extension is absent, and
+the survival of the mode through spirv-opt.
+
+Cluster acceleration structures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VK_NV_cluster_acceleration_structure`` groups the triangles of a mesh into
+clusters and gives every cluster an identity that a shader can read back from an
+intersection. A renderer uses that identity to pick the material, the level of
+detail or the shading bin of the triangle that was hit: the ID is shared by all
+the triangles of one cluster, so the lookup stays small and cache friendly, while
+the primitive index is unique per triangle. Building the clusters is a host
+operation; the only shader-visible part of the extension is the cluster ID of an
+intersection.
+
+The accessors live in ``<vk/nv/cluster_as.h>``:
+
+.. code:: hlsl
+
+  #include <vk/nv/cluster_as.h>
+
+  // committed intersection
+  clusterId = vk::nv::RayQueryGetCommittedIntersectionClusterId(query);
+  // candidate intersection, inside the Proceed() loop
+  clusterId = vk::nv::RayQueryGetCandidateIntersectionClusterId(query);
+  // raw form: the selector is spelled out
+  clusterId = vk::nv::RayQueryGetIntersectionClusterId(
+      query, vk::nv::IntersectionCommitted);
+
+and lowers to ``OpRayQueryGetIntersectionClusterIdNV`` (5345):
+
+.. code:: spirv
+
+  OpCapability RayTracingClusterAccelerationStructureNV ; 5437
+  OpExtension "SPV_NV_cluster_acceleration_structure"
+  ...
+  %clusterId = OpRayQueryGetIntersectionClusterIdNV %uint %query %uint_1
+
+The operands are the ray query object and the intersection - the same shape as
+``OpRayQueryGetIntersectionInstanceIdKHR`` - and the result is a 32-bit unsigned
+integer. The intersection operand is 0 for the candidate intersection and 1 for the
+committed one, and it **must be a constant**: SPIRV-Tools rejects a module whose
+intersection operand is not a constant 32-bit integer ("expected Intersection ID to
+be a constant 32-bit int scalar"). That is why the header exports the two selector
+values (``vk::nv::IntersectionCandidate``, ``vk::nv::IntersectionCommitted``) and
+the two wrappers instead of taking a ``bool``, and why the raw form takes the
+selector as a separate argument.
+
+**The accessors are not ``RayQuery`` methods.** Every ``RayQuery`` method is
+declared once and has to work for both backends, and DXR has no cluster
+acceleration structures: a cluster-ID method would need a DXIL lowering that cannot
+exist. Splitting the surface into a header-only free function keeps the shared
+method table, Sema and the DXIL backend untouched. It also means there is no DXIL
+path at all: a DXIL compile ignores the ``vk::`` attributes on the declaration
+(``-Wignored-attributes``) and leaves an accessor with no definition, which is an
+error in a non-library profile and an unresolved external in a library build.
+
+The extension is **not** enabled by default. A module that reads a cluster ID
+declares the ``RayTracingClusterAccelerationStructureNV`` capability and
+``OpExtension "SPV_NV_cluster_acceleration_structure"``, which a driver without
+``VK_NV_cluster_acceleration_structure`` rejects, so the accessors are only
+accepted with ``-fspv-extension=SPV_NV_cluster_acceleration_structure``. Without
+that flag every call is a compile error instead of a module that declares an
+extension the host never asked for, and a module that does not read a cluster ID is
+unchanged - including one that includes the header. The capability and the
+extension are emitted together from the instruction through the ordinary extension
+registration path, so ``-fspv-extension`` can both select and refuse this one; they
+are deliberately *not* written with ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]`` on the header declaration, because those attributes write
+the extension string without consulting the extension manager and no allow-list
+could reject them.
+
+Limitations:
+
+* **A cluster ID is only defined for clustered geometry.** The instruction is
+  always encodable, but for an acceleration structure built from ordinary
+  triangles the value it returns is undefined. The compiler cannot tell the two
+  apart, so the shader author has to know how the acceleration structure was
+  built.
+* The host must enable
+  ``VkPhysicalDeviceClusterAccelerationStructureFeaturesNV::clusterAccelerationStructure``,
+  build the cluster level (``vkGetClusterAccelerationStructureBuildSizesNV`` and
+  ``vkCmdBuildClusterAccelerationStructureIndirectNV``) and reference it from the
+  ray traced scene. The compiler cannot check any of that.
+* Ray queries already require Vulkan 1.2 / ``SPV_KHR_ray_query``; this extension
+  adds no additional target-environment requirement.
+* ``-fspv-extension`` is an allow-list, so a shader that passes it has to keep
+  naming ``SPV_KHR_ray_query`` as well:
+  ``-fspv-extension=SPV_KHR_ray_query -fspv-extension=SPV_NV_cluster_acceleration_structure``.
+  Naming only the cluster extension is not an error at the extension level, but the
+  ray query itself then stops being permitted and the module fails to validate.
+
+See ``examples/spirv-extensions/nv-cluster-acceleration-structure.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/vk.nv-cluster-as*.hlsl`` for the tests that pin the
+capability, the extension, the instruction with both intersection selectors, the
+unchanged off path, the survival of the accessor through spirv-opt and the
+diagnostic for a missing ``-fspv-extension``.
+
 
 Dynamic image offsets and signed remainder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1109,6 +1206,7 @@ Supported extensions
 * SPV_GOOGLE_user_type
 * SPV_NV_ray_tracing
 * SPV_NV_mesh_shader
+* SPV_NV_cluster_acceleration_structure
 * SPV_KHR_ray_query
 * SPV_KHR_opacity_micromap
 * SPV_EXT_shader_image_int64

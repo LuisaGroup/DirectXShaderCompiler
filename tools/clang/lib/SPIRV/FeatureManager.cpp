@@ -255,6 +255,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
               Extension::VALVE_mixed_float_dot_product)
         // HLSL Change - SPV_KHR_opacity_micromap.
         .Case("SPV_KHR_opacity_micromap", Extension::KHR_opacity_micromap)
+        // HLSL Change - SPV_NV_cluster_acceleration_structure.
+        .Case("SPV_NV_cluster_acceleration_structure",
+              Extension::NV_cluster_acceleration_structure)
         .Default(Extension::Unknown);
 }
 
@@ -366,6 +369,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_KHR_opacity_micromap.
     case Extension::KHR_opacity_micromap:
       return "SPV_KHR_opacity_micromap";
+    // HLSL Change - SPV_NV_cluster_acceleration_structure.
+    case Extension::NV_cluster_acceleration_structure:
+      return "SPV_NV_cluster_acceleration_structure";
     default:
     break;
   }
@@ -554,6 +560,19 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // -fspv-extension=SPV_KHR_opacity_micromap the HLSL opacity-micromap ray
     // flags keep their pre-existing, flag-only code generation.
     case Extension::KHR_opacity_micromap:
+      return false;
+    // HLSL Change - SPV_NV_cluster_acceleration_structure. A module that reads
+    // the cluster ID of an intersection declares the
+    // RayTracingClusterAccelerationStructureNV capability and
+    // OpExtension "SPV_NV_cluster_acceleration_structure", which a driver
+    // without VK_NV_cluster_acceleration_structure rejects. The extension
+    // is therefore opt-in: without
+    // -fspv-extension=SPV_NV_cluster_acceleration_structure the accessors
+    // in <vk/nv/cluster_as.h> are compile errors (see the
+    // OpRayQueryGetIntersectionClusterIdNV case in CapabilityVisitor)
+    // instead of a module that declares an extension the host never asked
+    // for, and a module that does not read a cluster ID is unchanged.
+    case Extension::NV_cluster_acceleration_structure:
       return false;
     default:
     return true;

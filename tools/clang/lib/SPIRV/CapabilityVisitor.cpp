@@ -720,6 +720,32 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     break;
   }
 
+  // HLSL Change Begin - SPV_NV_cluster_acceleration_structure.
+  // OpRayQueryGetIntersectionClusterIdNV reads the cluster ID of an
+  // intersection of a ray query and requires the
+  // RayTracingClusterAccelerationStructureNV capability plus the
+  // SPV_NV_cluster_acceleration_structure extension. Both are emitted here,
+  // from the instruction, rather than through [[vk::ext_capability]] /
+  // [[vk::ext_extension]] on the declarations in <vk/nv/cluster_as.h>: the
+  // attribute path writes the extension string unconditionally, so
+  // -fspv-extension= could neither select nor refuse it, and the capability
+  // would then be declared without the extension Vulkan requires of it
+  // (SPIRV-Tools: "Capability RayTracingClusterAccelerationStructureNV is
+  // not allowed by Vulkan 1.2 specification (or requires extension)").
+  // addExtension() reports "SPIR-V extension
+  // 'SPV_NV_cluster_acceleration_structure' required for ... but not
+  // permitted to use" when the extension is not enabled, which is the
+  // intended restriction: the extension is opt-in
+  // (FeatureManager::enabledByDefault) and the capability is only ever
+  // emitted together with it.
+  case spv::Op::OpRayQueryGetIntersectionClusterIdNV:
+    addExtension(Extension::NV_cluster_acceleration_structure,
+                 "OpRayQueryGetIntersectionClusterIdNV", loc);
+    addCapability(spv::Capability::RayTracingClusterAccelerationStructureNV,
+                  loc);
+    break;
+  // HLSL Change End - SPV_NV_cluster_acceleration_structure.
+
   case spv::Op::OpReportIntersectionKHR:
   case spv::Op::OpIgnoreIntersectionKHR:
   case spv::Op::OpTerminateRayKHR:

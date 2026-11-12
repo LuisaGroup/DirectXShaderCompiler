@@ -21,6 +21,23 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_NV_cluster_acceleration_structure`: with
+  `-fspv-extension=SPV_NV_cluster_acceleration_structure`,
+  `vk::nv::RayQueryGetCommittedIntersectionClusterId()` and
+  `vk::nv::RayQueryGetCandidateIntersectionClusterId()` from
+  `<vk/nv/cluster_as.h>` are emitted as
+  `OpRayQueryGetIntersectionClusterIdNV` with the
+  `RayTracingClusterAccelerationStructureNV` capability and the
+  `SPV_NV_cluster_acceleration_structure` extension, so a ray query can read the
+  cluster ID of a hit instead of deriving the material/LOD decision from the
+  primitive index. The accessors are header-only free functions rather than
+  `RayQuery` methods because DXR has no cluster acceleration structures (the
+  method table is shared with the DXIL backend); the intersection operand must be
+  a constant, so the header also exports `vk::nv::IntersectionCandidate` /
+  `vk::nv::IntersectionCommitted`. The extension is opt-in (without the flag the
+  accessors are compile errors) and a cluster ID is only meaningful for geometry
+  built from a cluster acceleration structure, which the compiler cannot check.
+
 - Added support for `SPV_KHR_fma`: with `-fspv-extension=SPV_KHR_fma`, a fused
   multiply-add on 32-bit float (`mad()`) is emitted as the `OpFmaKHR` core
   instruction with the `FMAKHR` capability instead of the `GLSL.std.450` `Fma`
