@@ -1471,6 +1471,129 @@ pin the capability of each mode, the extension, the instruction with its result
 type and operand order, the unchanged off path, the survival of the gathers through
 spirv-opt, and the diagnostic for a missing ``-fspv-extension``.
 
+Unsized array as the last uniform buffer member
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VK_EXT_shader_uniform_buffer_unsized_array`` allows the *last* member of a
+uniform buffer block to be an unsized array. The effective length of the array is
+then inferred at runtime from the size of the buffer object bound to the block,
+instead of being baked into the module, so one shader serves any data set size.
+The Vulkan extension is gated by
+``VkPhysicalDeviceShaderUniformBufferUnsizedArrayFeaturesEXT`` /
+``shaderUniformBufferUnsizedArray``.
+
+Unlike the rest of this chapter, the extension is not new module surface: it
+relaxes a rule of the Vulkan SPIR-V *environment* and reuses
+``OpTypeRuntimeArray``, which is already the type for "array whose length is not
+in the module". A conforming module therefore contains exactly
+
+.. code:: spirv
+
+    OpDecorate %runtimearr_float ArrayStride 16
+    OpMemberDecorate %type_ConstantBuffer_Data 0 Offset 0
+    OpMemberDecorate %type_ConstantBuffer_Data 1 Offset 16
+    OpDecorate %type_ConstantBuffer_Data Block
+    %runtimearr_float = OpTypeRuntimeArray %float
+    %type_ConstantBuffer_Data = OpTypeStruct %float %runtimearr_float
+    %_ptr_Uniform_type_ConstantBuffer_Data = OpTypePointer Uniform %type_ConstantBuffer_Data
+
+and nothing else. In particular there is **no**
+``SPV_EXT_shader_uniform_buffer_unsized_array`` (the Khronos SPIR-V registry has
+no such extension), so no ``OpExtension`` is emitted and
+``-fspv-extension`` cannot select the feature; and no capability is added, so the
+capability block of the module is the one any other module gets.
+``SPV_KHR_untyped_pointers``, which the Vulkan extension lists as a dependency of
+its *implementation*, is not needed by this interface and is not emitted either.
+
+HLSL spells the construct as a trailing ``T x[]`` member of a struct used as the
+element type of a ``ConstantBuffer``:
+
+.. code:: hlsl
+
+    struct DataBlock {
+      float scale;
+      float values[];   // unsized, must be the last member
+    };
+    ConstantBuffer<DataBlock> data;
+
+Because the relaxation is a property of the *device* and not a SPIR-V version or
+an extension string, DXC gates it behind an opt-in flag rather than behind
+``-fspv-target-env`` or ``-fspv-extension``:
+``-fspv-enable-uniform-buffer-unsized-array`` (default off, so a module compiled
+without it is byte-for-byte what it was before). The flag only permits the
+declaration; it is the application's promise that the device feature is enabled.
+
+Layout. The member is laid out by the same rules as a sized array of the same
+element type, so ``Offset`` and ``ArrayStride`` follow the block's layout rule
+(``std140`` by default, ``-fvk-use-dx-layout``, ``-fvk-use-scalar-layout``, ...).
+For the example above ``values`` gets ``Offset 16`` and ``ArrayStride 16`` under
+``std140`` (a ``float`` array element is padded to a ``vec4``), ``Offset 4`` and
+``ArrayStride 4`` under ``-fvk-use-scalar-layout``. The array itself contributes
+no size to the block, which is why it has to be last.
+
+Restrictions enforced by the compiler:
+
+* The unsized array must be the **last** member of the struct; a member declared
+  after it has no defined offset and is rejected ("a member of type ... follows an
+  unsized array member").
+* The struct may only be used as the element type of a ``ConstantBuffer``, i.e. as
+  a uniform buffer block. Push constant blocks and shader record buffers are not
+  covered by the Vulkan extension - the Vulkan SPIR-V environment keeps rejecting
+  an unsized array in the ``PushConstant`` storage class - and are rejected by
+  DXC; a ``TextureBuffer``/``StructuredBuffer`` element type would nest a runtime
+  array inside another runtime array, which no storage class allows; and a local
+  variable or a function parameter of such a struct cannot have a runtime size.
+  ``cbuffer``/``tbuffer`` members keep requiring an explicit dimension.
+* ``.Length`` on the unsized member is a compile error. The Vulkan extension
+  prohibits ``OpArrayLength`` on it (the length is not a property of the shader),
+  so HLSL's array-length property - which lowers to a constant for a sized array -
+  has no meaning here.
+* The block cannot be copied. A local ``ConstantBuffer<T>`` variable, a
+  ``ConstantBuffer<T>`` function parameter and a function returning one are all
+  rejected, because CodeGen materializes such a copy in ``Function`` storage and a
+  runtime array cannot live there - which is also why the Vulkan extension says
+  the unsized array "cannot be passed as arguments to functions". An array of such
+  blocks (``ConstantBuffer<T> blocks[2]``) is rejected as well, since the runtime
+  array would have to be the last member of each element block.
+
+How the shader learns the length. It does not; the length is passed in. The
+application computes it from the size of the bound buffer object:
+
+.. code:: text
+
+    count = max((bufferObjectSize - offsetOfArray) / arrayStride, 0)
+
+where ``offsetOfArray`` is the ``Offset`` decoration of the member and
+``arrayStride`` the ``ArrayStride`` decoration of the runtime array - both are
+printed by ``-Fc`` and reported by SPIRV-Reflect - and stores it in a separate
+uniform buffer member. Indexing the array with any other index is an ordinary
+out-of-range buffer access.
+
+What the compiler cannot check. DXC validates the module it emits with the
+SPIRV-Tools it ships, which accepts a ``Block``-decorated ``Uniform`` struct that
+contains a runtime array (the check lives in
+``source/val/validate_memory.cpp`` and defers the "last member, no
+``OpArrayLength``, buffer range covers the elements" part to pipeline creation),
+so no validator option is toggled. The device side is the application's
+responsibility:
+
+* enable ``VK_EXT_shader_uniform_buffer_unsized_array``
+  (``VK_EXT_SHADER_UNIFORM_BUFFER_UNSIZED_ARRAY_EXTENSION_NAME``) at
+  ``vkCreateDevice`` and set
+  ``VkPhysicalDeviceShaderUniformBufferUnsizedArrayFeaturesEXT::shaderUniformBufferUnsizedArray``
+  to ``VK_TRUE``;
+* set the block's ``VkDescriptorBufferInfo::range`` to cover the sized members
+  plus as many whole array elements as the shader should see
+  (``VK_WHOLE_SIZE`` exposes the rest of the buffer), and keep indexes inside it.
+
+Without the feature bit the pipeline is rejected at creation time, with the
+feature bit and a range that is too small the array reads out of bounds.
+
+See ``examples/spirv-extensions/ext-uniform-buffer-unsized-array.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/ext.unsized-array*.hlsl`` for the tests that pin
+the encoding, the off path and the diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1520,6 +1643,13 @@ Supported extensions
 * SPV_QCOM_multiple_wait_queues
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product
+
+* ``VK_EXT_shader_uniform_buffer_unsized_array`` has no matching SPIR-V
+  ``OpExtension``: it relaxes a rule of the Vulkan SPIR-V environment and reuses
+  ``OpTypeRuntimeArray``, so there is no extension string to allow and nothing is
+  added to the module header. DXC supports its uniform buffer rule with
+  ``-fspv-enable-uniform-buffer-unsized-array``; see `Unsized array as the last
+  uniform buffer member`_ above.
 
 Vulkan specific attributes
 --------------------------
@@ -1671,6 +1801,14 @@ supplied via ``-fspv-extension=`` will be used. If that does not suffice, errors
 will be emitted explaining what additional extensions are required to translate
 what specific feature in the source code. If you want to allow all KHR
 extensions, you can use ``-fspv-extension=KHR``.
+
+``-fspv-enable-uniform-buffer-unsized-array`` is the same kind of option for
+``VK_EXT_shader_uniform_buffer_unsized_array``: the extension adds no SPIR-V
+instruction and no capability, it only lets the last member of a uniform buffer
+block be an unsized array, so neither a target environment nor an extension
+string can express it. It is off by default; see `Unsized array as the last
+uniform buffer member`_ for the emitted types, the restrictions and the host
+requirements.
 
 ``-fspv-enable-maintenance9`` is a third, independent kind of option: it is not
 a version and not an extension, but a statement about the *device*. It declares

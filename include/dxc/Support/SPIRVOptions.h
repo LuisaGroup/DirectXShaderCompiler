@@ -71,6 +71,11 @@ struct SpirvCodeGenOptions {
   bool fixFuncCallArguments = false;
   bool enableMaximalReconvergence = false;
   bool enableMaintenance9 = false;
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  /// Allow an unsized array as the last member of a constant buffer (a
+  /// Uniform-storage-class block), which is lowered to OpTypeRuntimeArray.
+  bool enableUniformBufferUnsizedArray = false;
+  // HLSL Change End
   bool useVulkanMemoryModel = false;
   bool useUnknownImageFormat = false;
   bool useDescriptorHeap = false;

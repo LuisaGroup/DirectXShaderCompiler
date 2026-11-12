@@ -482,6 +482,11 @@ bool IsHLSLLineStreamType(clang::QualType type);
 bool IsHLSLTriangleStreamType(clang::QualType type);
 bool IsHLSLStreamOutputType(clang::QualType type);
 bool IsHLSLResourceType(clang::QualType type);
+// HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+/// Returns true if the given type is a struct that contains an unsized array
+/// member, either directly or through nested structs and arrays.
+bool TypeContainsUnsizedArrayMember(clang::QualType type);
+// HLSL Change End
 bool IsHLSLNodeInputType(clang::QualType type);
 bool IsHLSLDynamicResourceType(clang::QualType type);
 bool IsHLSLDynamicSamplerType(clang::QualType type);

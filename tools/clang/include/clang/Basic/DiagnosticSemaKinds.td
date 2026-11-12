@@ -7618,6 +7618,32 @@ def err_hlsl_unsupported_array_equality_op: Error<
   "equality operators cannot be used with array types">;
 def err_hlsl_unsupported_incomplete_array: Error<
   "array dimensions of struct/class members must be explicit">;
+// HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+def note_hlsl_unsized_array_needs_flag: Note<
+  "unsized arrays in uniform buffer blocks require "
+  "-fspv-enable-uniform-buffer-unsized-array "
+  "(VK_EXT_shader_uniform_buffer_unsized_array)">;
+def err_hlsl_unsized_array_not_last_member: Error<
+  "a member of type %0 follows an unsized array member; an unsized array "
+  "must be the last member of its struct">;
+def err_hlsl_unsized_array_member_use: Error<
+  "struct %0 has an unsized array member and can only be used as the element "
+  "type of a ConstantBuffer, which is lowered to a uniform buffer block "
+  "(VK_EXT_shader_uniform_buffer_unsized_array)">;
+def err_hlsl_unsized_array_block_copy: Error<
+  "a constant buffer with an unsized array member cannot be %select{declared "
+  "as a local variable|passed as a function argument|returned from a "
+  "function}0; VK_EXT_shader_uniform_buffer_unsized_array does not allow the "
+  "block to be copied">;
+def err_hlsl_unsized_array_block_array: Error<
+  "a constant buffer with an unsized array member cannot be used in an array; "
+  "the size of each element block would be undefined "
+  "(VK_EXT_shader_uniform_buffer_unsized_array)">;
+def err_hlsl_unsized_array_length: Error<
+  "cannot query the length of an unsized array: "
+  "VK_EXT_shader_uniform_buffer_unsized_array prohibits OpArrayLength; pass "
+  "the length as a separate uniform buffer member">;
+// HLSL Change End
 def err_hlsl_unsupported_bool_lvalue_op : Error<
   "operator cannot be used with a bool lvalue">;
 def err_hlsl_unsupported_bfloat16_op : Error<

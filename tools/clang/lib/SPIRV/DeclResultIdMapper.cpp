@@ -1644,6 +1644,17 @@ void DeclResultIdMapper::createCTBuffer(const HLSLBufferDecl *decl) {
 SpirvVariable *DeclResultIdMapper::createPushConstant(const VarDecl *decl) {
   // The front-end errors out if non-struct type push constant is used.
   const QualType type = decl->getType();
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  // VK_EXT_shader_uniform_buffer_unsized_array only relaxes uniform buffer
+  // blocks; the Vulkan SPIR-V environment keeps rejecting an unsized array in
+  // a push constant block.
+  if (hlsl::TypeContainsUnsizedArrayMember(
+          hlsl::GetHLSLResourceResultType(type)))
+    emitError("an unsized array member cannot be used in a push constant "
+              "block; VK_EXT_shader_uniform_buffer_unsized_array only "
+              "applies to uniform buffers (ConstantBuffer)",
+              decl->getLocation());
+  // HLSL Change End
   const auto *recordType = type->getAs<RecordType>();
 
   SpirvVariable *var = nullptr;
@@ -1707,6 +1718,14 @@ SpirvVariable *
 DeclResultIdMapper::createShaderRecordBuffer(const VarDecl *decl,
                                              ContextUsageKind kind) {
   const QualType type = decl->getType();
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  if (hlsl::TypeContainsUnsizedArrayMember(
+          hlsl::GetHLSLResourceResultType(type)))
+    emitError("an unsized array member cannot be used in a shader record "
+              "buffer; VK_EXT_shader_uniform_buffer_unsized_array only "
+              "applies to uniform buffers (ConstantBuffer)",
+              decl->getLocation());
+  // HLSL Change End
   const auto *recordType =
       hlsl::GetHLSLResourceResultType(type)->getAs<RecordType>();
   assert(recordType);

@@ -530,6 +530,34 @@ bool IsHLSLResourceType(clang::QualType type) {
   return false;
 }
 
+// HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+static bool typeContainsUnsizedArrayMemberImpl(clang::QualType type,
+                                              unsigned depth) {
+  if (depth > 16 || type.isNull() || type->isDependentType())
+    return false;
+  if (const auto *arrayType = type->getAsArrayTypeUnsafe())
+    return typeContainsUnsizedArrayMemberImpl(arrayType->getElementType(),
+                                             depth + 1);
+  const RecordType *recordType = type->getAs<RecordType>();
+  if (!recordType)
+    return false;
+  const RecordDecl *recordDecl = recordType->getDecl();
+  if (!recordDecl || recordDecl->isInvalidDecl())
+    return false;
+  for (const FieldDecl *field : recordDecl->fields()) {
+    if (field->getType()->isIncompleteArrayType())
+      return true;
+    if (typeContainsUnsizedArrayMemberImpl(field->getType(), depth + 1))
+      return true;
+  }
+  return false;
+}
+
+bool TypeContainsUnsizedArrayMember(clang::QualType type) {
+  return typeContainsUnsizedArrayMemberImpl(type, 0);
+}
+// HLSL Change End
+
 bool IsHLSLHitObjectType(QualType type) {
   return nullptr != getAttr<HLSLHitObjectAttr>(type);
 }

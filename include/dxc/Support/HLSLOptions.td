@@ -415,6 +415,10 @@ def fspv_enable_maximal_reconvergence: Flag<["-"], "fspv-enable-maximal-reconver
   HelpText<"Enables the MaximallyReconvergesKHR execution mode for this module.">;
 def fspv_enable_maintenance9: Flag<["-"], "fspv-enable-maintenance9">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"Emit bitwise instructions on non-32-bit integer operands directly instead of emulating them. Requires the VK_KHR_maintenance9 feature (maintenance9) on the device.">;
+// HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+def fspv_enable_uniform_buffer_unsized_array: Flag<["-"], "fspv-enable-uniform-buffer-unsized-array">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
+  HelpText<"Allow an unsized array as the last member of a constant buffer (uniform buffer block), lowered to OpTypeRuntimeArray. Requires the VK_EXT_shader_uniform_buffer_unsized_array feature (shaderUniformBufferUnsizedArray) on the device.">;
+// HLSL Change End
 def fspv_use_vulkan_memory_model: Flag<["-"], "fspv-use-vulkan-memory-model">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"Generates SPIR-V modules that use the Vulkan memory model instead of GLSL450.">;
 def fspv_use_unknown_image_format

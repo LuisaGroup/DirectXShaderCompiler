@@ -9693,6 +9693,14 @@ ExprResult HLSLExternalSource::LookupArrayMemberExprForHLSL(
   // The only property available on arrays is Length; it is deprecated and
   // available only on HLSL version <=2018
   if (member->getLength() == 6 && 0 == strcmp(memberText, "Length")) {
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    // The length of an unsized array is only known at runtime from the size of
+    // the bound buffer, so OpArrayLength cannot be used for it.
+    if (BaseType->isIncompleteArrayType()) {
+      m_sema->Diag(MemberLoc, diag::err_hlsl_unsized_array_length);
+      return ExprError();
+    }
+    // HLSL Change End
     if (const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(BaseType)) {
       // check version support
       hlsl::LangStd hlslVer = getSema()->getLangOpts().HLSLVersion;
@@ -15962,6 +15970,13 @@ bool Sema::DiagnoseHLSLDecl(Declarator &D, DeclContext *DC, Expr *BitWidth,
   }
   // HLSL Change Ends
 
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  // An unsized array member is only accepted when the user explicitly opts in
+  // to VK_EXT_shader_uniform_buffer_unsized_array for SPIR-V codegen.
+  const bool allowUnsizedArrayMember =
+      getLangOpts().SPIRV && getLangOpts().SPIRVUniformBufferUnsizedArray;
+  // HLSL Change End
+
   // Early checks - these are not simple attribution errors, but constructs that
   // are fundamentally unsupported,
   // and so we avoid errors that might indicate they can be repaired.
@@ -15972,15 +15987,88 @@ bool Sema::DiagnoseHLSLDecl(Declarator &D, DeclContext *DC, Expr *BitWidth,
     }
 
     if (isField && pType && pType->isIncompleteArrayType()) {
-      nestedDiagId = diag::err_hlsl_unsupported_incomplete_array;
+      // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+      // With the opt-in flag an unsized array member is accepted here; it is
+      // rejected later in this function unless it is the last member and the
+      // struct is only used as a ConstantBuffer element type.
+      if (!allowUnsizedArrayMember)
+        // HLSL Change End
+        nestedDiagId = diag::err_hlsl_unsupported_incomplete_array;
     }
 
     if (nestedDiagId) {
       Diag(D.getLocStart(), nestedDiagId);
+      // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+      if (nestedDiagId == diag::err_hlsl_unsupported_incomplete_array &&
+          getLangOpts().SPIRV)
+        Diag(D.getLocStart(), diag::note_hlsl_unsized_array_needs_flag);
+      // HLSL Change End
       D.setInvalidType();
       return false;
     }
   }
+
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  // For a function declarator qt is the function type itself, so the rules below
+  // (which apply to the value being declared) look at the return type instead.
+  QualType declaredType = qt;
+  if ((isFunction || isMethod) && !qt.isNull()) {
+    if (const auto *fnType = qt->getAs<FunctionType>())
+      declaredType = fnType->getReturnType();
+  }
+
+  if (allowUnsizedArrayMember && !D.isInvalidType() && pType &&
+      !declaredType->isDependentType()) {
+    // An unsized array member must be the last member of its struct, so no
+    // member may be declared after one.
+    if (isField) {
+      if (const auto *RD = dyn_cast<RecordDecl>(DC)) {
+        for (const FieldDecl *prevField : RD->fields()) {
+          if (prevField->getType()->isIncompleteArrayType()) {
+            Diag(D.getLocStart(), diag::err_hlsl_unsized_array_not_last_member)
+                << declaredType;
+            D.setInvalidType();
+            return false;
+          }
+        }
+      }
+    }
+    // A struct with an unsized array member can only be lowered as a uniform
+    // buffer block, i.e. as the element type of a ConstantBuffer. HLSL resource
+    // objects are exempt here: ConstantBuffer<T> is the supported spelling and
+    // the remaining resource types are rejected by the SPIR-V backend when they
+    // are lowered.
+    if (!hlsl::IsHLSLResourceType(declaredType) &&
+        hlsl::TypeContainsUnsizedArrayMember(declaredType)) {
+      Diag(D.getLocStart(), diag::err_hlsl_unsized_array_member_use)
+          << declaredType.getUnqualifiedType();
+      D.setInvalidType();
+      return false;
+    }
+    // A uniform buffer block that carries an unsized member cannot be copied
+    // into a function-scope temporary, which is what CodeGen creates for a local
+    // resource variable, a resource parameter and a resource return value; and
+    // an array of such blocks could not describe the size of its elements.
+    QualType elementType = declaredType;
+    while (elementType->isArrayType())
+      elementType = elementType->getAsArrayTypeUnsafe()->getElementType();
+    if (hlsl::IsHLSLResourceType(elementType) &&
+        hlsl::TypeContainsUnsizedArrayMember(
+            hlsl::GetHLSLResourceResultType(elementType))) {
+      if (elementType != declaredType) {
+        Diag(D.getLocStart(), diag::err_hlsl_unsized_array_block_array);
+        D.setInvalidType();
+        return false;
+      }
+      if (isLocalVar || isParameter || isFunction || isMethod) {
+        Diag(D.getLocStart(), diag::err_hlsl_unsized_array_block_copy)
+            << (isLocalVar ? 0 : (isParameter ? 1 : 2));
+        D.setInvalidType();
+        return false;
+      }
+    }
+  }
+  // HLSL Change End
 
   // String and subobject declarations are supported only as top level global
   // variables. Const and static modifiers are implied - add them if missing.

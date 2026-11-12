@@ -174,6 +174,11 @@ public:
   bool SPIRV = false;  // SPIRV Change
   unsigned SpirvMajorVersion; // SPIRV Change
   unsigned SpirvMinorVersion; // SPIRV Change
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array: mirror of
+  // -fspv-enable-uniform-buffer-unsized-array so that Sema can accept an
+  // unsized array as the last member of a struct.
+  bool SPIRVUniformBufferUnsizedArray = false;
+  // HLSL Change End
 
   bool isSignedOverflowDefined() const {
     return getSignedOverflowBehavior() == SOB_Defined;

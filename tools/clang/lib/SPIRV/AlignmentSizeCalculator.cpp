@@ -429,11 +429,24 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
   }
 
   // Rule 4, 6, 8, and 10
-  if (const auto *arrayType = astContext.getAsConstantArrayType(type)) {
-    const auto elemCount = arrayType->getSize().getZExtValue();
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  // An unsized (runtime) array follows the same element alignment and stride
+  // rules as a sized array. The only difference is that it contributes no
+  // size to the enclosing block, because its length is only known at runtime
+  // from the size of the buffer bound to the block.
+  const bool isUnsizedArray = type->isIncompleteArrayType();
+  // HLSL Change End
+  const auto *arrayType = astContext.getAsConstantArrayType(type);
+  if (arrayType || isUnsizedArray) {
+    const auto elemCount =
+        isUnsizedArray ? 1 : arrayType->getSize().getZExtValue();
+    const QualType elemType =
+        isUnsizedArray ? cast<IncompleteArrayType>(type)->getElementType()
+                       : arrayType->getElementType();
     uint32_t alignment = 0, size = 0;
-    std::tie(alignment, size) = getAlignmentAndSize(arrayType->getElementType(),
-                                                    rule, isRowMajor, stride);
+    std::tie(alignment, size) = getAlignmentAndSize(elemType, rule,
+                                                    isRowMajor,
+                                                    stride);
 
     if (rule == SpirvLayoutRule::FxcSBuffer ||
         rule == SpirvLayoutRule::Scalar) {
@@ -469,6 +482,10 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
       size = roundToPow2(size, alignment);
     }
 
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    if (isUnsizedArray)
+      return {alignment, 0};
+    // HLSL Change End
     return {alignment, size};
   }
 

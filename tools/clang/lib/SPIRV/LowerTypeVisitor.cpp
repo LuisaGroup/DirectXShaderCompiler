@@ -1063,6 +1063,16 @@ LowerTypeVisitor::lowerResourceType(QualType type, SpirvLayoutRule rule,
       isRowMajor = isRowMajorMatrix(spvOptions, type);
 
     // Lower the underlying type.
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    // The element type of a structured buffer is itself wrapped in a runtime
+    // array, so a nested unsized array cannot be represented.
+    if (hlsl::TypeContainsUnsizedArrayMember(s))
+      emitError("an unsized array member is not supported in a structured "
+                "buffer element type; "
+                "VK_EXT_shader_uniform_buffer_unsized_array only applies to "
+                "uniform buffers (ConstantBuffer)",
+                srcLoc);
+    // HLSL Change End
     const auto *structType = lowerType(s, rule, isRowMajor, srcLoc);
 
     // Calculate memory alignment for the resource.
@@ -1123,6 +1133,16 @@ LowerTypeVisitor::lowerResourceType(QualType type, SpirvLayoutRule rule,
 
     const auto *underlyingStructDecl = underlyingStructType->getDecl();
 
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    // An unsized array is only permitted in a uniform buffer block. A
+    // TextureBuffer<T> becomes a storage buffer block, whose element type the
+    // Vulkan SPIR-V environment does not allow to be a runtime array.
+    if (forTBuffer && hlsl::TypeContainsUnsizedArrayMember(underlyingType))
+      emitError("an unsized array member is not supported in a TextureBuffer; "
+                "VK_EXT_shader_uniform_buffer_unsized_array only applies to "
+                "uniform buffers (ConstantBuffer)",
+                srcLoc);
+    // HLSL Change End
     auto loweredFields = lowerStructFields(underlyingStructDecl, rule);
 
     const std::string structName = "type." + bufferDecl->getName().str() + "." +
@@ -1215,6 +1235,12 @@ LowerTypeVisitor::lowerStructFields(const RecordDecl *decl,
     }
   }
 
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  const FieldDecl *lastField = nullptr;
+  for (const auto *declaredField : decl->fields())
+    lastField = declaredField;
+  // HLSL Change End
+  
   // Create fields for all members of this struct
   for (const auto *field : decl->fields()) {
     llvm::Optional<BitfieldInfo> bitfieldInfo;
@@ -1241,6 +1267,14 @@ LowerTypeVisitor::lowerStructFields(const RecordDecl *decl,
       }
     }
 
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    // An unsized array member may only appear as the very last member.
+    if (field->getType()->isIncompleteArrayType() && field != lastField)
+      emitError(
+          "unsized array member %0 must be the last member of the struct",
+          field->getLocation())
+          << field->getName();
+    // HLSL Change End
     fields.push_back(HybridStructType::FieldInfo(
         field->getType(), field->getName(),
         /*vkoffset*/ field->getAttr<VKOffsetAttr>(),

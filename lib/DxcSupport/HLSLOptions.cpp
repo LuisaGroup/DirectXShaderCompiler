@@ -1242,6 +1242,10 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
       Args.hasFlag(OPT_fspv_enable_maximal_reconvergence, OPT_INVALID, false);
   opts.SpirvOptions.enableMaintenance9 =
       Args.hasFlag(OPT_fspv_enable_maintenance9, OPT_INVALID, false);
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  opts.SpirvOptions.enableUniformBufferUnsizedArray = Args.hasFlag(
+      OPT_fspv_enable_uniform_buffer_unsized_array, OPT_INVALID, false);
+  // HLSL Change End
   opts.SpirvOptions.useVulkanMemoryModel =
       Args.hasFlag(OPT_fspv_use_vulkan_memory_model, OPT_INVALID, false);
   opts.SpirvOptions.useUnknownImageFormat =

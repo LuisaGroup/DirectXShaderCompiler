@@ -1544,6 +1544,10 @@ public:
 // SPIRV change starts
 #ifdef ENABLE_SPIRV_CODEGEN
     compiler.getLangOpts().SPIRV = Opts.GenSPIRV;
+    // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+    compiler.getLangOpts().SPIRVUniformBufferUnsizedArray =
+        Opts.GenSPIRV && Opts.SpirvOptions.enableUniformBufferUnsizedArray;
+    // HLSL Change End
     llvm::Optional<spv_target_env> spirvTargetEnv =
         spirv::FeatureManager::stringToSpvEnvironment(
             Opts.SpirvOptions.targetEnv);

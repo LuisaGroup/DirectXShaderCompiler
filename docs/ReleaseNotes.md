@@ -21,6 +21,30 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `VK_EXT_shader_uniform_buffer_unsized_array`: with
+  `-fspv-enable-uniform-buffer-unsized-array`, the last member of a uniform buffer
+  block may be an unsized array (a trailing `float values[];` in the struct used as
+  the element type of a `ConstantBuffer`). The extension adds no SPIR-V instruction,
+  no capability and no `OpExtension` string - it relaxes a rule of the Vulkan SPIR-V
+  environment and reuses `OpTypeRuntimeArray` - so the relaxation is an opt-in flag
+  instead of a `-fspv-extension` or `-fspv-target-env` value, and a module compiled
+  without it is unchanged. The runtime array becomes the last member of the
+  `Block`-decorated `Uniform` struct with the `Offset` and `ArrayStride` the active
+  layout rule produces, is indexed at runtime through a dynamic `OpAccessChain`, and
+  is validated by the shipped SPIRV-Tools without any extra validator option. The
+  compiler rejects an unsized member that is not the last member, any use of the
+  struct outside a `ConstantBuffer` (push constant blocks, shader record buffers,
+  `TextureBuffer`/`StructuredBuffer` element types, local variables and function
+  parameters), any copy of the block (a local `ConstantBuffer<T>` variable, a
+  `ConstantBuffer<T>` parameter, a function returning one, or an array of blocks),
+  and `.Length` on the member, because the extension prohibits `OpArrayLength`;
+  the accessible length is
+  `max((bufferObjectSize - offsetOfArray) / arrayStride, 0)` and has to be passed in
+  by the application, which must also enable
+  `VkPhysicalDeviceShaderUniformBufferUnsizedArrayFeaturesEXT::shaderUniformBufferUnsizedArray`
+  on the device and size the descriptor range accordingly. See the "Unsized array as
+  the last uniform buffer member" section of `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/ext-uniform-buffer-unsized-array.hlsl`.
 - Added support for `SPV_QCOM_image_processing3`: with
   `-fspv-extension=SPV_QCOM_image_processing3`, the entry points in
   `<vk/qcom/image_processing3.h>` gather with a footprint chosen by a mode operand

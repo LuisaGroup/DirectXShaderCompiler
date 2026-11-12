@@ -13339,6 +13339,14 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
   SmallVector<FieldDecl*, 32> RecFields;
 
   bool ARCErrReported = false;
+  // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+  // A trailing unsized array member is a deliberate construct under the
+  // extension, so the C99 flexible-array-member extension diagnostics do not
+  // apply to it. An unsized array member that is not the last member has
+  // already been diagnosed by Sema::DiagnoseHLSLDecl.
+  const bool isHLSLUnsizedArrayMember =
+      getLangOpts().HLSL && getLangOpts().SPIRVUniformBufferUnsizedArray;
+  // HLSL Change End
   for (ArrayRef<Decl *>::iterator i = Fields.begin(), end = Fields.end();
        i != end; ++i) {
     FieldDecl *FD = cast<FieldDecl>(*i);
@@ -13400,7 +13408,7 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
                                  ? diag::err_flexible_array_empty_aggregate
                                  : 0;
 
-      if (DiagID)
+      if (DiagID && !isHLSLUnsizedArrayMember)
         Diag(FD->getLocation(), DiagID) << FD->getDeclName()
                                         << Record->getTagKind();
       // While the layout of types that contain virtual bases is not specified
@@ -13412,7 +13420,7 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
         if (RD->getNumVBases() != 0)
           Diag(FD->getLocation(), diag::err_flexible_array_virtual_base)
             << FD->getDeclName() << Record->getTagKind();
-      if (!getLangOpts().C99)
+      if (!getLangOpts().C99 && !isHLSLUnsizedArrayMember)
         Diag(FD->getLocation(), diag::ext_c99_flexible_array_member)
           << FD->getDeclName() << Record->getTagKind();
 
@@ -13431,6 +13439,15 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
       }
       // Okay, we have a legal flexible array member at the end of the struct.
       Record->setHasFlexibleArrayMember(true);
+    } else if (isHLSLUnsizedArrayMember &&
+               FDTy->isIncompleteArrayType() && Record &&
+               !Record->isUnion()) {
+      // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
+      // DiagnoseHLSLDecl already rejected this member.
+      // HLSL Change End
+      FD->setInvalidDecl();
+      EnclosingDecl->setInvalidDecl();
+      continue;
     } else if (!FDTy->isDependentType() &&
                RequireCompleteType(FD->getLocation(), FD->getType(),
                                    diag::err_field_incomplete)) {
