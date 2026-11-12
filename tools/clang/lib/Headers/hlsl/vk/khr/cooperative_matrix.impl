@@ -100,6 +100,173 @@ template <typename ResultType, typename MatrixTypeA, typename MatrixTypeB,
 __builtin_spv_CooperativeMatrixMulAddKHR(MatrixTypeA a, MatrixTypeB b,
                                          MatrixTypeC c,
                                          [[vk::ext_literal]] int operands);
+
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+// OpCooperativeMatrixConvertUseEXT (5293) and
+// OpCooperativeMatrixGetCoordinateEXT (5363) take and return ordinary values, so
+// they are plain [[vk::ext_instruction]] wrappers: CodeGen emits them from this
+// declaration and CapabilityVisitor attaches the capability and the extension
+// from the opcode.
+template <typename ResultType, typename MatrixType>
+[[vk::ext_instruction(/* OpCooperativeMatrixConvertUseEXT */ 5293)]] ResultType
+__builtin_spv_CooperativeMatrixConvertUseEXT(MatrixType matrix);
+
+// The Result Type has to be a two-component 32-bit integer vector
+// (external/SPIRV-Tools, ValidateCooperativeMatrixGetCoordinateEXT), which is
+// what `uint2` lowers to.
+template <typename MatrixType>
+[[vk::ext_instruction(/* OpCooperativeMatrixGetCoordinateEXT */ 5363)]] uint2
+__builtin_spv_CooperativeMatrixGetCoordinateEXT(MatrixType matrix,
+                                                uint32_t index);
+
+// OpCooperativeMatrixReduceEXT (5366) and
+// OpCooperativeMatrixPerElementOpEXT (5369) name a *function* in one of their
+// operands, and SPIR-V has no operand form that can name an HLSL function, so
+// these two are compiler builtins instead of [[vk::ext_instruction]] wrappers
+// (that attribute would also take precedence over the name-based dispatch in
+// SpirvEmitter::doCallExpr). CodeGen synthesizes the referenced function -
+// __coopmat_combine takes the two component-type values of a reduction and
+// __coopmat_perelem takes (row, column, value) - and replaces the placeholder
+// argument below with a reference to it.
+// The synthesized functions return OpUndef, so only the encoding is defined: HLSL
+// cannot express a user-supplied combine function yet (docs/SPIR-V.rst).
+template <typename ResultType, typename MatrixType>
+ResultType __builtin_spv_CooperativeMatrixReduceEXT(MatrixType matrix,
+                                                    uint32_t mode,
+                                                    uint32_t combineFunc);
+template <typename ResultType, typename MatrixType>
+ResultType __builtin_spv_CooperativeMatrixPerElementOpEXT(MatrixType matrix,
+                                                          uint32_t func);
+// HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+
+// HLSL Change Begin - SPV_ARM_cooperative_matrix_layouts.
+// Compile-time checks for the blocked-interleaved Arm memory layouts.
+//
+// HLSL has no `static_assert` before -HV 202x and these headers are documented
+// for -HV 2021, so an invalid combination is reported by instantiating a class
+// template that only has a definition for `true`. Instantiating it with `false`
+// produces
+//   error: implicit instantiation of undefined template
+//          'vk::arm::BlockedInterleavedLayoutIsSupported<false>'
+// followed by a note that points at the HLSL call site that asked for it.
+//
+// They are declared here, ahead of the load/store entry points that use them,
+// because this file is included at the end of <vk/khr/cooperative_matrix.h> and
+// is therefore also visible to <vk/arm/cooperative_matrix_layouts.h>, where the
+// layouts themselves are described.
+namespace vk {
+namespace arm {
+
+/// True for the two layouts SPV_ARM_cooperative_matrix_layouts adds to
+/// CooperativeMatrixLayout.
+template <CooperativeMatrixLayout layout> struct IsBlockedInterleavedLayout {
+  static const bool value =
+      layout == CooperativeMatrixLayoutRowBlockedInterleavedARM ||
+      layout == CooperativeMatrixLayoutColumnBlockedInterleavedARM;
+};
+
+/// Instantiating this with `false` is the diagnostic for a Stride that a
+/// blocked-interleaved Arm layout cannot accept, or for a (rows, columns,
+/// stride) shape the layout cannot describe. See
+/// <vk/arm/cooperative_matrix_layouts.h>
+/// for the rules and for the entry points that do allow these layouts.
+template <bool supported> struct BlockedInterleavedLayoutIsSupported;
+template <> struct BlockedInterleavedLayoutIsSupported<true> {
+  using ok = int;
+};
+
+/// Instantiating this with `false` is the diagnostic for passing one of the two
+/// blocked-interleaved Arm layouts to an entry point that takes the Stride as a
+/// run-time argument. SPV_ARM_cooperative_matrix_layouts requires that Stride
+/// come from a constant instruction, and a run-time argument is lowered to an
+/// OpLoad, so those layouts must be loaded and stored through
+/// LoadBlockedInterleaved/StoreBlockedInterleaved instead.
+template <bool supported> struct RuntimeStrideIsValidForLayout;
+template <> struct RuntimeStrideIsValidForLayout<true> {
+  using ok = int;
+};
+
+} // namespace arm
+} // namespace vk
+// HLSL Change End
+
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+// Compile-time checks for the four maintenance1 entry points. HLSL has no
+// `static_assert` before -HV 202x and these headers are documented for -HV 2021,
+// so an unsupported combination is reported by instantiating one of the two class
+// templates below, which only have a definition for `true` - the mechanism
+// <vk/arm/cooperative_matrix_layouts.h> already uses:
+//   error: implicit instantiation of undefined template
+//   'vk::khr::ConvertUseIsSupported<false>'
+// followed by a note that points at the HLSL call site that asked for it.
+namespace vk {
+namespace khr {
+template <bool supported> struct ConvertUseIsSupported;
+template <> struct ConvertUseIsSupported<true> {
+  using ok = int;
+};
+
+template <bool supported> struct ReduceIsSupported;
+template <> struct ReduceIsSupported<true> {
+  using ok = int;
+};
+
+/// Instantiating this at all is the diagnostic for calling Reduce with a run-time
+/// mode; it has no definition on purpose. See the Reduce(uint32_t) declaration in
+/// <vk/khr/cooperative_matrix.h>.
+template <bool modeIsAConstant> struct ReduceModeMustBeAConstant;
+
+/// (left < right) is used with two copies of one template argument, so `value` is
+/// always false, but it only becomes a constant once the enclosing template is
+/// instantiated. `ReduceModeMustBeAConstant<false>` therefore cannot be
+/// instantiated while the header is merely parsed: naming a non-dependent
+/// `ReduceModeMustBeAConstant<false>` directly would make every shader that
+/// includes <vk/khr/cooperative_matrix.h> fail.
+template <uint left, uint right> struct LessThan {
+  static const bool value = left < right;
+};
+
+/// True when converting a matrix whose use is `fromUse` to `toUse` is one of the
+/// conversions OpCooperativeMatrixConvertUseEXT allows. SPV_EXT_cooperative_
+/// matrix_maintenance1 (and external/SPIRV-Tools, ValidateCooperativeMatrix) only
+/// allow a conversion between MatrixAccumulatorKHR and MatrixAKHR /
+/// MatrixBKHR: A to B would change the meaning of the data rather than its
+/// layout, and a use to itself needs no conversion at all.
+template <CooperativeMatrixUse fromUse, CooperativeMatrixUse toUse>
+struct IsSupportedConvertUse {
+  static const bool value =
+      (fromUse == CooperativeMatrixUseMatrixAccumulatorKHR &&
+       (toUse == CooperativeMatrixUseMatrixAKHR ||
+        toUse == CooperativeMatrixUseMatrixBKHR)) ||
+      ((fromUse == CooperativeMatrixUseMatrixAKHR ||
+        fromUse == CooperativeMatrixUseMatrixBKHR) &&
+       toUse == CooperativeMatrixUseMatrixAccumulatorKHR);
+};
+
+/// True when (mode, use, shape) is a reduction OpCooperativeMatrixReduceEXT
+/// accepts. external/SPIRV-Tools, ValidateCooperativeMatrixReduceEXT: both the
+/// matrix and the result have to be accumulators, Reduce has to be one of the
+/// four values the extension allows, and the result shape has to be the one the
+/// mode produces - Row keeps the row count, Column the column count, 2x2 halves
+/// both and Row|Column leaves 1x1.
+template <uint mode, CooperativeMatrixUse use, uint rows, uint columns,
+          uint newRows, uint newColumns>
+struct IsSupportedReduce {
+  static const bool value =
+      use == CooperativeMatrixUseMatrixAccumulatorKHR &&
+      ((mode == uint(vk::CooperativeMatrixReduceRow) && newRows == rows) ||
+       (mode == uint(vk::CooperativeMatrixReduceColumn) &&
+        newColumns == columns) ||
+       (mode == (uint(vk::CooperativeMatrixReduceRow) |
+                 uint(vk::CooperativeMatrixReduceColumn)) &&
+        newRows == 1 && newColumns == 1) ||
+       (mode == uint(vk::CooperativeMatrixReduce2x2) && newRows * 2 == rows &&
+        newColumns * 2 == columns));
+};
+} // namespace khr
+} // namespace vk
+// HLSL Change End
+
 namespace vk {
 namespace khr {
 
@@ -185,6 +352,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
           class Type>
 void CooperativeMatrix<ComponentType, scope, rows, columns, use>::Store(
     WorkgroupSpirvPointer<Type> data, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   __builtin_spv_CooperativeMatrixWorkgroupStoreKHR(
       data, _matrix, layout, stride,
       memoryAccessOperands | MemoryAccessNonPrivatePointerMask |
@@ -198,6 +374,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
           class Type>
 void CooperativeMatrix<ComponentType, scope, rows, columns, use>::Store(
     RWStructuredBuffer<Type> data, uint32_t index, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   __builtin_spv_CooperativeMatrixStoreKHR(data[index], _matrix, layout, stride,
                                           memoryAccessOperands);
 }
@@ -209,6 +394,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
 void CooperativeMatrix<ComponentType, scope, rows, columns, use>::CoherentStore(
     globallycoherent RWStructuredBuffer<Type> data, uint32_t index,
     uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   __builtin_spv_CooperativeMatrixStoreKHR(
       data[index], _matrix, layout, stride,
       memoryAccessOperands | MemoryAccessNonPrivatePointerMask |
@@ -223,6 +417,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
 CooperativeMatrix<ComponentType, scope, rows, columns, use>
 CooperativeMatrix<ComponentType, scope, rows, columns, use>::Load(
     vk::WorkgroupSpirvPointer<Type> buffer, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   CooperativeMatrix result;
   result._matrix =
       __builtin_spv_CooperativeMatrixWorkgroupLoadKHR<SpirvMatrixType>(
@@ -240,6 +443,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
 CooperativeMatrix<ComponentType, scope, rows, columns, use>
 CooperativeMatrix<ComponentType, scope, rows, columns, use>::Load(
     RWStructuredBuffer<Type> buffer, uint32_t index, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   CooperativeMatrix result;
   result._matrix = __builtin_spv_CooperativeMatrixLoadKHR<SpirvMatrixType>(
       buffer[index], layout, stride, memoryAccessOperands);
@@ -253,6 +465,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
 CooperativeMatrix<ComponentType, scope, rows, columns, use>
 CooperativeMatrix<ComponentType, scope, rows, columns, use>::CoherentLoad(
     RWStructuredBuffer<Type> buffer, uint32_t index, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   CooperativeMatrix result;
   result._matrix = __builtin_spv_CooperativeMatrixLoadKHR<SpirvMatrixType>(
       buffer[index], layout, stride,
@@ -269,6 +490,15 @@ template <uint32_t memoryAccessOperands, CooperativeMatrixLayout layout,
 CooperativeMatrix<ComponentType, scope, rows, columns, use>
 CooperativeMatrix<ComponentType, scope, rows, columns, use>::Load(
     StructuredBuffer<Type> buffer, uint32_t index, uint32_t stride) {
+  // A blocked-interleaved Arm layout cannot be reached through an entry point
+  // that takes the Stride as a run-time argument: the extension requires the
+  // Stride operand to come from a constant instruction, and a run-time argument
+  // is lowered to an OpLoad. Instantiating this with `false` is the diagnostic;
+  // see <vk/arm/cooperative_matrix_layouts.h>.
+  typedef typename vk::arm::RuntimeStrideIsValidForLayout<
+      !vk::arm::IsBlockedInterleavedLayout<layout>::value>::ok
+      BlockedInterleavedLayoutStrideIsValid;
+
   CooperativeMatrix result;
   result._matrix = __builtin_spv_CooperativeMatrixLoadKHR<SpirvMatrixType>(
       buffer[index], layout, stride, MemoryAccessMaskNone);
@@ -373,5 +603,79 @@ cooperativeMatrixSaturatingMultiplyAdd(
   return result;
 }
 
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+template <class ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+template <CooperativeMatrixUse newUse>
+CooperativeMatrix<ComponentType, scope, rows, columns, newUse>
+CooperativeMatrix<ComponentType, scope, rows, columns, use>::ConvertUse() {
+  // Instantiating this check with `false` is the diagnostic for a use conversion
+  // SPV_EXT_cooperative_matrix_maintenance1 does not allow.
+  typedef typename vk::khr::ConvertUseIsSupported<
+      vk::khr::IsSupportedConvertUse<use, newUse>::value>::ok Checked;
+  using ResultType =
+      CooperativeMatrix<ComponentType, scope, rows, columns, newUse>;
+  ResultType result;
+  result._matrix = __builtin_spv_CooperativeMatrixConvertUseEXT<
+      typename ResultType::SpirvMatrixType>(_matrix);
+  return result;
+}
+
+template <class ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+template <uint newRows, uint newColumns, uint mode>
+CooperativeMatrix<ComponentType, scope, newRows, newColumns,
+                  CooperativeMatrixUseMatrixAccumulatorKHR>
+CooperativeMatrix<ComponentType, scope, rows, columns, use>::Reduce() {
+  // Instantiating this check with `false` is the diagnostic for a reduction (or a
+  // result shape) SPV_EXT_cooperative_matrix_maintenance1 does not allow.
+  typedef typename vk::khr::ReduceIsSupported<
+      vk::khr::IsSupportedReduce<mode, use, rows, columns, newRows,
+                                 newColumns>::value>::ok Checked;
+  using ResultType = CooperativeMatrix<ComponentType, scope, newRows, newColumns,
+                                       CooperativeMatrixUseMatrixAccumulatorKHR>;
+  ResultType result;
+  // `mode` is a template argument, so it reaches the instruction as a literal.
+  result._matrix = __builtin_spv_CooperativeMatrixReduceEXT<
+      typename ResultType::SpirvMatrixType>(_matrix, mode, 0);
+  return result;
+}
+
+template <class ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+template <uint newRows, uint newColumns>
+CooperativeMatrix<ComponentType, scope, newRows, newColumns,
+                  CooperativeMatrixUseMatrixAccumulatorKHR>
+CooperativeMatrix<ComponentType, scope, rows, columns, use>::Reduce(
+    uint32_t mode) {
+  // A run-time reduce mode cannot be encoded: the CooperativeMatrixReduce operand
+  // of OpCooperativeMatrixReduceEXT is a literal. Instantiating this check is the
+  // diagnostic; pass the mode as the third template argument instead, e.g.
+  //   m.Reduce<16, 1, vk::CooperativeMatrixReduceRow>()
+  typedef typename vk::khr::ReduceModeMustBeAConstant<
+      vk::khr::LessThan<newRows, newRows>::value>::ok ReduceModeIsAConstant;
+  CooperativeMatrix result;
+  return result;
+}
+
+template <class ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+CooperativeMatrix<ComponentType, scope, rows, columns, use>
+CooperativeMatrix<ComponentType, scope, rows, columns, use>::PerElementOp() {
+  CooperativeMatrix result;
+  result._matrix =
+      __builtin_spv_CooperativeMatrixPerElementOpEXT<SpirvMatrixType>(_matrix,
+                                                                     0);
+  return result;
+}
+
+template <class ComponentType, Scope scope, uint rows, uint columns,
+          CooperativeMatrixUse use>
+uint2 CooperativeMatrix<ComponentType, scope, rows, columns, use>::
+    GetCoordinate(uint32_t index) {
+  return __builtin_spv_CooperativeMatrixGetCoordinateEXT<SpirvMatrixType>(
+      _matrix, index);
+}
+// HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 } // namespace khr
 } // namespace vk

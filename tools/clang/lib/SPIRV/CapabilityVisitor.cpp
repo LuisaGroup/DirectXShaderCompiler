@@ -657,7 +657,40 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     // HLSL Change End
     break;
   }
-  case spv::Op::OpDPdxCoarse:
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  // OpCooperativeMatrixConvertUseEXT and OpCooperativeMatrixGetCoordinateEXT
+  // are emitted straight from <vk/khr/cooperative_matrix.h> as
+  // [[vk::ext_instruction]] calls, so this is the only place that can attach
+  // their capability and extension: the SPIR-V instruction is the whole
+  // feature, and its capability (CooperativeMatrixConversionsEXT = 5429 /
+  // CooperativeMatrixGetCoordinateEXT = 5438) is what makes it legal.
+  //
+  // Going through addExtension() rather than requireExtension() keeps
+  // -fspv-extension= an effective allow-list: for a module built with an
+  // explicit list that omits SPV_EXT_cooperative_matrix_maintenance1 this
+  // reports "SPV_EXT_cooperative_matrix_maintenance1 required for
+  // OpCooperativeMatrixConvertUseEXT but not permitted to use" instead of
+  // emitting a module SPIRV-Tools rejects for a missing capability.
+  //
+  // OpCooperativeMatrixReduceEXT and OpCooperativeMatrixPerElementOpEXT are
+  // deliberately not handled here: they need a synthesized helper function, so
+  // the emitter builds them (SpirvEmitter::processCooperativeMatrixReduceEXT /
+  // processCooperativeMatrixPerElementOpEXT) and attaches the same capability
+  // and extension after checking the enabled flag, exactly like the
+  // pre-existing SPV_NV_cooperative_matrix2 spellings do. Handling them here as
+  // well would make the NV spellings declare the EXT extension too.
+  case spv::Op::OpCooperativeMatrixConvertUseEXT:
+    addExtension(Extension::EXT_cooperative_matrix_maintenance1,
+                 "OpCooperativeMatrixConvertUseEXT", loc);
+    addCapability(spv::Capability::CooperativeMatrixConversionsEXT, loc);
+    break;
+  case spv::Op::OpCooperativeMatrixGetCoordinateEXT:
+    addExtension(Extension::EXT_cooperative_matrix_maintenance1,
+                 "OpCooperativeMatrixGetCoordinateEXT", loc);
+    addCapability(spv::Capability::CooperativeMatrixGetCoordinateEXT, loc);
+    break;
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+case spv::Op::OpDPdxCoarse:
   case spv::Op::OpDPdyCoarse:
   case spv::Op::OpFwidthCoarse:
   case spv::Op::OpDPdxFine:

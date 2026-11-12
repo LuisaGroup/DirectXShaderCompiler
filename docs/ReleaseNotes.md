@@ -20,6 +20,36 @@ The included licenses apply to the following files:
 ### Upcoming Release
 
 #### SPIR-V
+- Added support for `SPV_EXT_cooperative_matrix_maintenance1`
+  (`VK_EXT_cooperative_matrix_maintenance1`). Four new members of
+  `vk::khr::CooperativeMatrix` in `<vk/khr/cooperative_matrix.h>` emit the
+  extension's four instructions, each with its own capability and with
+  `OpExtension "SPV_EXT_cooperative_matrix_maintenance1"`:
+  `ConvertUse<use>()` emits `OpCooperativeMatrixConvertUseEXT` (5293) and
+  `CooperativeMatrixConversionsEXT` (5429) to reinterpret a matrix with a
+  different `CooperativeMatrixUse` (accumulator to A/B or back, same component
+  type, scope, rows and columns); `Reduce<rows, columns, mode>()` emits
+  `OpCooperativeMatrixReduceEXT` (5366) and `CooperativeMatrixReductionsEXT`
+  (5430) for `Row`, `Column`, `Row | Column` and `2x2` reductions;
+  `PerElementOp()` emits `OpCooperativeMatrixPerElementOpEXT` (5369) and
+  `CooperativeMatrixPerElementOperationsEXT` (5432); and `GetCoordinate(index)`
+  emits `OpCooperativeMatrixGetCoordinateEXT` (5363) and
+  `CooperativeMatrixGetCoordinateEXT` (5438) to map an element index to a
+  `uint2` coordinate. The reduce mode and the result shape are template
+  arguments, because the `CooperativeMatrixReduce` operand is a literal bit mask
+  and a run-time mode cannot be encoded; a run-time mode, a result shape that
+  does not match the mode, a non-accumulator matrix, and an A to B use
+  conversion are compile-time errors instead of SPIR-V that `spirv-val` rejects.
+  The two instructions that name a function operand (`Reduce`,
+  `PerElementOp`) get a compiler-synthesized `__coopmat_combine` /
+  `__coopmat_perelem` function whose body is `OpUndef`, so only their encoding is
+  defined so far - the same limitation the `SPV_NV_cooperative_matrix2`
+  spellings have. The extension is enabled by default, because every instruction
+  it gates needs an entry point that did not exist before it; an explicit
+  `-fspv-extension` list still acts as an allow-list.
+  `-fspv-extension=SPV_EXT_cooperative_matrix_maintenance1` is accepted. See the
+  "Cooperative matrix maintenance" section of `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/ext-cooperative-matrix-maintenance1.hlsl`.
 - Added support for `SPV_ARM_cooperative_matrix_layouts`
   (`VK_ARM_cooperative_matrix_layouts`): naming
   `vk::CooperativeMatrixLayoutRowBlockedInterleavedARM` (4202) or

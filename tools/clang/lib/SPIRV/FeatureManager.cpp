@@ -271,7 +271,10 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
           // HLSL Change - SPV_ARM_cooperative_matrix_layouts.
           .Case("SPV_ARM_cooperative_matrix_layouts",
                 Extension::ARM_cooperative_matrix_layouts)
-          .Default(Extension::Unknown);
+          // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1.
+          .Case("SPV_EXT_cooperative_matrix_maintenance1",
+                Extension::EXT_cooperative_matrix_maintenance1)
+.Default(Extension::Unknown);
 }
 
 const char *FeatureManager::getExtensionName(Extension symbol) {
@@ -400,6 +403,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
       // HLSL Change - SPV_ARM_cooperative_matrix_layouts.
       case Extension::ARM_cooperative_matrix_layouts:
         return "SPV_ARM_cooperative_matrix_layouts";
+      // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1.
+      case Extension::EXT_cooperative_matrix_maintenance1:
+        return "SPV_EXT_cooperative_matrix_maintenance1";
       default:
     break;
   }
@@ -666,6 +672,29 @@ bool FeatureManager::enabledByDefault(Extension ext) {
       // against the target environment and cannot be emitted without its
       // capability.
       case Extension::ARM_cooperative_matrix_layouts:
+        return true;
+      // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1. Deliberately
+      // not opt-in, for the same reason as SPV_ARM_cooperative_matrix_layouts
+      // above: every instruction it gates is reachable only through an entry
+      // point that did not exist before it
+      // (CooperativeMatrix::ConvertUse/Reduce/PerElementOp/GetCoordinate), so no
+      // existing shader changes code generation, and the capability and
+      // OpExtension "SPV_EXT_cooperative_matrix_maintenance1" are emitted only for
+      // a module that actually contains one of the four instructions
+      // (CapabilityVisitor for the two header-only ones,
+      // SpirvEmitter::processCooperativeMatrixReduceEXT /
+      // processCooperativeMatrixPerElementOpEXT for the two that need a
+      // synthesized function reference). Registration still buys the same three
+      // things: -fspv-extension=SPV_EXT_cooperative_matrix_maintenance1 is
+      // accepted instead of being reported as an unknown extension, the extension
+      // is listed by the -fspv-extension= diagnostics, and it is emitted through
+      // the same addExtension() path as every other extension, so it is
+      // cross-checked against the target environment and cannot be emitted
+      // without its capability. An explicit -fspv-extension list remains an
+      // allow-list: omitting this extension from it makes the entry points report
+      // a diagnostic instead of producing a module that SPIRV-Tools rejects for a
+      // missing capability.
+      case Extension::EXT_cooperative_matrix_maintenance1:
         return true;
       default:
     return true;

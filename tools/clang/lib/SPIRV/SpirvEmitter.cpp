@@ -611,6 +611,21 @@ bool isCooperativeMatrixReduceNVIntrinsic(const FunctionDecl *f) {
 bool isCooperativeMatrixPerElementOpNVIntrinsic(const FunctionDecl *f) {
   return f->getName().equals("__builtin_spv_CooperativeMatrixPerElementOpNV");
 }
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+// The two entry points of <vk/khr/cooperative_matrix.h> that need a
+// compiler-synthesized helper function for their function operand
+// (OpCooperativeMatrixReduceEXT takes a combine function,
+// OpCooperativeMatrixPerElementOpEXT takes a per-element function). Like the NV
+// spellings above they are declaration-only builtins dispatched here by name, so
+// that the header can name them without an [[vk::ext_instruction]] attribute,
+// which would take precedence over this dispatch.
+bool isCooperativeMatrixReduceEXTIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_CooperativeMatrixReduceEXT");
+}
+bool isCooperativeMatrixPerElementOpEXTIntrinsic(const FunctionDecl *f) {
+  return f->getName().equals("__builtin_spv_CooperativeMatrixPerElementOpEXT");
+}
+// HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 
 // Takes an AST member type, and determines its index in the equivalent SPIR-V
 // struct type. This is required as the struct layout might change between the
@@ -3661,6 +3676,12 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
       return processCooperativeMatrixReduceNV(callExpr);
     if (isCooperativeMatrixPerElementOpNVIntrinsic(funcDecl))
       return processCooperativeMatrixPerElementOpNV(callExpr);
+ // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+ if (isCooperativeMatrixReduceEXTIntrinsic(funcDecl))
+ return processCooperativeMatrixReduceEXT(callExpr);
+ if (isCooperativeMatrixPerElementOpEXTIntrinsic(funcDecl))
+ return processCooperativeMatrixPerElementOpEXT(callExpr);
+ // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
   }
   // Intrinsic functions such as 'dot' or 'mul'
   if (hlsl::IsIntrinsicOp(funcDecl)) {
@@ -18477,13 +18498,64 @@ SpirvEmitter::processCooperativeMatrixSubArrayQCOM(const CallExpr *call) {
 
 SpirvInstruction *
 SpirvEmitter::processCooperativeMatrixReduceNV(const CallExpr *call) {
+  return processCooperativeMatrixReduce(call, /*isExt=*/false);
+}
+
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixReduceEXT(const CallExpr *call) {
+  return processCooperativeMatrixReduce(call, /*isExt=*/true);
+}
+
+bool SpirvEmitter::checkCooperativeMatrixMaintenance1(llvm::StringRef target,
+                                                      SourceLocation loc) {
+  // -fspv-extension= is an allow-list even for an extension that is enabled by
+  // default (see FeatureManager::enabledByDefault), so the entry points can be
+  // called with the extension switched off. Refuse the call instead of emitting
+  // an instruction whose capability the module is then not allowed to declare:
+  // SPIRV-Tools would reject the module for the missing capability, and its
+  // message would not name the entry point that caused it.
+  if (featureManager.isExtensionEnabled(
+          Extension::EXT_cooperative_matrix_maintenance1))
+    return true;
+  emitError("'%0' requires the SPV_EXT_cooperative_matrix_maintenance1 "
+            "extension; pass "
+            "-fspv-extension=SPV_EXT_cooperative_matrix_maintenance1 to "
+            "enable it",
+            loc)
+      << target;
+  return false;
+}
+// HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixReduce(const CallExpr *call, bool isExt) {
   const auto args = call->getArgs();
   assert(call->getNumArgs() == 3);
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  if (isExt && !checkCooperativeMatrixMaintenance1(
+                   "__builtin_spv_CooperativeMatrixReduceEXT",
+                   call->getExprLoc()))
+    return nullptr;
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
   SpirvInstruction *matrixArg = doExpr(args[0]);
   SpirvInstruction *reduceModeArg = doExpr(args[1]);
   SpirvInstruction *combineOpArg = doExpr(args[2]);
-  if (auto *constArg = dyn_cast<SpirvConstant>(reduceModeArg))
-    constArg->setLiteral();
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  // The CooperativeMatrixReduce operand of OpCooperativeMatrixReduceEXT (and of
+  // its NV alias) is a literal bit mask, not an <id>, so a mode that is not a
+  // compile-time constant cannot be encoded at all: emitting the <id> that stands
+  // for it produces a module SPIRV-Tools rejects with "Invalid cooperative matrix
+  // reduce operand". <vk/khr/cooperative_matrix.h> takes the mode as a template
+  // argument, so through the header this is always a constant.
+  auto *reduceModeConst = dyn_cast<SpirvConstant>(reduceModeArg);
+  if (!reduceModeConst) {
+    emitError("the reduce mode must be a compile-time constant",
+              args[1]->getExprLoc());
+    return nullptr;
+  }
+  reduceModeConst->setLiteral();
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 
   // Replace the integer constant with a proper function reference.
   SpirvInstruction *combineFuncRef = combineOpArg;
@@ -18500,10 +18572,20 @@ SpirvEmitter::processCooperativeMatrixReduceNV(const CallExpr *call) {
   }
 
   QualType resultType = call->getType();
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  // OpCooperativeMatrixReduceEXT (5366) and OpCooperativeMatrixReduceNV are two
+  // names for one opcode, and CooperativeMatrixReductionsEXT (5430) is two names
+  // for one capability, so the spelling difference a module can show is the
+  // OpExtension. It is attached here rather than in CapabilityVisitor because the
+  // NV spelling has to keep declaring SPV_NV_cooperative_matrix2 and only that.
+  llvm::StringRef extension =
+      isExt ? llvm::StringRef("SPV_EXT_cooperative_matrix_maintenance1")
+            : llvm::StringRef("SPV_NV_cooperative_matrix2");
   SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
-      5366, resultType, {matrixArg, reduceModeArg, combineFuncRef},
-      {"SPV_NV_cooperative_matrix2"}, "",
-      {5430}, call->getExprLoc());
+      uint32_t(spv::Op::OpCooperativeMatrixReduceEXT), resultType,
+      {matrixArg, reduceModeArg, combineFuncRef}, {extension}, "", {5430},
+      call->getExprLoc());
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
   if (!intrInst) return nullptr;
   intrInst->setRValue();
   return intrInst;
@@ -18511,8 +18593,26 @@ SpirvEmitter::processCooperativeMatrixReduceNV(const CallExpr *call) {
 
 SpirvInstruction *
 SpirvEmitter::processCooperativeMatrixPerElementOpNV(const CallExpr *call) {
+  return processCooperativeMatrixPerElementOp(call, /*isExt=*/false);
+}
+
+// HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixPerElementOpEXT(const CallExpr *call) {
+  return processCooperativeMatrixPerElementOp(call, /*isExt=*/true);
+}
+// HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+
+SpirvInstruction *SpirvEmitter::processCooperativeMatrixPerElementOp(
+    const CallExpr *call, bool isExt) {
   const auto args = call->getArgs();
   assert(call->getNumArgs() == 2);
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  if (isExt && !checkCooperativeMatrixMaintenance1(
+                   "__builtin_spv_CooperativeMatrixPerElementOpEXT",
+                   call->getExprLoc()))
+    return nullptr;
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
   SpirvInstruction *matrixArg = doExpr(args[0]);
   SpirvInstruction *funcIdArg = doExpr(args[1]);
 
@@ -18531,10 +18631,16 @@ SpirvEmitter::processCooperativeMatrixPerElementOpNV(const CallExpr *call) {
   }
 
   QualType resultType = call->getType();
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  // As for the reduce: one opcode (5369) and one capability (5432), two
+  // extension names. See the comment there.
+  llvm::StringRef extension =
+      isExt ? llvm::StringRef("SPV_EXT_cooperative_matrix_maintenance1")
+            : llvm::StringRef("SPV_NV_cooperative_matrix2");
   SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
-      5369, resultType, {matrixArg, funcRef},
-      {"SPV_NV_cooperative_matrix2"}, "",
-      {5432}, call->getExprLoc());
+      uint32_t(spv::Op::OpCooperativeMatrixPerElementOpEXT), resultType,
+      {matrixArg, funcRef}, {extension}, "", {5432}, call->getExprLoc());
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
   if (!intrInst) return nullptr;
   intrInst->setRValue();
   return intrInst;

@@ -275,6 +275,72 @@ class CooperativeMatrix {
   void Set(ComponentType value, uint32_t index);
   ComponentType Get(uint32_t index);
 
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  // Conversions, reductions, per-element operations and index-to-coordinate
+  // conversion: VK_EXT_cooperative_matrix_maintenance1 /
+  // SPV_EXT_cooperative_matrix_maintenance1. Each of the four entry points below
+  // emits one of the extension's four instructions together with its capability
+  // (CooperativeMatrixConversionsEXT 5429, CooperativeMatrixReductionsEXT 5430,
+  // CooperativeMatrixPerElementOperationsEXT 5432,
+  // CooperativeMatrixGetCoordinateEXT 5438) and
+  // OpExtension "SPV_EXT_cooperative_matrix_maintenance1". The extension is
+  // registered in FeatureManager, so an explicit -fspv-extension= list that
+  // leaves it out reports a diagnostic instead of emitting an instruction whose
+  // capability the module is not allowed to declare.
+  //
+  // Reinterprets the same matrix with a different CooperativeMatrixUse. The
+  // component type, the scope, the rows and the columns are unchanged - only the
+  // use changes - because OpCooperativeMatrixConvertUseEXT requires the two types
+  // to have the same shape (external/SPIRV-Tools
+  // CooperativeMatrixShapesMatch), and it requires the conversion to go between
+  // MatrixAccumulatorKHR and MatrixAKHR / MatrixBKHR. Any other pairing is a
+  // compile error (vk::khr::ConvertUseIsSupported<false>).
+  // Lowers to OpCooperativeMatrixConvertUseEXT (5293).
+  template <CooperativeMatrixUse newUse>
+  CooperativeMatrix<ComponentType, scope, rows, columns, newUse> ConvertUse();
+
+  // Reduces this matrix to `newRows` x `newColumns`. `mode` is a
+  // CooperativeMatrixReduceMode value - CooperativeMatrixReduceRow,
+  // CooperativeMatrixReduceColumn, CooperativeMatrixReduceRow |
+  // CooperativeMatrixReduceColumn (a full reduction, which leaves 1x1) or
+  // CooperativeMatrixReduce2x2 - and it has to be a compile-time constant: the
+  // CooperativeMatrixReduce operand of the instruction is a literal, so a
+  // run-time mode cannot be encoded. Passing one is a compile error, as is a
+  // result shape that does not match the mode or a matrix whose use is not
+  // MatrixAccumulatorKHR (vk::khr::ReduceIsSupported<false>).
+  // Lowers to OpCooperativeMatrixReduceEXT (5366) with a compiler-synthesized
+  // combine function.
+  template <uint newRows, uint newColumns, uint mode>
+  CooperativeMatrix<ComponentType, scope, newRows, newColumns,
+                    CooperativeMatrixUseMatrixAccumulatorKHR>
+  Reduce();
+
+  // Never a valid call: it exists so that Reduce<rows, columns>(mode) - passing
+  // the mode as a run-time argument instead of as the third template argument -
+  // reports "implicit instantiation of undefined template
+  // 'vk::khr::ReduceModeMustBeAConstant<false>'" instead of "no matching member
+  // function for call to 'Reduce'". The CooperativeMatrixReduce operand of
+  // OpCooperativeMatrixReduceEXT is a literal, so only a constant can be
+  // encoded.
+  template <uint newRows, uint newColumns>
+  CooperativeMatrix<ComponentType, scope, newRows, newColumns,
+                    CooperativeMatrixUseMatrixAccumulatorKHR>
+  Reduce(uint32_t mode);
+
+  // Applies a per-element operation to every element. The result has the same
+  // type as the source: OpCooperativeMatrixPerElementOpEXT requires the result
+  // type and the matrix type to be identical.
+  // Lowers to OpCooperativeMatrixPerElementOpEXT (5369) with a
+  // compiler-synthesized per-element function.
+  CooperativeMatrix PerElementOp();
+
+  // Maps element `index` of this matrix to the coordinate of the same element in
+  // the source matrix of a different use, as a two-component 32-bit integer
+  // vector. The index must be less than GetLength().
+  // Lowers to OpCooperativeMatrixGetCoordinateEXT (5363).
+  uint2 GetCoordinate(uint32_t index);
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+
   // HLSL Change - SPV_KHR_bfloat16: the probe is routed through a trait so
   // that it can be specialized for bfloat16_t, which has no operators.
   static const bool hasSignedIntegerComponentType =

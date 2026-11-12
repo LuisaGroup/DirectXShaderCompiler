@@ -116,6 +116,13 @@ enum class Extension {
     // operands of OpCooperativeMatrixLoadKHR / OpCooperativeMatrixStoreKHR, and
     // the entry points in <vk/arm/cooperative_matrix_layouts.h>).
     ARM_cooperative_matrix_layouts,
+    // HLSL Change - SPV_EXT_cooperative_matrix_maintenance1
+    // (OpCooperativeMatrixConvertUseEXT, OpCooperativeMatrixReduceEXT,
+    // OpCooperativeMatrixPerElementOpEXT and
+    // OpCooperativeMatrixGetCoordinateEXT, the entry points in
+    // <vk/khr/cooperative_matrix.h>). Enabled by default; see
+    // enabledByDefault() in FeatureManager.cpp.
+    EXT_cooperative_matrix_maintenance1,
     Unknown,
 };
 

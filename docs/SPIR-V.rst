@@ -1959,6 +1959,141 @@ self-contained example and
 tests that pin the capability, the extension, the layout and stride operands, the
 classic off path, the optimizer-survival path and the diagnostics.
 
+Cooperative matrix maintenance
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The ``SPV_EXT_cooperative_matrix_maintenance1`` extension adds four operations to
+the cooperative matrix type of ``SPV_KHR_cooperative_matrix``: a *use* conversion,
+a reduction, a per-element operation, and an index-to-coordinate mapping. It is
+gated by the Vulkan ``VK_EXT_cooperative_matrix_maintenance1`` device extension.
+That extension adds no feature struct and no property struct of its own - the four
+capabilities are part of what a device already reports through
+``vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR``, and there is nothing extra
+for the host to query or chain.
+
+* ``ConvertUse`` - ``OpCooperativeMatrixConvertUseEXT`` (5293), capability
+  ``CooperativeMatrixConversionsEXT`` (5429).
+* ``Reduce`` - ``OpCooperativeMatrixReduceEXT`` (5366), capability
+  ``CooperativeMatrixReductionsEXT`` (5430).
+* ``PerElementOp`` - ``OpCooperativeMatrixPerElementOpEXT`` (5369), capability
+  ``CooperativeMatrixPerElementOperationsEXT`` (5432).
+* ``GetCoordinate`` - ``OpCooperativeMatrixGetCoordinateEXT`` (5363), capability
+  ``CooperativeMatrixGetCoordinateEXT`` (5438).
+
+A module that uses any of them declares the matching capability, once, and
+``OpExtension "SPV_EXT_cooperative_matrix_maintenance1"``. The extension is
+**enabled by default**: every instruction it gates is reachable only through an
+entry point that did not exist before, so no existing shader changes code
+generation, and the capability and the extension string are emitted only for a
+module that actually contains one of the four instructions. ``-fspv-extension=SPV_EXT_cooperative_matrix_maintenance1``
+is accepted and is only needed when an explicit allow-list is in use; with such a
+list that omits it, the entry points are compile errors instead of a module whose
+capability the header could not declare.
+
+The entry points are the last four members of
+``vk::khr::CooperativeMatrix<ComponentType, scope, rows, columns, use>`` in
+``<vk/khr/cooperative_matrix.h>``:
+
+.. code:: hlsl
+
+  #include <vk/khr/cooperative_matrix.h>
+
+  using Accumulator =
+      vk::khr::CooperativeMatrixAccumulator<float, vk::ScopeSubgroup, 16, 16>;
+  using AccumulatorRow =
+      vk::khr::CooperativeMatrixAccumulator<float, vk::ScopeSubgroup, 16, 1>;
+  using MatrixA = vk::khr::CooperativeMatrixA<float, vk::ScopeSubgroup, 16, 16>;
+
+  // 16x16 -> 16x1, one value per row (CooperativeMatrixReductionsEXT).
+  AccumulatorRow rowSum = c.Reduce<16, 1, vk::CooperativeMatrixReduceRow>();
+  // 16x16 -> 8x8, one value per 2x2 block.
+  Accumulator8x8 blockSum = c.Reduce<8, 8, vk::CooperativeMatrixReduce2x2>();
+  // The (row, column) the element at `index` came from.
+  uint2 coordinate = c.GetCoordinate(index);
+  // The same values, in the A position of a multiply-add
+  // (CooperativeMatrixConversionsEXT).
+  MatrixA a = c.ConvertUse<vk::CooperativeMatrixUseMatrixAKHR>();
+  // An element-wise operation (CooperativeMatrixPerElementOperationsEXT).
+  Accumulator scaled = c.PerElementOp();
+
+Use conversion
+++++++++++++++
+``OpCooperativeMatrixConvertUseEXT`` reinterprets a matrix with a different
+``CooperativeMatrixUse``: the component type, the scope, the rows and the columns
+have to be identical, and only the use changes. The extension restricts the
+conversion to accumulator -> A or B, and A or B -> accumulator, which is what
+moving a result into the input position of the next multiply-add needs; A -> B is
+not a conversion, it would reinterpret the values. ``ConvertUse`` instantiates a
+template that only has a definition for a supported pairing, so anything else is
+``error: implicit instantiation of undefined template
+'vk::khr::ConvertUseIsSupported<false>'`` followed by a note naming the call,
+rather than SPIR-V that ``spirv-val`` rejects with "Matrix and Result Type must
+convert between MatrixAccumulatorKHR and MatrixAKHR or MatrixBKHR".
+
+Reductions
+++++++++++
+``OpCooperativeMatrixReduceEXT`` reduces a matrix along rows (``Row``, 1), along
+columns (``Column``, 2), along both (``Row | Column``, 3, which leaves a 1x1
+matrix) or across 2x2 blocks (``2x2``, 4), combining the elements with the
+function named by its last operand. Both the matrix and the result have to be
+accumulators, and the result shape has to be the one the mode produces: ``Row``
+keeps the row count, ``Column`` the column count, ``2x2`` halves both and
+``Row | Column`` leaves 1x1. ``Reduce`` takes the mode *and* the result shape as
+template arguments, ``Reduce<newRows, newColumns, mode>()``, because the
+``CooperativeMatrixReduce`` operand is a literal bit mask and not an ``<id>``: a
+mode that is only known at run time cannot be encoded at all. Passing one anyway -
+``Reduce<newRows, newColumns>(mode)`` - is a compile error, as is an unsupported
+mode, a result shape that does not match it, or a matrix whose use is not
+``MatrixAccumulatorKHR``: ``error: implicit instantiation of undefined template
+'vk::khr::ReduceModeMustBeAConstant<false>'`` and
+``... 'vk::khr::ReduceIsSupported<false>'`` respectively.
+
+Per-element operations
+++++++++++++++++++++++
+``OpCooperativeMatrixPerElementOpEXT`` applies a function to every element of a
+matrix. The result type has to be the matrix type - ``spirv-val`` compares the two
+type ids - so ``PerElementOp()`` returns the same type as its receiver.
+
+Index to coordinate
++++++++++++++++++++
+``OpCooperativeMatrixGetCoordinateEXT`` maps an element index of a matrix to the
+coordinate of the same element in the source matrix, as a two-component 32-bit
+integer vector (``uvec2``); that is the result type ``spirv-val`` requires, and
+``GetCoordinate`` returns it as a ``uint2``.
+
+The combine and per-element functions
++++++++++++++++++++++++++++++++++++++
+The last operand of ``OpCooperativeMatrixReduceEXT`` and
+``OpCooperativeMatrixPerElementOpEXT`` is the id of an ``OpFunction``, and SPIR-V
+has no operand form that can name an HLSL function, so the two entry points are
+compiler builtins rather than ``[[vk::ext_instruction]]`` wrappers. CodeGen
+synthesizes the function - ``__coopmat_combine`` takes the two component-type
+values of a reduction, ``__coopmat_perelem`` takes (row, column, value) - and
+passes a reference to it, and the module therefore contains the definition of a
+function whose body is ``OpUndef``. **The operation itself is not defined yet**:
+the encoding is, and the extension's capability is what makes the instruction
+legal, but a shader that reduces or applies a per-element operation gets an
+undefined value until HLSL has a way to pass a user-defined function. This
+limitation is inherited from the ``SPV_NV_cooperative_matrix2`` spellings, which
+use the same synthesized functions.
+
+What the compiler cannot check
+++++++++++++++++++++++++++++++
+* the device. Shapes, component types, scopes and uses are device specific: the
+  host has to find a ``VkCooperativeMatrixPropertiesKHR`` matching them and enable
+  ``VK_EXT_cooperative_matrix_maintenance1`` before it creates the pipeline. A
+  driver without the extension rejects a module that contains one of the four
+  instructions.
+* the result of a reduction or of a per-element operation, as described above.
+* the semantics of a use conversion. ``spirv-val`` checks that the two types have
+  the same shape and a legal pairing of uses; whether the values make sense in the
+  new role is the shader author's responsibility.
+
+See ``examples/spirv-extensions/ext-cooperative-matrix-maintenance1.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/ext.cooperative-matrix.maintenance1*.hlsl`` for the
+tests that pin the four capabilities, the extension, the operand order of each
+instruction, the off path, the optimizer-survival path and the two diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1972,6 +2107,7 @@ Supported extensions
 * SPV_KHR_shader_draw_parameters
 * SPV_KHR_ray_tracing
 * SPV_KHR_shader_clock
+* SPV_EXT_cooperative_matrix_maintenance1
 * SPV_EXT_demote_to_helper_invocation
 * SPV_EXT_descriptor_indexing
 * SPV_EXT_fragment_fully_covered

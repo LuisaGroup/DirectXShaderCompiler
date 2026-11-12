@@ -947,6 +947,25 @@ private:
   SpirvInstruction *processCooperativeMatrixReduceNV(const CallExpr *call);
   /// Process NV cooperative matrix per-element-op builtin.
   SpirvInstruction *processCooperativeMatrixPerElementOpNV(const CallExpr *call);
+  // HLSL Change Begin - SPV_EXT_cooperative_matrix_maintenance1.
+  /// Process the SPV_EXT_cooperative_matrix_maintenance1 spellings of the two
+  /// builtins above. They share the implementation with the NV spellings and
+  /// differ only in the extension string and in whether the extension has to be
+  /// enabled; see SpirvEmitter::processCooperativeMatrixReduce.
+  SpirvInstruction *processCooperativeMatrixReduceEXT(const CallExpr *call);
+  SpirvInstruction *
+  processCooperativeMatrixPerElementOpEXT(const CallExpr *call);
+  /// Common implementations of the reduce / per-element-op builtins.
+  /// isExt selects the SPV_EXT_cooperative_matrix_maintenance1 spelling.
+  SpirvInstruction *processCooperativeMatrixReduce(const CallExpr *call,
+                                                   bool isExt);
+  SpirvInstruction *
+  processCooperativeMatrixPerElementOp(const CallExpr *call, bool isExt);
+  /// Emits the "requires -fspv-extension=SPV_EXT_cooperative_matrix_maintenance1"
+  /// error and returns false if the extension is not enabled for this module.
+  bool checkCooperativeMatrixMaintenance1(llvm::StringRef target,
+                                          SourceLocation loc);
+  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 
   /// Extract the component type from a cooperative matrix call argument.
   QualType getComponentTypeFromCallee(const CallExpr *call);
