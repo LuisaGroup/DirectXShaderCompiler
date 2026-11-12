@@ -2667,6 +2667,140 @@ self-contained example and
 tests that pin the four capabilities, the extension, the operand order of each
 instruction, the off path, the optimizer-survival path and the two diagnostics.
 
+TOSA tensor operations (``TOSA.001000.1``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+TOSA - Tensor Operator Set Architecture - is Arm's operator set for the tensor
+graphs of the **ARM data-graph ecosystem**. It is not a Vulkan extension and this
+compiler does not implement it as one: TOSA is an *extended instruction set*,
+identified by the string in ``OpExtInstImport``, with no extension string and no
+capability of its own.
+
+.. code:: hlsl
+
+  #include <vk/arm/tosa.h>
+  using namespace vk::arm::tosa;
+  Tensor<float> a = ...;
+  Tensor<float> b = ...;
+  Tensor<float> sum = Add(a, b);                        // ADD
+  Tensor<float> mag = Abs(sum);                         // ABS
+  Tensor<float> big = Maximum(NanModeIgnore, mag, b);   // MAXIMUM, nan_mode IGNORE
+
+.. code:: text
+
+  OpCapability TensorsARM
+  OpExtension "SPV_ARM_tensors"
+  %1 = OpExtInstImport "TOSA.001000.1"
+  %tf = OpTypeTensorARM %float
+  %add = OpExtInst %tf %1 ADD %a %b
+  %abs = OpExtInst %tf %1 ABS %add
+  %max = OpExtInst %tf %1 MAXIMUM %int_1 %abs %b
+
+The set name pins the version: ``TOSA.001000.1`` is TOSA 1.0 revision 1
+(``TOSAVersion`` 1000001, ``TOSARevision`` 1), whose 66 operations are numbered
+0-65. A consumer looks the set up by that exact string, so a different version is a
+different instruction set with a different opcode table; ``dxc`` refuses one
+("Invalid extended instruction import '...'"), as it refuses an opcode outside the
+table ("Invalid extended instruction number: ..."). Getting the *string* and the
+*numbers* right is the whole contract - both are pinned in
+``tools/clang/test/CodeGenSPIRV/tosa.identifiers.error.hlsl``.
+
+The operand type is a tensor, not a scalar or a vector. ``SPV_ARM_tensors``
+provides it as ``OpTypeTensorARM`` (4163), which HLSL has no spelling for, so
+``<vk/arm/tosa.h>`` builds it out of the ordinary ``vk::`` type machinery:
+
+.. code:: hlsl
+
+  template <typename ElementType> using Tensor =
+      vk::SpirvOpaqueType</* OpTypeTensorARM */ 4163, ElementType>;
+
+and every declaration in the header is one ``[[vk::ext_instruction]]`` over it.
+That type is in ``SPV_ARM_tensors``, so a module that contains a TOSA operation
+declares ``OpCapability TensorsARM`` (4174) and ``OpExtension "SPV_ARM_tensors"`` -
+once each, and only when an operation is used. Including the header and using
+nothing from it adds nothing to the module, and there is no import until the first
+TOSA call (``SpirvBuilder::getExtInstSet``).
+
+``SPV_ARM_tensors`` is deliberately **not** a ``FeatureManager`` allow-list entry -
+``-fspv-extension=SPV_ARM_tensors`` is "error: unknown SPIR-V extension" - so the
+header requests the pair with ``[[vk::ext_capability]]`` / ``[[vk::ext_extension]]``
+instead of letting ``CapabilityVisitor`` infer it. There is consequently no flag that
+turns a TOSA body off while leaving the shader intact, which is the right behaviour
+for a graph instruction set: the alternative would be a module whose instructions
+need a capability that the command line had just removed.
+
+Operand order is the instructions' and not the mnemonics': ``MAXIMUM`` and
+``MINIMUM`` take ``nan_mode`` first, ``TRANSPOSE`` takes its permutation first,
+``CONCAT`` takes its axis first, and ``MUL``, ``NEGATE`` and ``MATMUL`` put their
+attribute operands last, after every data operand. TOSA's attribute operands - a
+``nan_mode``, an ``axis``, a zero point, a reshape shape - are ``IdRef`` operands in
+the SPIR-V encoding, so each is an ordinary HLSL parameter in the header and each
+must be a compile-time constant for TOSA to be meaningful. The compiler does not
+enforce that: a computed value becomes an ``OpLoad`` where TOSA wants an
+``OpConstant``, and the module validates anyway because the validator only checks
+the operand count.
+
+The same applies to the *values* of the mode selectors. ``NanModeIgnore`` is 1 and
+``NanModePropagate`` is 0 because that is what the TOSA 1.0 specification assigns
+them; SPIR-V sees an integer id and nothing else, so a consumer that reads a
+different value reads a different mode. The header names the two enumerators that
+exist rather than inviting a bare literal, but it cannot check them.
+
+What the surface cannot express
++++++++++++++++++++++++++++++++
+
+* **No shape, and only optionally a rank.** ``OpTypeTensorARM``'s two optional
+  operands are Rank and Shape. Rank is expressible - it is the id of an integer
+  constant, ``vk::integral_constant<uint, N>`` - and
+  ``tools/clang/test/CodeGenSPIRV/tosa.ranked-tensor.hlsl`` shows the spelling.
+  Shape is not: it is the id of an ``OpConstantComposite`` of an integer array, and
+  the ``vk::`` template-argument machinery carries types and integer constants but
+  not composite constants. A tensor in this compiler therefore has neither rank nor
+  shape unless you declare the type yourself, which is why the header's ``Tensor``
+  alias is unranked and why a consumer reads shapes from the graph that produced
+  the tensors.
+* **No data-graph entry point.** ``OpGraphARM``, ``OpGraphEntryPointARM`` and the
+  rest of the ``OpGraph*ARM`` family - ``SPV_ARM_graph``, ``OpCapability
+  GraphARM`` - are what make a module a *graph* rather than a kernel. DXC emits
+  none of them, so a module using these operations is a compute shader that happens
+  to contain TOSA instructions, and a runtime that requires them inside a graph
+  rejects it. That is a front-end feature (a new kind of entry point), not
+  something a header can supply.
+* **No tensor resource, and no constant tensor.** ``SPV_ARM_tensors`` makes
+  ``OpTypeTensorARM`` a descriptor type, but HLSL has no resource-object spelling
+  for it: a global of an opaque type lands in ``$Globals``, and a
+  ``RWStructuredBuffer`` of one embeds the opaque type in a ``StructBlock``. A
+  tensor value can only come from another TOSA operation, or be an uninitialized
+  local, until a data-graph entry point supplies one. A constant tensor needs the
+  Shape operand the type cannot carry.
+* **Not the whole set.** The header declares 47 of the 66 operations: the ones a
+  shader can feed without inventing convolution-kernel, pooling, FFT, resize,
+  gather/scatter, table or rescale operand conventions. Those are reachable through
+  ``[[vk::ext_instruction(<opcode>, "TOSA.001000.1")]]`` directly.
+* **Nothing numeric.** No CI in this repository implements TOSA, so the tests pin
+  the encoding and not the arithmetic, and a driver rejecting the module at
+  pipeline-creation time is outside the compiler's reach.
+
+What the host has to do
++++++++++++++++++++++++
+
+TOSA is a profile-and-level specification, and the module says nothing about
+conformance:
+
+* Which of the 66 operations a device implements, at which levels (8K, 16K, FP), and
+  in which of TOSA's extensions (int16, fp8, bf16, control flow, ...) is discovered
+  at runtime from the implementation. ``ADD`` in a module is not evidence that the
+  device can execute ``ADD``.
+* The device and driver have to support the Arm data-graph model that consumes
+  these instructions, and the application has to have negotiated the TOSA version it
+  is handing over - the compiler emits exactly ``TOSA.001000.1``.
+* The compiler cannot check any of this and no test can execute it.
+
+See ``examples/spirv-extensions/tosa.hlsl`` for a self-contained example and
+``tools/clang/test/CodeGenSPIRV/tosa.*.hlsl`` for the tests that pin the import
+string, the capability and extension pair, the operand order of 47 operations, the
+ranked-tensor spelling, the off path, the optimizer-survival path and the two
+element-type and set-string diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 

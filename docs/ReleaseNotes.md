@@ -20,6 +20,24 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for the `TOSA.001000.1` extended instruction set: TOSA (Tensor
+  Operator Set Architecture) is Arm's operator set for the tensor graphs of the
+  ARM data-graph ecosystem, and it is an extended instruction *set* rather than a
+  Vulkan extension - it has no extension string, no capability and no
+  `-fspv-extension` value. The new `<vk/arm/tosa.h>` header declares 47 of the
+  set's 66 operations as `[[vk::ext_instruction(<opcode>, "TOSA.001000.1")]]`
+  functions over `vk::arm::tosa::Tensor<ElementType>`, which lowers to
+  `OpTypeTensorARM` (4163) and so brings `OpCapability TensorsARM` (4174) and
+  `OpExtension "SPV_ARM_tensors"` with it; a call emits `OpExtInst` and nothing
+  else, and the import appears only when an operation is used. Operand order is
+  the instructions' - `MAXIMUM` takes `nan_mode` first, `TRANSPOSE` its
+  permutation first, `MUL`/`NEGATE`/`MATMUL` their attribute operands last - and
+  the import string pins TOSA 1.0 rev 1, so a wrong version or an out-of-range
+  opcode is refused. Not expressible: the tensor *shape* (only the rank is), a
+  constant tensor, a tensor resource, and a data-graph entry point, so a module
+  that uses these operations is a compute shader that happens to contain TOSA
+  instructions until `SPV_ARM_graph` is implemented. See `docs/SPIR-V.rst`
+  ("TOSA tensor operations") and `examples/spirv-extensions/tosa.hlsl`.
 - Added support for `SPV_NV_cooperative_matrix_decode_vector`
   (`VK_NV_cooperative_matrix_decode_vector`): the extension adds the
   `DecodeVectorFunc` bit (`0x0004`) to the `TensorAddressingOperands`
