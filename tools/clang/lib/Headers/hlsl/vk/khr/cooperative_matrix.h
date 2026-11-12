@@ -16,6 +16,21 @@
 namespace vk {
 namespace khr {
 
+// HLSL Change Begin - SPV_KHR_bfloat16 (BFloat16CooperativeMatrixKHR).
+// Drives the Matrix*SignedComponentsKHR operands of
+// OpCooperativeMatrixMulAddKHR. bfloat16_t defines no arithmetic or comparison
+// operators, so the subtraction/comparison probe below cannot be evaluated for
+// it, and it has to be specialized. The answer for bfloat16_t is false: those
+// operands may only be set when the component type of the corresponding matrix
+// is an integer type.
+template <typename T> struct HasSignedIntegerComponentType {
+  static const bool value = (T(0) - T(1) < T(0));
+};
+template <> struct HasSignedIntegerComponentType<bfloat16_t> {
+  static const bool value = false;
+};
+// HLSL Change End
+
 // The base cooperative matrix class. The template arguments correspond to the
 // operands in the OpTypeCooperativeMatrixKHR instruction.
 template <typename ComponentType, Scope scope, uint rows, uint columns,
@@ -211,8 +226,10 @@ class CooperativeMatrix {
   void Set(ComponentType value, uint32_t index);
   ComponentType Get(uint32_t index);
 
+  // HLSL Change - SPV_KHR_bfloat16: the probe is routed through a trait so
+  // that it can be specialized for bfloat16_t, which has no operators.
   static const bool hasSignedIntegerComponentType =
-      (ComponentType(0) - ComponentType(1) < ComponentType(0));
+      HasSignedIntegerComponentType<ComponentType>::value;
 
   // clang-format off
   using SpirvMatrixType = vk::SpirvOpaqueType<

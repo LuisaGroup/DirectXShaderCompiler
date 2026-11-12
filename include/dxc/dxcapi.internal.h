@@ -151,9 +151,19 @@ enum LEGAL_INTRINSIC_COMPTYPES {
   LICOMPTYPE_VK_SAMPLED_TEXTURE3D = 63,
   LICOMPTYPE_VK_SAMPLED_TEXTURECUBE = 64,
   LICOMPTYPE_VK_SAMPLED_TEXTURECUBE_ARRAY = 65,
-  LICOMPTYPE_COUNT = 66
+  // HLSL Change Begin - SPV_KHR_bfloat16: dot() on bfloat16_t operands.
+  // Same set as LICOMPTYPE_NUMERIC plus bfloat16_t, so that the intrinsic
+  // table can declare a bfloat16_t overload of dot() without also admitting
+  // bfloat16_t in every other numeric intrinsic (SPV_KHR_bfloat16 defines no
+  // general arithmetic for the type).
+  LICOMPTYPE_NUMERIC_BFLOAT16 = 66,
+  // HLSL Change End
+  LICOMPTYPE_COUNT = 67
 #else
-  LICOMPTYPE_COUNT = 56
+  // HLSL Change Begin - SPV_KHR_bfloat16: see LICOMPTYPE_NUMERIC_BFLOAT16.
+  LICOMPTYPE_NUMERIC_BFLOAT16 = 56,
+  // HLSL Change End
+  LICOMPTYPE_COUNT = 57
 #endif
 };
 

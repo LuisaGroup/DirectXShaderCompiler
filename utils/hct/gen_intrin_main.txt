@@ -125,7 +125,12 @@ $match<0, 1> float_like [[rn]] determinant(in float_like<r, r> x);
 void [[]] DeviceMemoryBarrier() : syncdevicememory_ug;
 void [[]] DeviceMemoryBarrierWithGroupSync() : syncgroupanddevicememory_ug;
 $match<0, 1> float_like [[rn]] distance(in float_like<c> a, in $type1 b);
-$match<0, 1> numeric [[rn,unsigned_op=udot]] dot(in numeric<c> a, in $type1 b);
+// HLSL Change Begin - SPV_KHR_bfloat16: dot() additionally accepts bfloat16_t
+// operands, which makes it the BFloat16DotProductKHR entry point (OpDot with a
+// BFloat16KHR component type). bfloat16_t is a SPIR-V-only type, so the extra
+// overload is unreachable for DXIL targets.
+$match<0, 1> numeric_bf16 [[rn,unsigned_op=udot]] dot(in numeric_bf16<c> a, in $type1 b);
+// HLSL Change End
 $type1 [[rn]] dst(in numeric<4> a, in $type1 b);
 // void errorf(in string Format, ...);
 $type1 [[rn]] EvaluateAttributeAtSample(in numeric<> value, in uint index);

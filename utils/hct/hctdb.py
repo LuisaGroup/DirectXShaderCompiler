@@ -9620,6 +9620,11 @@ class db_hlsl(object):
             "numeric16_only": "LICOMPTYPE_NUMERIC16_ONLY",
             "numeric32": "LICOMPTYPE_NUMERIC32",
             "numeric32_only": "LICOMPTYPE_NUMERIC32_ONLY",
+            # HLSL Change Begin - SPV_KHR_bfloat16: "numeric" plus bfloat16_t,
+            # used only by dot() so that a bfloat16_t dot product resolves to a
+            # bfloat16_t overload (OpDot with a BFloat16KHR component type).
+            "numeric_bf16": "LICOMPTYPE_NUMERIC_BFLOAT16",
+            # HLSL Change End
             "any": "LICOMPTYPE_ANY",
             "sampler1d": "LICOMPTYPE_SAMPLER1D",
             "sampler2d": "LICOMPTYPE_SAMPLER2D",

@@ -1114,6 +1114,24 @@ static const ArBasicKind g_NumericCT[] = {
     AR_BASIC_MIN16UINT,     AR_BASIC_INT64,
     AR_BASIC_UINT64,        AR_BASIC_UNKNOWN};
 
+// HLSL Change Begin - SPV_KHR_bfloat16. g_NumericCT plus bfloat16_t. Only
+// dot() uses this set: it is the sole intrinsic that SPV_KHR_bfloat16 gives a
+// bfloat16_t form for (BFloat16DotProductKHR, lowered to OpDot with a
+// BFloat16KHR component type). Keeping the extra kind out of g_NumericCT means
+// no other numeric intrinsic silently starts accepting bfloat16_t.
+static const ArBasicKind g_NumericBFloat16CT[] = {
+    AR_BASIC_FLOAT32,       AR_BASIC_FLOAT32_PARTIAL_PRECISION,
+    AR_BASIC_FLOAT16,       AR_BASIC_FLOAT64,
+    AR_BASIC_LITERAL_FLOAT, AR_BASIC_MIN10FLOAT,
+    AR_BASIC_MIN16FLOAT,    AR_BASIC_LITERAL_INT,
+    AR_BASIC_INT16,         AR_BASIC_INT32,
+    AR_BASIC_UINT16,        AR_BASIC_UINT32,
+    AR_BASIC_MIN12INT,      AR_BASIC_MIN16INT,
+    AR_BASIC_MIN16UINT,     AR_BASIC_INT64,
+    AR_BASIC_UINT64,        AR_BASIC_BFLOAT16,
+    AR_BASIC_UNKNOWN};
+// HLSL Change End
+
 static const ArBasicKind g_Numeric32CT[] = {
     AR_BASIC_FLOAT32,       AR_BASIC_FLOAT32_PARTIAL_PRECISION,
     AR_BASIC_LITERAL_FLOAT, AR_BASIC_LITERAL_INT,
@@ -1385,6 +1403,8 @@ const ArBasicKind *g_LegalIntrinsicCompTypes[] = {
     g_VKSampledTextureCUBEArrayCT, // LICOMPTYPE_VK_SAMPLED_TEXTURECUBE_ARRAY
     g_VKSampledTexture3DCT,        // LICOMPTYPE_VK_SAMPLED_TEXTURE3D
 #endif
+    // HLSL Change - SPV_KHR_bfloat16: dot() on bfloat16_t operands.
+    g_NumericBFloat16CT, // LICOMPTYPE_NUMERIC_BFLOAT16
 };
 static_assert(
     ARRAYSIZE(g_LegalIntrinsicCompTypes) == LICOMPTYPE_COUNT,
@@ -2740,6 +2760,8 @@ DoesComponentTypeAcceptMultipleTypes(LEGAL_INTRINSIC_COMPTYPES value) {
          value == LICOMPTYPE_NUMERIC ||        // all sorts of numbers
          value == LICOMPTYPE_NUMERIC32 ||      // all sorts of numbers
          value == LICOMPTYPE_NUMERIC32_ONLY || // all sorts of numbers
+         // HLSL Change - SPV_KHR_bfloat16: all sorts of numbers plus bfloat16_t.
+         value == LICOMPTYPE_NUMERIC_BFLOAT16 ||
          value == LICOMPTYPE_ANY;              // any time
 }
 

@@ -150,6 +150,28 @@ The included licenses apply to the following files:
   bits it exposes (`VkPhysicalDeviceMaintenance12FeaturesKHR`); without them a
   driver is entitled to assume the subscript is dynamically uniform, and the
   compiler cannot check that.
+  - Added support for the `VK_KHR_shader_bfloat16` compute half of
+    `SPV_KHR_bfloat16`, so that all three of its capabilities are now
+    expressible. `dot()` on `bfloat16_t` vector operands is emitted as `OpDot`
+    with a `BFloat16KHR` component type and declares
+    `OpCapability BFloat16DotProductKHR` (5117) on top of the existing
+    `BFloat16TypeKHR`; it is `OpDot`, not `OpSDot`/`OpUDot`, because the integer
+    dot product instructions require an integer result type. `dot()` now returns
+    `bfloat16_t` for `bfloat16_t` operands, so `float f = dot(a, b)` widens the
+    bfloat16 result with an extra `OpFConvert`, and mixing `bfloat16_t` with any
+    other component type in one `dot()` call is a compile error instead of a
+    silent widening. `vk::khr::CooperativeMatrix<bfloat16_t, ...>` from
+    `<vk/khr/cooperative_matrix.h>` is now usable and declares
+    `OpCapability BFloat16CooperativeMatrixKHR` (5118) in addition to
+    `CooperativeMatrixKHR`; only multiply-add, load, store, `Splat`, `Get`/`Set`
+    and `GetLength` are legal on it, since the extension defines no arithmetic
+    for the component type. Both are opt-in at the driver level through
+    `VkPhysicalDeviceShaderBfloat16FeaturesKHR` (`shaderBFloat16Type`,
+    `shaderBFloat16DotProduct`, `shaderBFloat16CooperativeMatrix`), which the
+    compiler cannot check. `docs/SPIR-V.rst` now documents the extension,
+    including the conversion model (implicit widening to `float` only, no
+    `bfloat16_t`/`float16_t` mixing) and the stage I/O restriction.
+
 
 Place release notes for the upcoming release below this line and remove this
 line upon naming the release. Refer to previous for appropriate section names.

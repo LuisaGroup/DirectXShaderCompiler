@@ -290,7 +290,31 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
     for (auto field : structType->getFields())
       addCapabilityForType(field.type, loc, sc);
   }
-}
+  // HLSL Change Begin - SPV_KHR_bfloat16 (BFloat16CooperativeMatrixKHR).
+  // vk::khr::CooperativeMatrix<ComponentType, ...> is lowered to a
+  // vk::SpirvOpaqueType, which this visitor sees as a SpirvIntrinsicType with
+  // the OpTypeCooperativeMatrixKHR opcode and the component type as its first
+  // operand. A bfloat16_t component additionally requires
+  // BFloat16CooperativeMatrixKHR on top of CooperativeMatrixKHR (which the
+  // header requests itself) and its dependency BFloat16TypeKHR.
+  else if (const auto *intrinsicType = dyn_cast<SpirvIntrinsicType>(type)) {
+    if (intrinsicType->getOpCode() ==
+        uint32_t(spv::Op::OpTypeCooperativeMatrixKHR)) {
+      const auto operands = intrinsicType->getOperands();
+      if (!operands.empty() && operands.front().isTypeOperand) {
+        const auto *componentType =
+            dyn_cast<FloatType>(operands.front().operand_as_type);
+        if (componentType && componentType->isBFloat16()) {
+          addExtension(Extension::KHR_bfloat16,
+                       "bfloat16_t cooperative matrix type", loc);
+          addCapability(spv::Capability::BFloat16TypeKHR);
+          addCapability(spv::Capability::BFloat16CooperativeMatrixKHR);
+        }
+      }
+    }
+  }
+  // HLSL Change End
+  }
 
 bool CapabilityVisitor::visit(SpirvConstantSizeOfEXT *inst) {
   // The operand type is not the result type, so the generic handling of

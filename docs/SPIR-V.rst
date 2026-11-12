@@ -701,6 +701,137 @@ See ``examples/spirv-extensions/khr-maintenance9.hlsl`` for a self-contained
 example and ``tools/clang/test/CodeGenSPIRV/maintenance9.*.hlsl`` for the tests
 that pin both the flagged and the unflagged encodings.
 
+BFloat16
+~~~~~~~~
+
+``SPV_KHR_bfloat16`` adds ``bfloat16_t``, a 16-bit floating point type with the
+``BFloat16KHR`` encoding: IEEE 754 binary32's 8-bit exponent with the significand
+truncated to 7 stored bits. It has ``float``'s range and roughly three significant
+decimal digits, which is what a machine-learning storage type wants.
+``bfloat16_t`` is primarily a storage and conversion type - the extension defines
+no arithmetic, comparison or bitwise operation for it - and only the two optional
+compute modes described below operate on it directly.
+
+``bfloat16_t`` is a real HLSL builtin type, so ``bfloat16_t2`` through
+``bfloat16_t4``, ``bfloat16_t2x2``, and structs and arrays containing it all work.
+It is available only when compiling with ``-spirv`` (the DXIL target rejects it),
+it requires HLSL 2018 or later, and it does not require
+``-enable-16bit-types``: the type is always 16 bits wide. It lowers to an
+``OpTypeFloat 16`` that carries the ``BFloat16KHR`` encoding operand, and the
+module declares ``OpCapability BFloat16TypeKHR`` (5116) together with
+``OpExtension "SPV_KHR_bfloat16"``:
+
+::
+
+    OpCapability BFloat16TypeKHR
+    OpExtension "SPV_KHR_bfloat16"
+    %bfloat16 = OpTypeFloat 16 BFloat16KHR
+
+``bfloat16_t`` is *not* ``float16_t``. The ``Float16`` capability and the
+16-bit stage I/O capabilities (``StorageInputOutput16``) are never requested on
+its behalf, and no implicit conversion exists between ``bfloat16_t`` and
+``float16_t`` in either direction. When ``-enable-16bit-types`` is given,
+``bfloat16_t`` keeps its own identity rather than aliasing ``float16_t``, and it
+does not change what ``half`` or ``min16float`` lower to.
+
+The only implicit conversion involving ``bfloat16_t`` is widening to
+``float``/``float64``, for scalars, vectors and matrices alike, which lowers to
+``OpFConvert``:
+
+.. code:: hlsl
+
+    bfloat16_t b = 1.5;
+    float f = b;                // OpFConvert %float
+    bfloat16_t2 v = bfloat16_t2(b, b);
+    float2 vf = v;              // OpFConvert %v2float
+
+Every other conversion needs an explicit constructor: implicit narrowing from
+``float``, conversions to and from the integer types, conversions to and from
+``float16_t``, and conversions to and from ``bool`` are compile errors. Mixed
+operands follow the same rule: ``bfloat16_t`` combined with ``float16_t`` is a
+type mismatch, and since no arithmetic is defined for the type an expression such
+as ``b * 2.0`` has to be written ``float(b) * 2.0``.
+
+``VK_KHR_shader_bfloat16`` does not allow the ``BFloat16KHR`` encoding in the
+``Input`` and ``Output`` storage classes, so ``bfloat16_t`` - including vectors,
+matrices and structs containing it - cannot appear in a shader stage interface.
+DXC rejects it there instead of emitting a module the validator would refuse:
+
+::
+
+    error: bfloat16_t is not supported in shader stage input/output: SPV_KHR_bfloat16
+    does not allow the BFloat16KHR type in Input/Output storage classes
+
+Pass values between stages as ``float`` and convert inside the shader.
+
+``BFloat16DotProductKHR``
++++++++++++++++++++++++++
+
+``dot()`` on ``bfloat16_t`` vector operands is the extension's bfloat16 dot
+product. It lowers to ``OpDot`` with a ``BFloat16KHR`` component type, and the
+module adds ``OpCapability BFloat16DotProductKHR`` (5117) on top of
+``BFloat16TypeKHR``:
+
+.. code:: hlsl
+
+    bfloat16_t3 a = bfloat16_t3(1.0, 2.0, 3.0);
+    bfloat16_t3 b = bfloat16_t3(4.0, 5.0, 6.0);
+    bfloat16_t d = dot(a, b); // %d = OpDot %bfloat16 %a %b
+
+Note that this is ``OpDot``, not ``OpSDot``/``OpUDot``: the latter two belong to
+``SPV_KHR_integer_dot_product`` and require an integer result type, so a
+bfloat16 component cannot be encoded with them. A ``float`` destination still
+compiles and widens the result (``float f = dot(a, b)`` emits ``OpDot %bfloat16``
+followed by ``OpFConvert %float``), but the result is rounded to bfloat16, so
+write ``dot(float3(a), float3(b))`` if the full float precision of a converted
+dot product is wanted. Mixing ``bfloat16_t`` with any other component type in one
+``dot()`` call is an error rather than a silent widening. A scalar
+``dot(bfloat16_t, bfloat16_t)`` is rejected as well, because the extension defines
+``BFloat16DotProductKHR`` only for vectors.
+
+``BFloat16CooperativeMatrixKHR``
+++++++++++++++++++++++++++++++++
+
+``vk::khr::CooperativeMatrix<bfloat16_t, scope, rows, columns, use>`` from
+``<vk/khr/cooperative_matrix.h>`` is a cooperative matrix whose
+``OpTypeCooperativeMatrixKHR`` takes an ``OpTypeFloat 16 BFloat16KHR`` component
+type. Such a module declares ``OpCapability BFloat16CooperativeMatrixKHR`` (5118)
+in addition to the ``CooperativeMatrixKHR`` and ``BFloat16TypeKHR`` capabilities
+that are already required, and both the ``SPV_KHR_cooperative_matrix`` and
+``SPV_KHR_bfloat16`` extensions:
+
+::
+
+    OpCapability BFloat16TypeKHR
+    OpCapability BFloat16CooperativeMatrixKHR
+    OpCapability CooperativeMatrixKHR
+    OpExtension "SPV_KHR_bfloat16"
+    OpExtension "SPV_KHR_cooperative_matrix"
+    %bfloat16 = OpTypeFloat 16 BFloat16KHR
+    %spirvIntrinsicType = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_8 %uint_0
+
+Only the operations the extension allows can be applied to it: multiply-add
+(``cooperativeMatrixMultiplyAdd``), load, store, ``Splat``, ``Get``/``Set`` and
+``GetLength``. The element-wise arithmetic and comparison operators of
+``vk::khr::CooperativeMatrix`` are integer/float only, so convert through
+``float`` for those.
+
+``VK_KHR_shader_bfloat16`` is a device extension whose
+``VkPhysicalDeviceShaderBfloat16FeaturesKHR`` struct carries one feature bit per
+capability: ``shaderBFloat16Type``, ``shaderBFloat16DotProduct`` and
+``shaderBFloat16CooperativeMatrix``. ``shaderBFloat16Type`` must be supported,
+``shaderBFloat16CooperativeMatrix`` requires ``VK_KHR_cooperative_matrix``, and
+at least one of ``shaderBFloat16DotProduct`` and
+``shaderBFloat16CooperativeMatrix`` must be supported. The relevant bits have to
+be enabled at ``vkCreateDevice`` for the capability to be legal, and a
+cooperative matrix's supported component types and shapes have to be queried with
+``vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR``. The compiler cannot check
+any of that.
+
+See ``examples/spirv-extensions/khr-bfloat16.hlsl`` for a self-contained example
+and ``tools/clang/test/CodeGenSPIRV/bfloat16.*.hlsl`` for the tests that pin the
+encodings and the diagnostics.
+
 Non-uniform push constant indexing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``VK_KHR_maintenance12`` is a Vulkan maintenance extension - one device
@@ -786,6 +917,7 @@ Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
 * SPV_KHR_16bit_storage
+* SPV_KHR_bfloat16
 * SPV_KHR_device_group
 * SPV_KHR_fragment_shading_rate
 * SPV_KHR_multivew

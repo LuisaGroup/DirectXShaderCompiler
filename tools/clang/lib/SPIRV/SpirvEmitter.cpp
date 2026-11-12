@@ -14098,6 +14098,63 @@ SpirvInstruction *SpirvEmitter::processIntrinsicDot(const CallExpr *callExpr) {
   // and floats.
   assert(returnType->isFloatingType() || returnType->isIntegerType());
 
+  // HLSL Change Begin - SPV_KHR_bfloat16 (BFloat16DotProductKHR).
+  // dot() requires both operands to have the same component type, so a
+  // bfloat16_t operand must not be mixed with anything else. Note that Sema
+  // resolves such a call through the float overload and widens the bfloat16_t
+  // side, so the pre-conversion types have to be inspected here. Rejecting the
+  // mix keeps a bfloat16_t dot from silently becoming a float dot product
+  // (which is what the capability is meant to control) and matches the rest of
+  // the bfloat16_t model, where e.g. "bfloat16_t * float" is also an error.
+  {
+    QualType arg0NoCastType, arg1NoCastType;
+    uint32_t ignoredSize = 0;
+    const bool arg0IsBFloat16 =
+        isScalarOrVectorType(arg0->IgnoreCasts()->getType(), &arg0NoCastType,
+                             &ignoredSize) &&
+        arg0NoCastType->isSpecificBuiltinType(BuiltinType::BFloat16);
+    const bool arg1IsBFloat16 =
+        isScalarOrVectorType(arg1->IgnoreCasts()->getType(), &arg1NoCastType,
+                             &ignoredSize) &&
+        arg1NoCastType->isSpecificBuiltinType(BuiltinType::BFloat16);
+    if (arg0IsBFloat16 != arg1IsBFloat16) {
+      emitError("dot product cannot mix bfloat16_t with other component types; "
+                "convert both operands to the same type explicitly",
+                loc);
+      return nullptr;
+    }
+  }
+
+  // dot() on bfloat16_t operands is the extension's bfloat16 dot product. It
+  // must be emitted as OpDot with a BFloat16KHR component type, and it needs
+  // BFloat16DotProductKHR on top of BFloat16TypeKHR plus the
+  // "SPV_KHR_bfloat16" extension.
+  //
+  // Note that OpSDot/OpUDot (the SPV_KHR_integer_dot_product lowering used by
+  // dot4add_* below) cannot be used here: both require an integer result type
+  // and the validator rejects a bfloat16 component for them. OpDot is the
+  // instruction SPV_KHR_bfloat16 actually extends (see the BFloat16DotProductKHR
+  // check in ValidateDot / validate_arithmetics.cpp).
+  if (vec0ComponentType->isSpecificBuiltinType(BuiltinType::BFloat16)) {
+    if (vec0Size == 1) {
+      // SPV_KHR_bfloat16 adds no bfloat16 multiply and OpDot requires vector
+      // operands, so a scalar bfloat16_t dot product is not expressible.
+      emitError("dot product of scalar bfloat16_t operands is not supported: "
+                "SPV_KHR_bfloat16 only defines BFloat16DotProductKHR for "
+                "vector operands",
+                loc);
+      return nullptr;
+    }
+    SpirvInstruction *operands[]{arg0Id, arg1Id};
+    uint32_t capabilities[]{uint32_t(spv::Capability::BFloat16TypeKHR),
+                            uint32_t(spv::Capability::BFloat16DotProductKHR)};
+    llvm::StringRef extensions[]{"SPV_KHR_bfloat16"};
+    return spvBuilder.createSpirvIntrInstExt(uint32_t(spv::Op::OpDot),
+                                             returnType, operands, extensions,
+                                             /*instSet=*/"", capabilities, loc);
+  }
+  // HLSL Change End
+
   // Special case: dot product of two vectors, each of size 1. That is
   // basically the same as regular multiplication of 2 scalars.
   if (vec0Size == 1) {
