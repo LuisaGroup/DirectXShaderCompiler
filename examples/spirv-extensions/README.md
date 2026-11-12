@@ -44,6 +44,7 @@ features.
 | `nv-cluster-acceleration-structure.hlsl` | `VK_NV_cluster_acceleration_structure` → `OpRayQueryGetIntersectionClusterIdNV` | `-fspv-extension=SPV_NV_cluster_acceleration_structure` |
 | `nv-linear-swept-spheres.hlsl` | `VK_NV_ray_tracing_linear_swept_spheres` → sphere/LSS ray-query accessors | `-fspv-extension=SPV_NV_linear_swept_spheres` |
 | `qcom-image-processing3.hlsl` | `VK_QCOM_image_processing3` → `OpImageGatherQCOM` | `-fspv-extension=SPV_QCOM_image_processing3` |
+| `nv-cooperative-vector.hlsl` | `VK_NV_cooperative_vector` → `OpTypeVectorIdEXT`, `OpCooperativeVector{Load,Store,MatrixMul}NV` | `-fspv-extension=SPV_NV_cooperative_vector` |
 | `khr-maintenance8.hlsl` | `VK_KHR_maintenance8` (dynamic image offsets; no module surface) | — |
 | `khr-maintenance9.hlsl` | `VK_KHR_maintenance9` (narrow-integer bitwise ops) | `-fspv-enable-maintenance9` |
 | `khr-maintenance12.hlsl` | `VK_KHR_maintenance12` (non-uniform push-constant indexing) | — |

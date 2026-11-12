@@ -129,6 +129,11 @@ enum class Extension {
     // components, the vk::ext::LongVector type in <vk/ext/long_vector.h>).
     // Opt-in; see enabledByDefault() in FeatureManager.cpp.
     EXT_long_vector,
+    // HLSL Change - SPV_NV_cooperative_vector (OpTypeVectorIdEXT as a
+    // cooperative vector type and the six OpCooperativeVector*NV operations,
+    // the entry points in <vk/nv/cooperative_vector.h>). Opt-in; see
+    // enabledByDefault() in FeatureManager.cpp.
+    NV_cooperative_vector,
     Unknown,
 };
 

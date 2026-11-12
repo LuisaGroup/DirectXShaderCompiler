@@ -543,11 +543,12 @@ Restrictions, each diagnosed rather than miscompiled:
 * A component count that is not a compile-time constant is rejected by the front
   end. A count taken from a specialization constant is a *different* instruction,
   ``OpTypeVectorIdEXT`` (5288), whose *Component Count* is an ``<id>`` of a 32-bit
-  integer constant instruction instead of a ``LiteralInteger``. DXC does not
-  implement it yet: the type would have to be keyed on a specialization constant id
-  in ``SpirvContext``'s structural uniquing, and spec-constant-sized vectors are
-  additionally restricted in explicitly laid out storage classes. Until then
-  ``OpTypeVectorIdEXT`` is not emitted for any HLSL source.
+  integer constant instruction instead of a ``LiteralInteger``. This header does not
+  provide it: the type would have to be keyed on a specialization constant id in
+  ``SpirvContext``'s structural uniquing, and spec-constant-sized vectors are
+  additionally restricted in explicitly laid out storage classes. ``OpTypeVectorIdEXT``
+  is instead the cooperative vector type of
+  ``VK_NV_cooperative_vector`` - see `Cooperative vectors`_ below.
 * A long vector in stage input or output is an error. ``SPV_EXT_long_vector`` lists
   the storage classes long vectors may be allocated in and Input/Output are not
   among them; SPIRV-Tools rejects such a module with "Long vector types with more
@@ -577,6 +578,172 @@ Limitations:
 See ``examples/spirv-extensions/ext-long-vector.hlsl`` for a self-contained example
 and ``tools/clang/test/CodeGenSPIRV/vk.long-vector*.hlsl`` for the tests that pin
 the capability, the type encoding, the composite instructions, the
+optimizer-survival path and the diagnostics.
+
+Cooperative vectors
+~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_NV_cooperative_vector`` extension adds an opaque vector whose length and
+component type are part of its SPIR-V type, plus a fixed instruction set for it:
+a matrix-vector product, an accumulating matrix-vector product, two training
+accumulators, and a load and a store that move values between memory and the
+opaque type. The point is machine-learning inference: the weight matrix stays in
+memory and is streamed, while the implementation decides how wide the vector
+registers are, instead of the shader fixing a register layout per component. It is
+gated by the Vulkan ``VK_NV_cooperative_vector`` device extension, which exposes
+the inferencing and the training halves as separate feature bits.
+
+The type is ``OpTypeVectorIdEXT`` (5288; the grammar also aliases it as
+``OpTypeCooperativeVectorNV``), whose *Component Type* is an ``<id>`` of a scalar
+type and whose *Component Count* is an ``<id>`` of a 32-bit integer constant
+instruction - the instruction ``SPV_EXT_long_vector`` uses for a vector with a
+specialization-constant component count, which ``<vk/ext/long_vector.h>``
+deliberately does not provide. Only ``CooperativeVectorNV`` (5394) and
+``LongVectorEXT`` (5425) permit it, so a module that contains one declares one of
+the two capabilities:
+
+.. code:: spirv
+
+  %cv4 = OpTypeVectorIdEXT %float %uint_4  ; a cooperative vector of 4 floats
+
+HLSL has no such type, so DXC names it through an inline SPIR-V type in
+``<vk/nv/cooperative_vector.h>``, and the six instructions are
+``[[vk::ext_instruction]]`` declarations with one parameter per SPIR-V operand:
+
+.. code:: hlsl
+
+  #include <vk/nv/cooperative_vector.h>
+
+  using float4cv = vk::nv::CooperativeVector<float, 4>;
+
+  groupshared float g_matrix[32]; // 8 rows x 4 columns
+  groupshared float g_input[4];
+  groupshared float g_output[8];
+
+  float4cv v = vk::nv::Load<float, 4>(g_input, 0);         // OpCooperativeVectorLoadNV
+  vk::nv::CooperativeVector<float, 8> r = vk::nv::MatrixMul<float, 8, 4>(
+      v, vk::CooperativeVectorComponentTypeFloat32NV,
+      g_matrix, /*matrixOffset*/ 0,
+      vk::CooperativeVectorComponentTypeFloat32NV,
+      /*M*/ 8, /*K*/ 4, vk::CooperativeVectorMatrixLayoutRowMajorNV,
+      /*transpose*/ false, /*matrixStride*/ 16);           // OpCooperativeVectorMatrixMulNV
+  vk::nv::Store<float, 8>(g_output, 0, r);                 // OpCooperativeVectorStoreNV
+
+The six entry points are ``Load``, ``Store``, ``MatrixMul``, ``MatrixMulAdd``
+(OpCooperativeVectorMatrixMulAddNV, 5292), ``OuterProductAccumulate``
+(OpCooperativeVectorOuterProductAccumulateNV, 5290) and ``ReduceSumAccumulate``
+(OpCooperativeVectorReduceSumAccumulateNV, 5291). The last two are the training
+half and are the only ones that return ``void``: the accumulator array in memory
+is their destination. Each of the three memory-taking entry points has two
+overloads, one with and one without the optional ``MatrixStride`` operand, because
+``RowMajorNV`` / ``ColumnMajorNV`` describe the stride and the two ``*OptimalNV``
+layouts leave it to the device.
+
+The bias of ``MatrixMulAdd`` is a pointer, an offset and an interpretation, the
+same shape as the matrix, and not a cooperative vector value; that is the
+instruction's operand list, not a choice made here. The operand order of every
+entry point is the instruction's, so the header comment of each declaration spells
+out the operand list it implements.
+
+Capabilities are selected per instruction, not once for the extension:
+``CooperativeVectorNV`` (5394) for the type and for ``Load``, ``Store``,
+``MatrixMul`` and ``MatrixMulAdd``, and ``CooperativeVectorTrainingNV`` (5435) for
+``OuterProductAccumulate`` and ``ReduceSumAccumulate``. A module that uses a
+training instruction declares both; a module that only infers declares only the
+first, which is what keeps it acceptable on a device that does not implement the
+training half. Both are added by SPIR-V CodeGen from the type
+(``CapabilityVisitor::addCapabilityForType``) and from the instruction
+(``CapabilityVisitor::visitInstruction``), not by ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]`` on the header's declarations, which is what lets
+``-fspv-extension`` both select and refuse the extension.
+
+The extension is **not** enabled by default: a driver that does not expose
+``VK_NV_cooperative_vector`` rejects a module that declares the capability, so
+without ``-fspv-extension=SPV_NV_cooperative_vector`` every use is a compile error
+instead of a module the host never asked for. There is **no target-environment
+gate**: the vendored grammar gives ``OpTypeVectorIdEXT`` and all six instructions no
+SPIR-V version requirement (``"version": "None"``), so a module produced from this
+header also validates at the default environment, ``vulkan1.0``. That is unlike
+``SPV_EXT_long_vector``, which is specified as modifications to SPIR-V 1.3.
+
+Pointer operands and workgroup staging:
+
+* SPIRV-Tools requires the pointer of every one of these instructions to point at
+  an ``OpTypeArray`` or ``OpTypeRuntimeArray`` in the Workgroup, StorageBuffer or
+  PhysicalStorageBuffer storage class. In HLSL the shape that produces exactly that
+  is a ``groupshared`` array passed whole, so the matrix, the bias, the source and
+  the destination of a value are workgroup arrays. Data that arrives in a buffer has
+  to be staged through workgroup memory first.
+* A ``groupshared`` *cooperative vector* is an error: ``SPV_NV_cooperative_vector``
+  allows the type in Function and Private storage and as a function parameter only,
+  and SPIRV-Tools rejects the module otherwise. Stage the data, not the vector.
+
+Every operand the extension requires to name a constant instruction -
+``InputInterpretation``, ``MatrixInterpretation``, ``BiasInterpretation``, ``M``,
+``K``, ``MemoryLayout`` and ``Transpose`` - has to be passed as a compile-time
+constant, because a declaration-only entry point has one parameter per SPIR-V
+operand and cannot bake values in. SPIR-V CodeGen reports a value it cannot fold
+into an ``OpConstant`` ("... must be compile-time constants") instead of producing
+a module that SPIRV-Tools rejects, and there is no instruction that converts a
+memory layout at run time, so a layout cannot be computed in the shader at all. The
+interpretation and layout parameters take the enumerators of ``<vk/spirv.h>``
+(``vk::CooperativeVectorComponentType``, ``vk::CooperativeVectorMatrixLayout``),
+which is also the header that materializes those enumerators as module-scope
+variables - a cost ``<vk/khr/cooperative_matrix.h>`` already pays.
+
+Other restrictions, each diagnosed rather than miscompiled:
+
+* The component type must be a 32-bit integer or a 16/32-bit float; ``double``,
+  ``bool``, 8- and 16-bit integers are rejected by the front end (a default
+  template argument of the entry points) and by ``CapabilityVisitor``.
+* A pointer operand that addresses a single component instead of an array is
+  rejected by the front end, because it would lower to a pointer SPIRV-Tools
+  rejects.
+* MatrixStride has to match the layout overload; passing a stride to an
+  ``*OptimalNV`` layout or leaving it out for ``RowMajorNV`` / ``ColumnMajorNV`` is
+  a deliberate choice in the source that the compiler cannot second-guess.
+
+Limitations:
+
+* **No component access.** There is no instruction that reads or writes a single
+  component of a cooperative vector, so a shader moves values through memory with
+  ``Load`` / ``Store`` and combines them with the matrix and reduce instructions.
+  There is no arithmetic, comparison or swizzle surface, and ``vk::nv::`` provides
+  none.
+* **One pointer form.** A buffer read produces a pointer to the buffer block, not to
+  the array the instruction needs, so buffer-resident matrices have to be staged
+  through ``groupshared`` memory. Passing a private or function-local array
+  produces the right shape with the wrong storage class; the compiler cannot see
+  the storage class of an ``[[vk::ext_reference]]`` argument, and SPIRV-Tools
+  rejects the module.
+* **No CooperativeMatrixOperands.** The trailing optional operand of
+  ``OpCooperativeVectorMatrixMulNV`` / ``...MatrixMulAddNV`` - the literal mask that
+  carries the ``Matrix*SignedComponentsKHR`` hints - is not modelled, so a shader
+  cannot request them and inferencing on signed 8-bit data uses the device's default
+  interpretation. The two instructions are otherwise emitted with the full operand
+  list.
+* **What the host must query**, and the compiler cannot check: the
+  ``VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME`` device extension;
+  ``cooperativeVectorSupportedStages`` and the component type / layout pairs a
+  stage reports; ``maxCooperativeVectorComponents`` and
+  ``maxCooperativeVectorMatrixComponents``, which a shader can exceed while still
+  compiling and validating; the training feature bits
+  (``cooperativeVectorTrainingFloat16Accumulation``,
+  ``cooperativeVectorTrainingFloat32Accumulation``) for the two training
+  instructions. All of these live in the
+  ``VkPhysicalDeviceCooperativeVectorPropertiesNV`` structure that
+  ``vkGetPhysicalDeviceCooperativeVectorPropertiesNV`` fills in.
+* No driver in CI implements the extension, so SPIRV-Tools validation is the only
+  signal: the instructions are pinned as encodings, not executed.
+
+``VK_NV_cooperative_vector`` is not a replacement for the HLSL cooperative vector
+type that DXC removed in favour of LinAlg: it is a SPIR-V-only surface that adds no
+DXIL opcode, no validator support and no HLSL type, and it is available only when
+the extension is requested.
+
+See ``examples/spirv-extensions/nv-cooperative-vector.hlsl`` for a self-contained
+matrix-vector example and ``tools/clang/test/CodeGenSPIRV/nv.cooperative-vector*.hlsl``
+for the tests that pin the capability per family, the six instruction encodings, the
 optimizer-survival path and the diagnostics.
 
 Push constant banks
@@ -2404,6 +2571,7 @@ Supported extensions
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product
 * SPV_ARM_cooperative_matrix_layouts
+* SPV_NV_cooperative_vector
 
 * ``VK_EXT_shader_uniform_buffer_unsized_array`` has no matching SPIR-V
   ``OpExtension``: it relaxes a rule of the Vulkan SPIR-V environment and reuses

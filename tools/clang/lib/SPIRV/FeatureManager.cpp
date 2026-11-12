@@ -278,6 +278,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
                 Extension::EXT_cooperative_matrix_maintenance1)
           // HLSL Change - SPV_EXT_long_vector.
           .Case("SPV_EXT_long_vector", Extension::EXT_long_vector)
+            // HLSL Change - SPV_NV_cooperative_vector.
+            .Case("SPV_NV_cooperative_vector",
+                  Extension::NV_cooperative_vector)
 .Default(Extension::Unknown);
 }
 
@@ -416,6 +419,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
       // HLSL Change - SPV_EXT_long_vector.
       case Extension::EXT_long_vector:
         return "SPV_EXT_long_vector";
+        // HLSL Change - SPV_NV_cooperative_vector.
+        case Extension::NV_cooperative_vector:
+          return "SPV_NV_cooperative_vector";
       default:
     break;
   }
@@ -719,6 +725,23 @@ bool FeatureManager::enabledByDefault(Extension ext) {
       // asked for. See CapabilityVisitor::addCapabilityForType.
       case Extension::EXT_long_vector:
         return false;
+        // HLSL Change - SPV_NV_cooperative_vector. Opt-in, like
+        // SPV_EXT_long_vector. A module that uses <vk/nv/cooperative_vector.h>
+        // declares the CooperativeVectorNV (5394) capability - and
+        // CooperativeVectorTrainingNV (5435) for the two training instructions -
+        // plus OpExtension "SPV_NV_cooperative_vector", and a driver that does
+        // not expose VK_NV_cooperative_vector rejects it. Everything this header
+        // provides is new surface: no existing HLSL spelling reaches
+        // OpTypeVectorIdEXT or any OpCooperativeVector*NV instruction, so making
+        // the extension opt-in does not change the code generation of any
+        // existing shader. It only means the extension has to be named on the
+        // command line - and that an explicit -fspv-extension list can leave it
+        // out, in which case every use is a diagnostic instead of a module that
+        // declares an extension the host never asked for. See
+        // CapabilityVisitor::addCapabilityForType and
+        // CapabilityVisitor::visitInstruction.
+        case Extension::NV_cooperative_vector:
+          return false;
       default:
     return true;
   }

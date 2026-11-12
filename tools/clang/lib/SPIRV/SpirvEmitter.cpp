@@ -18244,8 +18244,34 @@ spvArgs.push_back(argInst);
       constArg->setLiteral();
       spvArgs.push_back(constArg);
     } else {
-      spvArgs.push_back(loadIfGLValue(arg, argInst));
-    }
+        // HLSL Change Begin - SPV_NV_cooperative_vector.
+        // Every enumerator of an HLSL enum is materialized as a module-scope
+        // Private variable holding an OpConstant
+        // (DeclResultIdMapper::createEnumConstant), so naming one produces an
+        // OpLoad and not a constant instruction. An extended instruction whose
+        // operand its extension requires to *name a constant* cannot be written
+        // that way: the interpretation, M, K, MemoryLayout and Transpose
+        // operands of the OpCooperativeVector*NV instructions in
+        // <vk/nv/cooperative_vector.h> are <id>s of constant instructions, and
+        // SPIRV-Tools rejects the module otherwise ("<op> <operand> <id> is not
+        // a constant instruction"). Fold an enum-typed argument that is a
+        // constant expression into the OpConstant it names, which is the only
+        // encoding of it that is a constant instruction. Only an enum-typed
+        // argument that lowered to such a load is affected: one that already
+        // names a constant (the enumerators the existing wrappers pass through
+        // a template parameter, for example) is left alone, and the fold
+        // replaces a load of the enumerator's variable with the constant it
+        // holds, so the value an instruction sees is the same.
+        if (!isa<SpirvConstant>(argInst) && arg->getType()->isEnumeralType()) {
+          if (auto *enumConstant =
+                  constEvaluator.tryToEvaluateAsConst(arg, isSpecConstantMode)) {
+            spvArgs.push_back(enumConstant);
+            continue;
+          }
+        }
+        // HLSL Change End - SPV_NV_cooperative_vector.
+        spvArgs.push_back(loadIfGLValue(arg, argInst));
+      }
   }
 
   return createSpirvIntrInstExt(funcDecl->getAttrs(), funcDecl->getReturnType(),

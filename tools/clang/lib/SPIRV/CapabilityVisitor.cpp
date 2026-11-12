@@ -380,9 +380,120 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
       }
     }
     // HLSL Change End - SPV_EXT_long_vector.
+    // HLSL Change Begin - SPV_NV_cooperative_vector.
+    // vk::nv::CooperativeVector<T, N> in <vk/nv/cooperative_vector.h> is
+    // lowered to a vk::SpirvOpaqueType with the OpTypeVectorIdEXT opcode
+    // (5288; the instruction the grammar also aliases as
+    // OpTypeCooperativeVectorNV), whose Component Count is the id of an
+    // OpConstant, so this visitor sees a SpirvIntrinsicType rather than a
+    // VectorType. The type -- not any particular instruction -- is what
+    // makes a module require CooperativeVectorNV, and it is the only place
+    // where the component type and the storage class can be checked:
+    //
+    // * SPIRV-Tools only accepts a 32-bit integer or a 16/32-bit float
+    //   component ("<op> result component type <id> is not a 32 bit int or
+    //   16/32 bit float"), and the component type is an operand of the type
+    //   rather than its result type, so the generic handling above never
+    //   visits it. Diagnosing it here also covers a type that is only
+    //   declared, and a wrong type never reaches the module.
+    // * A cooperative vector may only be allocated in Function or Private
+    //   storage, or used as a function parameter (external/SPIRV-Tools,
+    //   ValidateMemory: "Cooperative vector types (or types containing
+    //   them) can only be allocated in Function or Private storage classes
+    //   or as function parameters"). Only the storage classes HLSL can put
+    //   one in are reported, so a type in a position the visitor does not
+    //   know the storage class of (StorageClass::Max) is not misdiagnosed.
+    //
+    // The capability is added after the checks so that a rejected type does
+    // not also change the capability block of the module.
+    if (intrinsicType->getOpCode() == uint32_t(spv::Op::OpTypeVectorIdEXT)) {
+      const auto operands = intrinsicType->getOperands();
+      const SpirvType *componentType =
+          (!operands.empty() && operands.front().isTypeOperand)
+              ? operands.front().operand_as_type
+              : nullptr;
+      const auto *intComponent = dyn_cast_or_null<IntegerType>(componentType);
+      const auto *floatComponent = dyn_cast_or_null<FloatType>(componentType);
+      const bool supportedComponent =
+          (intComponent && intComponent->getBitwidth() == 32) ||
+          (floatComponent && !floatComponent->isBFloat16() &&
+           !floatComponent->isFloat8() &&
+           (floatComponent->getBitwidth() == 16 ||
+            floatComponent->getBitwidth() == 32));
+      if (!supportedComponent) {
+        if (!reportedCooperativeVectorComponentType) {
+          reportedCooperativeVectorComponentType = true;
+          featureManager.reportError(
+              "the component type of a cooperative vector "
+              "(vk::nv::CooperativeVector) must be a 32-bit integer or a "
+              "16/32-bit float: SPV_NV_cooperative_vector has no encoding "
+              "for any other component type",
+              loc);
+        }
+        return;
+      }
+      if (sc == spv::StorageClass::Input || sc == spv::StorageClass::Output ||
+          sc == spv::StorageClass::Uniform ||
+          sc == spv::StorageClass::UniformConstant ||
+          sc == spv::StorageClass::StorageBuffer ||
+          sc == spv::StorageClass::PushConstant ||
+          sc == spv::StorageClass::Workgroup) {
+        if (!reportedCooperativeVectorStorageClass) {
+          reportedCooperativeVectorStorageClass = true;
+          featureManager.reportError(
+              "a cooperative vector (vk::nv::CooperativeVector) can only be "
+              "allocated in Function or Private storage, or used as a "
+              "function parameter: SPV_NV_cooperative_vector does not allow "
+              "it in a groupshared, stage input/output, uniform or storage "
+              "buffer variable",
+              loc);
+        }
+        return;
+      }
+      addExtension(Extension::NV_cooperative_vector, "cooperative vector types",
+                   loc);
+      addCapability(spv::Capability::CooperativeVectorNV);
+      // The component type is an operand of the intrinsic type, so the
+      // generic handling above never visits it: a
+      // vk::nv::CooperativeVector<half, N> would otherwise lose Float16.
+      if (componentType)
+        addCapabilityForType(componentType, loc, sc);
+    }
+    // HLSL Change End - SPV_NV_cooperative_vector.
   }
   // HLSL Change End
   }
+
+// HLSL Change Begin - SPV_NV_cooperative_vector.
+bool CapabilityVisitor::checkCooperativeVectorConstantOperands(
+    SpirvIntrinsicInstruction *inst, llvm::ArrayRef<unsigned> indices,
+    SourceLocation loc) {
+  const auto operands = inst->getOperands();
+  for (unsigned index : indices) {
+    // An index past the last operand is one of the optional operands the two
+    // overloads of a header entry point add or leave out, not an error.
+    if (index >= operands.size())
+      continue;
+    if (isa<SpirvConstant>(operands[index]))
+      continue;
+    // Reported once: a wrong operand usually comes from one declaration with
+    // several uses.
+    if (!reportedCooperativeVectorConstantOperand) {
+      reportedCooperativeVectorConstantOperand = true;
+      featureManager.reportError(
+          "the interpretation, M, K, MemoryLayout and Transpose operands of "
+          "OpCooperativeVectorMatrixMulNV, OpCooperativeVectorMatrixMulAddNV "
+          "and OpCooperativeVectorOuterProductAccumulateNV must be "
+          "compile-time constants: SPV_NV_cooperative_vector requires each of "
+          "them to name a constant instruction, and the extension has no "
+          "instruction that converts a memory layout at run time",
+          loc);
+    }
+    return false;
+  }
+  return true;
+}
+// HLSL Change End - SPV_NV_cooperative_vector.
 
 bool CapabilityVisitor::visit(SpirvConstantSizeOfEXT *inst) {
   // The operand type is not the result type, so the generic handling of
@@ -927,6 +1038,78 @@ case spv::Op::OpDPdxCoarse:
     addCapability(spv::Capability::RayTracingLinearSweptSpheresGeometryNV, loc);
     break;
   // HLSL Change End - SPV_NV_linear_swept_spheres.
+
+  // HLSL Change Begin - SPV_NV_cooperative_vector.
+  // The six OpCooperativeVector*NV instructions in
+  // <vk/nv/cooperative_vector.h> are not a single capability family:
+  // CooperativeVectorNV (5394) covers the inferencing half (load, store,
+  // matrix-vector product and the accumulating product), while
+  // CooperativeVectorTrainingNV (5435) covers the two training instructions.
+  // VK_NV_cooperative_vector exposes those as separate device features, so the
+  // capability is selected per instruction instead of once for the extension: a
+  // module that only infers has to stay acceptable on a device that does not
+  // implement the training half, and one capability must never imply the other
+  // (SPIRV-Tools checks the pairing for every instruction:
+  // "Opcode OpCooperativeVectorOuterProductAccumulateNV requires one of these
+  // capabilities: CooperativeVectorTrainingNV").
+  // The extension is emitted here, from the instruction, through the ordinary
+  // registration path (and not through [[vk::ext_extension]] on the header
+  // declarations) so that -fspv-extension= stays an effective allow-list:
+  // addExtension() reports "SPIR-V extension 'SPV_NV_cooperative_vector'
+  // required for cooperative vectors but not permitted to use" when the
+  // extension is not enabled, and no capability is ever emitted without the
+  // extension Vulkan requires of it (SPIRV-Tools: "Capability
+  // CooperativeVectorNV is not allowed by Vulkan 1.0 specification (or requires
+  // extension)").
+  // The type itself is handled in addCapabilityForType, which is also where a
+  // module that only declares a cooperative vector picks up
+  // CooperativeVectorNV.
+  case spv::Op::OpCooperativeVectorLoadNV:
+  case spv::Op::OpCooperativeVectorStoreNV:
+  addExtension(Extension::NV_cooperative_vector, "cooperative vectors", loc);
+  addCapability(spv::Capability::CooperativeVectorNV, loc);
+  break;
+  case spv::Op::OpCooperativeVectorMatrixMulNV: {
+  addExtension(Extension::NV_cooperative_vector, "cooperative vectors", loc);
+  addCapability(spv::Capability::CooperativeVectorNV, loc);
+  // getOperands() leaves the result type and the result id out, so the
+  // operands start at Input: 1 InputInterpretation, 4
+  // MatrixInterpretation, 5 M, 6 K, 7 MemoryLayout, 8 Transpose. The
+  // optional MatrixStride and CooperativeMatrixOperands follow and are not
+  // required to be constants.
+  const unsigned constantOperands[] = {1, 4, 5, 6, 7, 8};
+  if (auto *intrInst = dyn_cast<SpirvIntrinsicInstruction>(instr))
+    checkCooperativeVectorConstantOperands(intrInst, constantOperands, loc);
+  break;
+  }
+  case spv::Op::OpCooperativeVectorMatrixMulAddNV: {
+  addExtension(Extension::NV_cooperative_vector, "cooperative vectors", loc);
+  addCapability(spv::Capability::CooperativeVectorNV, loc);
+  // As above, with the three bias operands in between: 1
+  // InputInterpretation, 4 MatrixInterpretation, 7 BiasInterpretation, 8 M,
+  // 9 K, 10 MemoryLayout, 11 Transpose.
+  const unsigned constantOperands[] = {1, 4, 7, 8, 9, 10, 11};
+  if (auto *intrInst = dyn_cast<SpirvIntrinsicInstruction>(instr))
+    checkCooperativeVectorConstantOperands(intrInst, constantOperands, loc);
+  break;
+  }
+  case spv::Op::OpCooperativeVectorOuterProductAccumulateNV: {
+  addExtension(Extension::NV_cooperative_vector,
+               "cooperative vector training operations", loc);
+  addCapability(spv::Capability::CooperativeVectorTrainingNV, loc);
+  // (Pointer, Offset, A, B, MemoryLayout, MatrixInterpretation,
+  // [MatrixStride]): 4 MemoryLayout, 5 MatrixInterpretation.
+  const unsigned constantOperands[] = {4, 5};
+  if (auto *intrInst = dyn_cast<SpirvIntrinsicInstruction>(instr))
+    checkCooperativeVectorConstantOperands(intrInst, constantOperands, loc);
+  break;
+  }
+  case spv::Op::OpCooperativeVectorReduceSumAccumulateNV:
+  addExtension(Extension::NV_cooperative_vector,
+               "cooperative vector training operations", loc);
+  addCapability(spv::Capability::CooperativeVectorTrainingNV, loc);
+  break;
+  // HLSL Change End - SPV_NV_cooperative_vector.
 
   // HLSL Change Begin - SPV_QCOM_image_processing3.
   // OpImageGatherQCOM gathers one component of the four texels whose footprint

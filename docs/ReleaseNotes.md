@@ -18,8 +18,35 @@ The included licenses apply to the following files:
 ## Changelog
 
 ### Upcoming Release
-
+### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_NV_cooperative_vector` (`VK_NV_cooperative_vector`): the
+  new `<vk/nv/cooperative_vector.h>` header provides
+  `vk::nv::CooperativeVector<T, N>` - an opaque SPIR-V vector whose length and
+  component type are part of its type, lowered to `OpTypeVectorIdEXT` (5288) with
+  the component count as a 32-bit integer constant - and the extension's six
+  instructions as `[[vk::ext_instruction]]` entry points: `Load`
+  (`OpCooperativeVectorLoadNV`, 5302), `Store` (5303), `MatrixMul` (5289),
+  `MatrixMulAdd` (5292), and the training half's `OuterProductAccumulate` (5290)
+  and `ReduceSumAccumulate` (5291). Capabilities are selected per instruction:
+  `CooperativeVectorNV` (5394) for the type and the inferencing instructions,
+  `CooperativeVectorTrainingNV` (5435) for the two training instructions, so a
+  module that only infers stays acceptable on a device that does not implement the
+  training half. Both and `OpExtension "SPV_NV_cooperative_vector"` are emitted by
+  SPIR-V CodeGen from the type and the instruction, so
+  `-fspv-extension=SPV_NV_cooperative_vector` can select and refuse the extension;
+  it is opt-in because a driver without `VK_NV_cooperative_vector` rejects the
+  module. There is no target-environment gate: the extension carries no SPIR-V
+  version requirement, so it also validates at the default `vulkan1.0`. The
+  interpretation, `M`, `K`, `MemoryLayout` and `Transpose` operands have to be
+  compile-time constants (the extension requires each of them to name a constant
+  instruction), and the pointer operands have to address an array in workgroup
+  memory, so matrices and accumulators are `groupshared` arrays; a run-time layout,
+  a wrong component type, a scalar pointer operand and a `groupshared` cooperative
+  vector are diagnostics rather than invalid SPIR-V. This is a SPIR-V-only surface:
+  it adds no DXIL opcode and no HLSL type, and it is unrelated to the cooperative
+  vector DXIL feature that LinAlg replaced. See `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/nv-cooperative-vector.hlsl`.
 - Added support for `SPV_EXT_long_vector` (`VK_EXT_shader_long_vector`): the
   new `<vk/ext/long_vector.h>` header provides `vk::ext::LongVector<T, N>`, a
   SPIR-V vector with more than four components, lowered to a single
@@ -38,8 +65,9 @@ The included licenses apply to the following files:
   vectors only. A component count of four or less, a component count that is not a
   compile-time constant, a long vector in stage input/output and a target
   environment older than SPIR-V 1.3 are all diagnostics rather than invalid
-  SPIR-V. `OpTypeVectorIdEXT` (5288) and per-storage-class buffer layout are not
-  implemented yet. See `docs/SPIR-V.rst` and
+  SPIR-V. `OpTypeVectorIdEXT` (5288) is not provided by this header - it is the
+  cooperative vector type of `SPV_NV_cooperative_vector`, above - and
+  per-storage-class buffer layout is not implemented. See `docs/SPIR-V.rst` and
   `examples/spirv-extensions/ext-long-vector.hlsl`.
 - Added support for `SPV_EXT_float8` (`VK_EXT_shader_float8`): the HLSL types
   `float8_e4m3_t` and `float8_e5m2_t` lower to `OpTypeFloat 8` with the

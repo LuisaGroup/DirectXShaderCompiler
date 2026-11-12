@@ -100,6 +100,25 @@ private:
   bool reportedLongVectorStageIO = false;
   bool reportedLongVectorTargetEnv = false;
   // HLSL Change End - SPV_EXT_long_vector.
+    // HLSL Change Begin - SPV_NV_cooperative_vector. Set once the corresponding
+    // diagnostic has been reported, so that a cooperative vector type reachable
+    // from several instructions does not repeat it. Both messages are one per
+    // module: the same wrong component type or storage class usually comes from
+    // one declaration with several uses.
+    bool reportedCooperativeVectorComponentType = false;
+    bool reportedCooperativeVectorStorageClass = false;
+    bool reportedCooperativeVectorConstantOperand = false;
+    /// Checks that every operand of \p inst at \p indices names a constant
+    /// instruction, the requirement SPV_NV_cooperative_vector places on the
+    /// interpretation, M, K, MemoryLayout and Transpose operands of
+    /// OpCooperativeVectorMatrixMulNV / ...MatrixMulAddNV /
+    /// ...OuterProductAccumulateNV. An index past the last operand is an absent
+    /// optional operand and is not an error. Reports a diagnostic naming the
+    /// family once per module and returns false.
+    bool checkCooperativeVectorConstantOperands(
+        SpirvIntrinsicInstruction *inst, llvm::ArrayRef<unsigned> indices,
+        SourceLocation loc);
+    // HLSL Change End - SPV_NV_cooperative_vector.
 };
 
 } // end namespace spirv
