@@ -1545,6 +1545,16 @@ static bool EvaluateAsBooleanCondition(const Expr *E, bool &Result,
 template<typename T>
 static void HandleOverflow(EvalInfo &Info, const Expr *E,
                            const T &SrcValue, QualType DestType) {
+  // HLSL Change Begin - SPV_EXT_float8. A conversion into a float8 type is
+  // defined by SPV_EXT_float8 to saturate to the largest finite value (E4M3) or
+  // to infinity where the format has one (E5M2), so an out-of-range value is
+  // the documented result rather than a mistake worth a diagnostic.
+  if (const BuiltinType *BT = DestType->getAs<BuiltinType>()) {
+    if (BT->getKind() == BuiltinType::Float8E4M3 ||
+        BT->getKind() == BuiltinType::Float8E5M2)
+      return;
+  }
+  // HLSL Change End.
   Info.CCEDiag(E, diag::note_constexpr_overflow)
     << SrcValue << DestType;
   // HLSL changes begin

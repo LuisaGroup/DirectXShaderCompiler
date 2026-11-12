@@ -266,6 +266,11 @@ public:
   // HLSL Change - the BFloat16KHR encoded 16-bit float from SPV_KHR_bfloat16.
   // Kept separate from getFloatType(16), which returns the plain 16-bit float.
   const FloatType *getBFloat16Type();
+  // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t). The two
+  // OpTypeFloat 8 types with the Float8E4M3EXT / Float8E5M2EXT encodings.
+  const FloatType *getFloat8E4M3Type();
+  const FloatType *getFloat8E5M2Type();
+  // HLSL Change End.
 
   const VectorType *getVectorType(const SpirvType *elemType, uint32_t count);
   // Note: In the case of non-floating-point matrices, this method returns an
@@ -520,6 +525,11 @@ private:
   // HLSL Change - the BFloat16KHR encoded 16-bit float (SPV_KHR_bfloat16).
   // Cannot be stored in floatTypes, which is indexed by bitwidth only.
   const FloatType *bfloat16Type;
+  // HLSL Change Begin - SPV_EXT_float8. The Float8E4M3EXT / Float8E5M2EXT
+  // encoded 8-bit floats, kept separate from floatTypes for the same reason.
+  const FloatType *float8E4M3Type = nullptr;
+  const FloatType *float8E5M2Type = nullptr;
+  // HLSL Change End.
 
   // The VectorType at index i has the length of i. For example, vector of
   // size 4 would be at index 4. Valid SPIR-V vector sizes are 2,3,4.

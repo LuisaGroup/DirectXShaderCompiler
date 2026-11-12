@@ -2530,6 +2530,10 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   case UInt128:           return "unsigned __int128";
   // HLSL Changes begin
   case BFloat16:        return "bfloat16_t";
+  // HLSL Change Begin - SPV_EXT_float8.
+  case Float8E4M3: return "float8_e4m3_t";
+  case Float8E5M2: return "float8_e5m2_t";
+  // HLSL Change End.
   case HalfFloat:
   case Half:              return /*Policy.Half*/ true ? "half" : "__fp16";
   // HLSL Changes end

@@ -1168,6 +1168,10 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
     default: llvm_unreachable("Unexpected type for float literal!");
     case BuiltinType::LitFloat:   break; // HLSL Change -- no suffix
     case BuiltinType::BFloat16:   break; // no bfloat16 literal suffix
+    // HLSL Change Begin - SPV_EXT_float8 (no float8 literal suffix).
+    case BuiltinType::Float8E4M3: break;
+    case BuiltinType::Float8E5M2: break;
+    // HLSL Change End.
     case BuiltinType::Min10Float: break; // no suffix, as this is a literal and 'F' would pollute expression
     case BuiltinType::HalfFloat:
     case BuiltinType::Min16Float:
@@ -1185,6 +1189,10 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
   default: llvm_unreachable("Unexpected type for float literal!");
   case BuiltinType::Half:       break; // FIXME: suffix?
   case BuiltinType::BFloat16:   break; // HLSL Change -- no suffix
+  // HLSL Change Begin - SPV_EXT_float8 (no float8 literal suffix).
+  case BuiltinType::Float8E4M3: break;
+  case BuiltinType::Float8E5M2: break;
+  // HLSL Change End.
   case BuiltinType::Double:     break; // no suffix.
   case BuiltinType::Float:      OS << 'F'; break;
   case BuiltinType::LongDouble: OS << 'L'; break;

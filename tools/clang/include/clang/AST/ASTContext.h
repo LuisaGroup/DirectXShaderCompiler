@@ -850,6 +850,8 @@ public:
   CanQualType LitIntTy, LitFloatTy;
   CanQualType HalfFloatTy, Min16FloatTy, Min16IntTy, Min16UIntTy;
   CanQualType BFloat16Ty;
+  // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+  CanQualType Float8E4M3Ty, Float8E5M2Ty;
   CanQualType HLSLStringTy;
   CanQualType Int8_4PackedTy, UInt8_4PackedTy;
   CanQualType LinAlgMatrixTy;

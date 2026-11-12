@@ -472,6 +472,13 @@ const SpirvType *LowerTypeVisitor::lowerType(QualType type,
           // -enable-16bit-types option.
           case BuiltinType::BFloat16:
             return spvContext.getBFloat16Type();
+          // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t /
+          // float8_e5m2_t): OpTypeFloat 8 with the matching encoding.
+          case BuiltinType::Float8E4M3:
+            return spvContext.getFloat8E4M3Type();
+          case BuiltinType::Float8E5M2:
+            return spvContext.getFloat8E5M2Type();
+          // HLSL Change End.
         case BuiltinType::Short: // int16_t
           return spvContext.getSIntType(16);
         case BuiltinType::UShort: // uint16_t

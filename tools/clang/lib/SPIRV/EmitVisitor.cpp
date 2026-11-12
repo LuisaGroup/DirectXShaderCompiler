@@ -2467,6 +2467,10 @@ uint32_t EmitTypeHandler::getOrCreateConstantFloat(SpirvConstantFloat *inst) {
     // not IEEE half.
     const llvm::fltSemantics &targetSemantics =
         floatType->isBFloat16() ? llvm::APFloat::BFloat16
+        // HLSL Change Begin - SPV_EXT_float8: the two 8-bit encodings.
+        : floatType->isFloat8E4M3() ? llvm::APFloat::Float8E4M3
+        : floatType->isFloat8E5M2() ? llvm::APFloat::Float8E5M2
+        // HLSL Change End.
         : typeBitwidth == 16   ? llvm::APFloat::IEEEhalf
         : typeBitwidth == 32   ? llvm::APFloat::IEEEsingle
                                : llvm::APFloat::IEEEdouble;
@@ -2513,7 +2517,9 @@ uint32_t EmitTypeHandler::getOrCreateConstantFloat(SpirvConstantFloat *inst) {
 
   // Start constructing the value word / words
 
-  if (typeBitwidth == 16) {
+  // HLSL Change - SPV_EXT_float8: 8-bit floats take the same path as 16-bit
+  // floats (any width below 32) instead of the two-word 64-bit path.
+  if (typeBitwidth < 32) {
     // According to the SPIR-V Spec:
     // When the type's bit width is less than 32-bits, the literal's value
     // appears in the low-order bits of the word, and the high-order bits must

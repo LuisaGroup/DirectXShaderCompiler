@@ -98,6 +98,19 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
         addCapability(spv::Capability::BFloat16TypeKHR);
         return;
       }
+
+      // HLSL Change Begin - SPV_EXT_float8. The Float8E4M3EXT / Float8E5M2EXT
+      // encodings are gated by Float8EXT and SPV_EXT_float8, not by an integer
+      // 8-bit storage capability, and stage I/O is rejected earlier in
+      // DeclResultIdMapper because the extension does not allow the encoded
+      // types in Input/Output storage classes.
+      if (floatType->isFloat8()) {
+        addExtension(Extension::EXT_float8, "float8_e4m3_t/float8_e5m2_t type",
+                     loc);
+        addCapability(spv::Capability::Float8EXT);
+        return;
+      }
+      // HLSL Change End.
     switch (floatType->getBitwidth()) {
     case 16: {
       // Usage of a 16-bit float type.

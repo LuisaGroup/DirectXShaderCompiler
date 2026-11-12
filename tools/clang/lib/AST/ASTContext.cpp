@@ -61,7 +61,11 @@ unsigned ASTContext::NumImplicitDestructors;
 unsigned ASTContext::NumImplicitDestructorsDeclared;
 
 enum FloatingRank {
-  LitFloatRank, Min10FloatRank, Min16FloatRank, BFloat16Rank, HalfRank,
+  LitFloatRank, Min10FloatRank, Min16FloatRank,
+  // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t rank below
+  // every other HLSL floating point type: fewest significand bits).
+  Float8Rank,
+  BFloat16Rank, HalfRank,
   HalfFloatRank, FloatRank, DoubleRank, LongDoubleRank // HLSL Change
 };
 
@@ -1106,6 +1110,9 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
     InitBuiltinType(Min10FloatTy, BuiltinType::Min10Float);
     InitBuiltinType(HalfFloatTy, BuiltinType::HalfFloat);
     InitBuiltinType(BFloat16Ty, BuiltinType::BFloat16);
+    // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+    InitBuiltinType(Float8E4M3Ty, BuiltinType::Float8E4M3);
+    InitBuiltinType(Float8E5M2Ty, BuiltinType::Float8E5M2);
     InitBuiltinType(LitIntTy, BuiltinType::LitInt);
     InitBuiltinType(LitFloatTy, BuiltinType::LitFloat);
     InitBuiltinType(Int8_4PackedTy, BuiltinType::Int8_4Packed);
@@ -1346,6 +1353,10 @@ const llvm::fltSemantics &ASTContext::getFloatTypeSemantics(QualType T) const {
   // HLSL Change Ends
   case BuiltinType::Half:       return Target->getHalfFormat();
     case BuiltinType::BFloat16: return llvm::APFloat::BFloat16; // HLSL Change
+    // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+    case BuiltinType::Float8E4M3: return llvm::APFloat::Float8E4M3;
+    case BuiltinType::Float8E5M2: return llvm::APFloat::Float8E5M2;
+    // HLSL Change End.
   case BuiltinType::HalfFloat: // HLSL Change
   case BuiltinType::Float:      return Target->getFloatFormat();
   case BuiltinType::Double:     return Target->getDoubleFormat();
@@ -1666,6 +1677,13 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       Width = Target->getHalfWidth();
       Align = Target->getHalfAlign();
       break;
+    // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+    case BuiltinType::Float8E4M3:
+    case BuiltinType::Float8E5M2:
+      Width = 8;
+      Align = 8;
+      break;
+    // HLSL Change End.
     case BuiltinType::BFloat16: // HLSL Change
       Width = 16;
       Align = 16;
@@ -4705,7 +4723,11 @@ static FloatingRank getFloatingRank(QualType T) {
   assert(T->getAs<BuiltinType>() && "getFloatingRank(): not a floating type");
   switch (T->getAs<BuiltinType>()->getKind()) {
   default: llvm_unreachable("getFloatingRank(): not a floating type");
-  case BuiltinType::BFloat16:   return BFloat16Rank; // HLSL Change
+  // HLSL Change Begin - SPV_EXT_float8 (both float8 encodings share a rank).
+  case BuiltinType::Float8E4M3:
+  case BuiltinType::Float8E5M2: return Float8Rank;
+  // HLSL Change End.
+  case BuiltinType::BFloat16: return BFloat16Rank; // HLSL Change
   case BuiltinType::Half:       return HalfRank;
   case BuiltinType::Float:      return FloatRank;
   case BuiltinType::Double:     return DoubleRank;
@@ -4732,6 +4754,7 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
     case DoubleRank:     return DoubleComplexTy;
     case LongDoubleRank: return LongDoubleComplexTy;
     // HLSL Changes begin
+    case Float8Rank: // HLSL Change - SPV_EXT_float8
     case BFloat16Rank:
     case HalfRank:
     case LitFloatRank:
@@ -4748,6 +4771,8 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
   case LitFloatRank:   return LitFloatTy;   // HLSL Change
   case Min10FloatRank: return Min10FloatTy; // HLSL Change
   case BFloat16Rank:   return BFloat16Ty;   // HLSL Change
+  // HLSL Change - SPV_EXT_float8
+  case Float8Rank:     return Float8E4M3Ty;
   case HalfRank:       return HalfTy;
   case FloatRank:      return FloatTy;
   case DoubleRank:     return DoubleTy;
@@ -5582,6 +5607,9 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
       llvm_unreachable("invalid builtin type for @encode");
     // HLSL Change Start
     case BuiltinType::BFloat16:
+    // HLSL Change - SPV_EXT_float8.
+    case BuiltinType::Float8E4M3:
+    case BuiltinType::Float8E5M2:
     case BuiltinType::Min12Int:
     case BuiltinType::Min10Float:
     case BuiltinType::Min16Float:

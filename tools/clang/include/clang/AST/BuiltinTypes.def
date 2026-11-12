@@ -162,6 +162,12 @@ FLOATING_TYPE(HalfFloat, HalfFloatTy)
 
 // HLSL Change - 'bfloat16_t' in HLSL
 FLOATING_TYPE(BFloat16, BFloat16Ty)
+// HLSL Change Begin - SPV_EXT_float8: 'float8_e4m3_t' and 'float8_e5m2_t' in
+// HLSL. They lower to OpTypeFloat 8 with the Float8E4M3EXT / Float8E5M2EXT
+// encoding and are only supported by the SPIR-V backend.
+FLOATING_TYPE(Float8E4M3, Float8E4M3Ty)
+FLOATING_TYPE(Float8E5M2, Float8E5M2Ty)
+// HLSL Change End
 
 // HLSL Change - literal float in HLSL
 FLOATING_TYPE(LitFloat, LitFloatTy)

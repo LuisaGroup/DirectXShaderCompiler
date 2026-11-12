@@ -65,7 +65,11 @@ const char *HLSLScalarTypeNames[] = {
     "int32_t",        "int64_t",        "uint16_t",    "uint32_t",
     "uint64_t",       "float16_t",      "float32_t",   "float64_t",
     "int8_t",         "uint8_t",        "int8_t4_packed",
-    "uint8_t4_packed", "bfloat16_t"};
+    "uint8_t4_packed", "bfloat16_t",
+    // HLSL Change Begin - SPV_EXT_float8.
+    "float8_e4m3_t", "float8_e5m2_t"
+    // HLSL Change End.
+};
 
 static_assert(HLSLScalarTypeCount == _countof(HLSLScalarTypeNames),
               "otherwise scalar constants are not aligned");
@@ -252,6 +256,21 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
           return HLSLScalarType_float64;
         }
       }
+      case 13: // float8_e4m3_t, float8_e5m2_t (SPV_EXT_float8)
+        if (typeName[0] == 'f' && typeName[1] == 'l' && typeName[6] == '_' &&
+            typeName[7] == 'e') {
+          if (typeName[8] == '4') {
+            if (strncmp(typeName, "float8_e4m3_t", 13))
+              break;
+            return HLSLScalarType_float8_e4m3;
+          }
+          if (typeName[8] == '5') {
+            if (strncmp(typeName, "float8_e5m2_t", 13))
+              break;
+            return HLSLScalarType_float8_e5m2;
+          }
+        }
+        break;
     }
   }
   return HLSLScalarType_unknown;

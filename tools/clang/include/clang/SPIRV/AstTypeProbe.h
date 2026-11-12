@@ -138,6 +138,9 @@ bool isOrContains8BitType(QualType type);
 /// HLSL Change - Returns true if the given type is or contains a bfloat16_t
 /// (SPV_KHR_bfloat16) type.
 bool isOrContainsBFloat16Type(QualType type);
+/// HLSL Change - Returns true if the given type is or contains a float8_e4m3_t
+/// or float8_e5m2_t (SPV_EXT_float8) type.
+bool isOrContainsFloat8Type(QualType type);
 
 /// NOTE: This method doesn't handle Literal types correctly at the moment.
 ///

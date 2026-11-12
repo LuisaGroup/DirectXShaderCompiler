@@ -322,6 +322,10 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
   case BuiltinType::LongDouble:
     // HLSL Change Starts
   case BuiltinType::BFloat16:
+  // HLSL Change Begin - SPV_EXT_float8.
+  case BuiltinType::Float8E4M3:
+  case BuiltinType::Float8E5M2:
+  // HLSL Change End.
   case BuiltinType::HalfFloat:
   case BuiltinType::Min10Float:
   case BuiltinType::Min16Float:

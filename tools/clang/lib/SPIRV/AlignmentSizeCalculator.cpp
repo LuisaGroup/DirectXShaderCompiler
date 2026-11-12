@@ -333,6 +333,13 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
           // -enable-16bit-types option.
           case BuiltinType::BFloat16:
           return {2, 2};
+          // HLSL Change Begin - SPV_EXT_float8. 8-bit floats occupy one byte
+          // with a one-byte alignment so that a struct or matrix containing
+          // them packs the way the encoding requires.
+          case BuiltinType::Float8E4M3:
+          case BuiltinType::Float8E5M2:
+          return {1, 1};
+          // HLSL Change End.
         // 'HalfFloat' always represents 32-bit floats.
         case BuiltinType::HalfFloat:
           return {4, 4};

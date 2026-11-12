@@ -238,6 +238,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
       .Case("SPV_EXT_shader_atomic_float_min_max", Extension::EXT_shader_atomic_float_min_max)
         // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
         .Case("SPV_KHR_bfloat16", Extension::KHR_bfloat16)
+        // HLSL Change - SPV_EXT_float8.
+        .Case("SPV_EXT_float8", Extension::EXT_float8)
         // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
         .Case("SPV_KHR_fma", Extension::KHR_fma)
         // HLSL Change - SPV_EXT_split_barrier.
@@ -364,6 +366,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
   // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
   case Extension::KHR_bfloat16:
  return "SPV_KHR_bfloat16";
+ // HLSL Change - SPV_EXT_float8.
+ case Extension::EXT_float8:
+   return "SPV_EXT_float8";
     // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
     case Extension::KHR_fma:
       return "SPV_KHR_fma";

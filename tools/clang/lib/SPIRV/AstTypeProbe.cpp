@@ -105,6 +105,12 @@ std::string getAstTypeName(QualType type) {
         // HLSL Change - bfloat16_t (SPV_KHR_bfloat16).
         case BuiltinType::BFloat16:
           return "bfloat16";
+        // HLSL Change Begin - SPV_EXT_float8.
+        case BuiltinType::Float8E4M3:
+          return "float8_e4m3";
+        case BuiltinType::Float8E5M2:
+          return "float8_e5m2";
+        // HLSL Change End.
         case BuiltinType::Min12Int:
           return "min12int";
         case BuiltinType::Min16Int:
@@ -507,6 +513,58 @@ bool isOrContainsBFloat16Type(QualType type) {
 }
 // HLSL Change End.
 
+// HLSL Change Begin - SPV_EXT_float8. Detect a float8_e4m3_t / float8_e5m2_t
+// anywhere inside a type. Used to reject shader stage input/output variables,
+// which SPV_EXT_float8 does not allow to carry a Float8E4M3EXT / Float8E5M2EXT
+// encoded type.
+bool isOrContainsFloat8Type(QualType type) {
+  // Primitive types
+  {
+    QualType ty = {};
+    if (isScalarType(type, &ty)) {
+      if (const auto *builtinType = ty->getAs<BuiltinType>()) {
+        return builtinType->getKind() == BuiltinType::Float8E4M3 ||
+               builtinType->getKind() == BuiltinType::Float8E5M2;
+      }
+    }
+  }
+  // Vector types
+  {
+    QualType elemType = {};
+    if (isVectorType(type, &elemType))
+      return isOrContainsFloat8Type(elemType);
+  }
+  // Matrix types
+  {
+    QualType elemType = {};
+    if (isMxNMatrix(type, &elemType))
+      return isOrContainsFloat8Type(elemType);
+  }
+  // Struct type
+  if (const auto *structType = type->getAs<RecordType>()) {
+    const auto *decl = structType->getDecl();
+    for (const auto *field : decl->fields()) {
+      if (isOrContainsFloat8Type(field->getType()))
+        return true;
+    }
+    return false;
+  }
+  // Array type
+  if (const auto *arrayType = type->getAsArrayTypeUnsafe())
+    return isOrContainsFloat8Type(arrayType->getElementType());
+  // Reference types
+  if (const auto *refType = type->getAs<ReferenceType>())
+    return isOrContainsFloat8Type(refType->getPointeeType());
+  // Pointer types
+  if (const auto *ptrType = type->getAs<PointerType>())
+    return isOrContainsFloat8Type(ptrType->getPointeeType());
+  if (const auto *typedefType = type->getAs<TypedefType>())
+    return isOrContainsFloat8Type(typedefType->desugar());
+
+  return false;
+}
+// HLSL Change End.
+
 bool isOrContains8BitType(QualType type) {
   // Primitive types
   {
@@ -649,6 +707,12 @@ uint32_t getElementSpirvBitwidth(const ASTContext &astContext, QualType type,
       // -enable-16bit-types option.
       case BuiltinType::BFloat16:
       return 16;
+
+      // HLSL Change Begin - SPV_EXT_float8: 8-bit floats.
+      case BuiltinType::Float8E4M3:
+      case BuiltinType::Float8E5M2:
+        return 8;
+      // HLSL Change End.
     // HalfFloat builtin type is just an alias for Float builtin type and is
     // always 32-bit. The HLSL 'half' keyword is translated to 'HalfFloat' enum
     // if -enable-16bit-types is false.
@@ -805,6 +869,22 @@ QualType getTypeWithCustomBitwidth(const ASTContext &ctx, QualType type,
   assert(type->isIntegerType() || type->isFloatingType());
   // HLSL Change - bfloat16_t keeps its identity for 16-bit and widens like
   // other floating point types.
+  // HLSL Change Begin - SPV_EXT_float8. A float8 type keeps its identity at 8
+  // bits and widens like the other floating point types otherwise.
+  if (type->isSpecificBuiltinType(BuiltinType::Float8E4M3) ||
+      type->isSpecificBuiltinType(BuiltinType::Float8E5M2)) {
+    switch (bitwidth) {
+    case 8:
+      return type;
+    case 16:
+      return ctx.HalfTy;
+    case 32:
+      return ctx.FloatTy;
+    case 64:
+      return ctx.DoubleTy;
+    }
+  }
+  // HLSL Change End.
   if (type->isSpecificBuiltinType(BuiltinType::BFloat16)) {
     switch (bitwidth) {
     case 16:

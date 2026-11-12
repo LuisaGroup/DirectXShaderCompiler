@@ -130,6 +130,14 @@ public:
 
   static const fltSemantics IEEEhalf;
   static const fltSemantics BFloat16;
+  // HLSL Change Begin - SPV_EXT_float8. The FP8 interchange formats used by
+  // the HLSL float8_e4m3_t (OCP "E4M3 FN": no infinity, NaN is 0x7F/0xFF,
+  // largest finite value 448) and float8_e5m2_t (IEEE-like, largest finite
+  // value 57344) types. They are needed so that float8 constants can be
+  // rounded and encoded by constant folding.
+  static const fltSemantics Float8E4M3;
+  static const fltSemantics Float8E5M2;
+  // HLSL Change End.
   static const fltSemantics IEEEsingle;
   static const fltSemantics IEEEdouble;
   static const fltSemantics IEEEquad;
@@ -609,6 +617,9 @@ private:
 
   APInt convertHalfAPFloatToAPInt() const;
   APInt convertBFloat16APFloatToAPInt() const;
+  // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
+  APInt convertFloat8E4M3APFloatToAPInt() const;
+  APInt convertFloat8E5M2APFloatToAPInt() const;
   APInt convertFloatAPFloatToAPInt() const;
   APInt convertDoubleAPFloatToAPInt() const;
   APInt convertQuadrupleAPFloatToAPInt() const;
@@ -617,6 +628,9 @@ private:
   void initFromAPInt(const fltSemantics *Sem, const APInt &api);
   void initFromHalfAPInt(const APInt &api);
   void initFromBFloat16APInt(const APInt &api);
+  // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
+  void initFromFloat8E4M3APInt(const APInt &api);
+  void initFromFloat8E5M2APInt(const APInt &api);
   void initFromFloatAPInt(const APInt &api);
   void initFromDoubleAPInt(const APInt &api);
   void initFromQuadrupleAPInt(const APInt &api);

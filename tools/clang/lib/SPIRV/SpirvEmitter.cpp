@@ -10727,6 +10727,14 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
   if (isLitTypeOrVecOfLitType(fromType) || isLitTypeOrVecOfLitType(toType))
     return fromVal;
 
+  // HLSL Change Begin - SPV_EXT_float8. Converting an integer to a float8 value
+  // is done by OpConvertSToF / OpConvertUToF alone: an intermediate 8-bit
+  // integer would require the Int8 capability and would truncate the value
+  // before the float conversion rounds it.
+  if (isOrContainsFloat8Type(toType) && !isFloatOrVecOfFloatType(fromType))
+    return fromVal;
+  // HLSL Change End.
+
   const auto fromBitwidth = getElementSpirvBitwidth(
       astContext, fromType, spirvOptions.enable16BitTypes);
   const auto toBitwidth = getElementSpirvBitwidth(
@@ -10737,7 +10745,16 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
       isFloatOrVecOfFloatType(fromType) &&
       (isOrContainsBFloat16Type(fromType) ||
        isOrContainsBFloat16Type(toType));
-  if (fromBitwidth == toBitwidth && !isBFloat16Conversion) {
+  // HLSL Change Begin - SPV_EXT_float8. Float8 values need an OpFConvert even
+  // when the storage width matches (float8_e4m3_t <-> float8_e5m2_t), and both
+  // float8 formats have to survive as the operand/result type of the
+  // conversion instead of being rebuilt from a bitwidth.
+  const bool isFloat8Conversion =
+      isOrContainsFloat8Type(fromType) || isOrContainsFloat8Type(toType);
+  // HLSL Change End.
+  const bool needsExplicitFloatConversion =
+      isBFloat16Conversion || isFloat8Conversion;
+  if (fromBitwidth == toBitwidth && !needsExplicitFloatConversion) {
     if (resultType)
       *resultType = fromType;
     return fromVal;
@@ -10747,7 +10764,7 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
   // directly for BF16 conversions so neither BF16 nor FP16 is reconstructed
   // as the other 16-bit floating point format.
   QualType targetType =
-      isBFloat16Conversion
+      needsExplicitFloatConversion
           ? toType
           : getTypeWithCustomBitwidth(astContext, fromType, toBitwidth);
   if (resultType)

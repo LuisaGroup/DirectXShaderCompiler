@@ -3869,6 +3869,19 @@ bool DeclResultIdMapper::createStageVars(StageVarDataBundle &stageVarData,
     return false;
   }
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_float8. The Float8E4M3EXT / Float8E5M2EXT
+  // encodings are not allowed in the Input/Output storage classes either, so
+  // reject float8 stage I/O (including vectors, matrices, structs and arrays
+  // containing it) instead of emitting invalid SPIR-V.
+  if (isOrContainsFloat8Type(stageVarData.type)) {
+    emitError(
+        "float8_e4m3_t and float8_e5m2_t are not supported in shader stage "
+        "input/output: SPV_EXT_float8 does not allow the Float8E4M3EXT or "
+        "Float8E5M2EXT type in Input/Output storage classes",
+        stageVarData.decl->getLocation());
+    return false;
+  }
+  // HLSL Change End.
   // invocationId should only be used for handling HS per-vertex output.
   if (stageVarData.invocationId.hasValue()) {
     assert(spvContext.isHS() && stageVarData.arraySize != 0 && !asInput);
@@ -5097,6 +5110,21 @@ bool DeclResultIdMapper::tryToCreateConstantVar(const ValueDecl *decl) {
     constVal =
         spvBuilder.getConstantFloat(astContext.BFloat16Ty, val->getFloat());
     break;
+
+  // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t). The
+  // APFloat value already carries the E4M3 / E5M2 semantics, so the bit pattern
+  // encoded for the constant is the Float8E4M3EXT / Float8E5M2EXT one, with
+  // out-of-range values saturated to the E4M3 / E5M2 largest finite value by
+  // APFloat::bitcastToAPInt.
+  case BuiltinType::Float8E4M3: // float8_e4m3_t
+    constVal =
+        spvBuilder.getConstantFloat(astContext.Float8E4M3Ty, val->getFloat());
+    break;
+  case BuiltinType::Float8E5M2: // float8_e5m2_t
+    constVal =
+        spvBuilder.getConstantFloat(astContext.Float8E5M2Ty, val->getFloat());
+    break;
+  // HLSL Change End.
   case BuiltinType::Float:     // float32_t
   case BuiltinType::HalfFloat: // float16_t without -enable-16bit-types
     constVal = spvBuilder.getConstantFloat(astContext.FloatTy, val->getFloat());

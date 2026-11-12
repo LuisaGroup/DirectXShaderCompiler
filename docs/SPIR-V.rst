@@ -1249,6 +1249,142 @@ See ``examples/spirv-extensions/khr-bfloat16.hlsl`` for a self-contained example
 and ``tools/clang/test/CodeGenSPIRV/bfloat16.*.hlsl`` for the tests that pin the
 encodings and the diagnostics.
 
+Float8
+~~~~~~
+``SPV_EXT_float8`` adds the two OCP 8-bit floating point formats as real HLSL
+builtin types:
+
+``float8_e4m3_t``
+  1 sign bit, 4 exponent bits (bias 7), 3 mantissa bits. Normal range
+  ``2^-6`` (0.015625) to 448, subnormals down to ``2^-9``. There is no infinity:
+  the only NaN patterns are 0x7F and 0xFF, and a value above 448 saturates to
+  448. About three significant decimal digits.
+
+``float8_e5m2_t``
+  1 sign bit, 5 exponent bits (bias 15), 2 mantissa bits. Normal range ``2^-14``
+  to 57344, subnormals down to ``2^-16``, with infinities and NaNs like IEEE.
+  The exponent range of ``half`` with two significant decimal digits.
+
+E4M3 is the format for weights and activations whose scale is bounded; E5M2 keeps
+half's range for gradients. Both are SPIR-V only, both require HLSL 2018 or later,
+and neither needs ``-enable-16bit-types``: the types are always 8 bits wide.
+``float8_e4m3_t2`` through ``float8_e4m3_t4``, ``float8_e4m3_t2x2``,
+``float8_e5m2_t2`` .. ``float8_e5m2_t4``, and structs and arrays containing them
+all work.
+
+The type lowers to ``OpTypeFloat 8`` with the ``Float8E4M3EXT`` (4214) or
+``Float8E5M2EXT`` (4215) encoding operand, declares ``OpCapability Float8EXT``
+(4212) and emits ``OpExtension "SPV_EXT_float8"`` once per module:
+
+.. code-block:: text
+
+    OpCapability Float8EXT
+    OpExtension "SPV_EXT_float8"
+    %float8_e4m3 = OpTypeFloat 8 Float8E4M3EXT
+    %float8_e5m2 = OpTypeFloat 8 Float8E5M2EXT
+
+``Float8CooperativeMatrixEXT`` (4213) is not implemented, so it is never emitted.
+Using a float8 type as a cooperative matrix component type is rejected: the
+``vk::khr::CooperativeMatrix`` header probes its component type with an
+arithmetic expression, and SPV_EXT_float8 defines no arithmetic, so the
+instantiation reports the "operator is not supported for float8_e4m3_t or
+float8_e5m2_t" error at the header's probe. Cooperative-matrix float8 needs its
+own capability emission and a saturating multiply-accumulate model; treat it as a
+separate landing.
+
+``float8_e4m3_t`` and ``float8_e5m2_t`` are *not* 8-bit integers and *not*
+``half``. No ``Int8`` and no 8-bit storage capability is requested on their
+behalf, and no ``Float16`` capability is requested either. The two formats are
+distinct types with distinct encodings: they never convert into each other
+implicitly, so mixing E4M3 and E5M2 in one expression is a type mismatch instead
+of a silent rounding.
+
+The extension defines no arithmetic, comparison or bitwise operation on the
+formats. They are storage and conversion types: a value can be loaded, stored,
+composited, selected, kept in a constant, and converted with ``OpFConvert`` - and
+that is all. Any other operation on a float8 value is rejected by the front end:
+
+.. code-block:: text
+
+    error: operator is not supported for float8_e4m3_t or float8_e5m2_t;
+    SPV_EXT_float8 defines no arithmetic, comparison or bitwise operations -
+    convert the operand to float or double explicitly
+
+The conversion model is widening only. A float8 value converts implicitly to
+``float`` and ``float64`` (scalars, vectors and matrices), and numeric literals
+convert into a float8 type implicitly. Every other conversion requires an
+explicit constructor:
+
+* narrowing from ``float``/``double``/``half``,
+* to or from integer types,
+* to or from ``bfloat16_t`` or ``float16_t``,
+* between ``float8_e4m3_t`` and ``float8_e5m2_t``,
+* implicit narrowing is a plain initialization error: ``float8_e4m3_t x = f;``
+  reports ``error: cannot initialize a variable of type 'float8_e4m3_t' with an
+  lvalue of type 'float'``.
+
+No conversion to or from ``bool`` exists, implicitly or explicitly.
+
+A literal mixed into an arithmetic expression with a float8 operand takes the
+float8 kind, so ``a + 1.0`` is rejected like any other float8 arithmetic and
+has to be written ``float(a) + 1.0``. ``a + f`` with a ``float`` operand widens
+and is accepted.
+
+Because a float8 value is 8 bits wide and a wider float is not, an implicit
+widening still emits ``OpFConvert``:
+
+.. code-block:: hlsl
+
+    float8_e4m3_t w = float8_e4m3_t(1.5);   // explicit narrowing, OpFConvert
+    float f = w;                            // implicit widening,   OpFConvert
+    float8_e5m2_t g = float8_e5m2_t(w);     // format change,       OpFConvert
+
+Values that are out of range saturate to the largest finite value of the format
+(448 for E4M3, 57344 for E5M2) or become infinity where the format has one
+(E5M2), following the OCP definition of the encodings. Constant initializers are
+rounded by the same rules, so ``float8_e4m3_t(1000.0)`` is the constant 448., and
+because that is the documented result rather than a mistake the usual
+``-Wconst-expr-overflow`` warning is not produced for a float8 destination.
+
+Storage follows the 8-bit size: an element occupies one byte with a one-byte
+alignment, so ``StructuredBuffer<float8_e4m3_t>`` has an ``ArrayStride`` of 1 and
+a struct packs its float8 members at the natural offsets.
+
+``VK_EXT_shader_float8`` does not allow the ``Float8E4M3EXT`` and
+``Float8E5M2EXT`` encodings in the ``Input`` and ``Output`` storage classes, so a
+float8 type - including vectors, matrices and structs containing it - cannot be a
+shader stage input or output:
+
+.. code-block:: text
+
+    error: float8_e4m3_t and float8_e5m2_t are not supported in shader stage
+    input/output: SPV_EXT_float8 does not allow the Float8E4M3EXT or
+    Float8E5M2EXT type in Input/Output storage classes
+
+Pass the value between stages as ``float``.
+
+``-fspv-extension=`` is an allow-list: with an explicit list that omits
+``SPV_EXT_float8``, using either type fails with
+
+.. code-block:: text
+
+    error: SPIR-V extension 'SPV_EXT_float8' required for
+    float8_e4m3_t/float8_e5m2_t type but not permitted to use
+
+(see ``float8.extension.error.hlsl``).
+
+``VK_EXT_shader_float8`` is a device extension. The application must enable it at
+``vkCreateDevice`` and set
+``VkPhysicalDeviceShaderFloat8FeaturesEXT::shaderFloat8`` to ``VK_TRUE``; the
+feature has to be queried with ``vkGetPhysicalDeviceFeatures2``. A driver without
+the feature rejects a module that declares ``Float8EXT``, and the compiler cannot
+check the host half.
+
+See ``examples/spirv-extensions/ext-shader-float8.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/float8.*.hlsl`` for the tests that pin
+both encodings, the conversions, the storage layout, the two diagnostics and the
+optimizer-survival path.
+
 Non-uniform push constant indexing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``VK_KHR_maintenance12`` is a Vulkan maintenance extension - one device
@@ -2113,6 +2249,7 @@ Supported extensions
 * SPV_EXT_fragment_fully_covered
 * SPV_EXT_fragment_invocation_density
 * SPV_EXT_fragment_shader_interlock
+* SPV_EXT_float8
 * SPV_EXT_mesh_shader
 * SPV_EXT_shader_stencil_support
 * SPV_EXT_shader_subgroup_partitioned

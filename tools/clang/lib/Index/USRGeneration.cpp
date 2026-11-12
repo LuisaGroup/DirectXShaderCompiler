@@ -601,6 +601,12 @@ void USRGenerator::VisitType(QualType T) {
           c = 'h'; break;
         case BuiltinType::BFloat16: // HLSL Change
           c = 'B'; break;
+        // HLSL Change Begin - SPV_EXT_float8.
+        case BuiltinType::Float8E4M3:
+          c = 'E'; break;
+        case BuiltinType::Float8E5M2:
+          c = 'e'; break;
+        // HLSL Change End.
         case BuiltinType::Float:
           c = 'f'; break;
         case BuiltinType::Double:

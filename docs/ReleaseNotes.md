@@ -20,6 +20,18 @@ The included licenses apply to the following files:
 ### Upcoming Release
 
 #### SPIR-V
+- Added support for `SPV_EXT_float8` (`VK_EXT_shader_float8`): the HLSL types
+  `float8_e4m3_t` and `float8_e5m2_t` lower to `OpTypeFloat 8` with the
+  `Float8E4M3EXT` (4214) and `Float8E5M2EXT` (4215) encodings, declare
+  `OpCapability Float8EXT` (4212) and emit `OpExtension "SPV_EXT_float8"`.
+  Both are storage and conversion types: `OpFConvert` to and from
+  `float`/`double`/`half`, integer conversions, and storage in buffers and
+  constants with a one-byte element stride. SPV_EXT_float8 defines no
+  arithmetic, comparison or bitwise operation on them, so any such operation is
+  rejected; the conversion model is widening only and E4M3 and E5M2 never mix
+  implicitly. The two encodings are not allowed in shader stage input/output.
+  Cooperative-matrix float8 (`Float8CooperativeMatrixEXT`) is not implemented.
+  See `docs/SPIR-V.rst` and `examples/spirv-extensions/ext-shader-float8.hlsl`.
 - Added support for `SPV_EXT_cooperative_matrix_maintenance1`
   (`VK_EXT_cooperative_matrix_maintenance1`). Four new members of
   `vk::khr::CooperativeMatrix` in `<vk/khr/cooperative_matrix.h>` emit the

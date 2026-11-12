@@ -59,6 +59,13 @@ namespace llvm {
 
   const fltSemantics APFloat::IEEEhalf = { 15, -14, 11, 16 };
   const fltSemantics APFloat::BFloat16 = { 127, -126, 8, 16 };
+  // HLSL Change Begin - SPV_EXT_float8. FP8 E4M3 (OCP "E4M3 FN") is 1 sign
+  // bit, 4 exponent bits with a bias of 7 and 3 mantissa bits: normal values
+  // range from 2^-6 to 448, with subnormals down to 2^-9. FP8 E5M2 is 1/5/2
+  // with a bias of 15: normal values range from 2^-14 to 57344.
+  const fltSemantics APFloat::Float8E4M3 = { 8, -6, 4, 8 };
+  const fltSemantics APFloat::Float8E5M2 = { 15, -14, 3, 8 };
+  // HLSL Change End.
   const fltSemantics APFloat::IEEEsingle = { 127, -126, 24, 32 };
   const fltSemantics APFloat::IEEEdouble = { 1023, -1022, 53, 64 };
   const fltSemantics APFloat::IEEEquad = { 16383, -16382, 113, 128 };
@@ -3113,6 +3120,77 @@ APFloat::convertBFloat16APFloatToAPInt() const
                     (mysignificand & 0x7f)));
 }
 
+  // HLSL Change Begin - SPV_EXT_float8 (FP8 E4M3 / E5M2 bit patterns).
+  //
+  // E4M3 follows the OCP "E4M3 FN" definition used by the Float8E4M3EXT
+  // encoding: there is no infinity, exponent field 0xf with mantissa 7 is the
+  // only NaN, and a value that rounds above the largest finite value (448,
+  // 0x7E) saturates to it. E5M2 is a conventional IEEE-like 8-bit format with
+  // infinities and quiet NaNs.
+  APInt
+  APFloat::convertFloat8E4M3APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float8E4M3);
+    assert(partCount()==1);
+
+    uint32_t myexponent, mysignificand;
+
+    if (isFiniteNonZero()) {
+      myexponent = exponent+7; //bias
+      mysignificand = (uint32_t)*significandParts();
+      if (myexponent == 1 && !(mysignificand & 0x8))
+        myexponent = 0; // denormal
+    } else if (category==fcZero) {
+      myexponent = 0;
+      mysignificand = 0;
+    } else if (category==fcInfinity) {
+      // E4M3 has no infinity: saturate to the largest finite value.
+      myexponent = 0xf;
+      mysignificand = 0x6;
+    } else {
+      assert(category == fcNaN && "Unknown category!");
+      myexponent = 0xf;
+      mysignificand = 0x7;
+    }
+
+    return APInt(8, (((sign&1) << 7) | ((myexponent&0xf) << 3) |
+                     (mysignificand & 0x7)));
+  }
+
+  APInt
+  APFloat::convertFloat8E5M2APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float8E5M2);
+    assert(partCount()==1);
+
+    uint32_t myexponent, mysignificand;
+
+    if (isFiniteNonZero()) {
+      myexponent = exponent+15; //bias
+      mysignificand = (uint32_t)*significandParts();
+      if (myexponent == 1 && !(mysignificand & 0x4))
+        myexponent = 0; // denormal
+    } else if (category==fcZero) {
+      myexponent = 0;
+      mysignificand = 0;
+    } else if (category==fcInfinity) {
+      myexponent = 0x1f;
+      mysignificand = 0;
+    } else {
+      assert(category == fcNaN && "Unknown category!");
+      myexponent = 0x1f;
+      mysignificand = (uint32_t)*significandParts();
+      // Keep the encoding out of the infinity (and signalling) patterns.
+      if (!(mysignificand & 0x3))
+        mysignificand = 0x2;
+    }
+
+    return APInt(8, (((sign&1) << 7) | ((myexponent&0x1f) << 2) |
+                     (mysignificand & 0x3)));
+  }
+  // HLSL Change End.
+
+
 // This function creates an APInt that is just a bit map of the floating
 // point constant as it would appear in memory.  It is not a conversion,
 // and treating the result as a normal integer is unlikely to be useful.
@@ -3125,6 +3203,14 @@ APFloat::bitcastToAPInt() const
 
   if (semantics == (const llvm::fltSemantics*)&BFloat16)
     return convertBFloat16APFloatToAPInt();
+
+    // HLSL Change Begin - SPV_EXT_float8.
+    if (semantics == (const llvm::fltSemantics*)&Float8E4M3)
+      return convertFloat8E4M3APFloatToAPInt();
+
+    if (semantics == (const llvm::fltSemantics*)&Float8E5M2)
+      return convertFloat8E5M2APFloatToAPInt();
+    // HLSL Change End.
 
   if (semantics == (const llvm::fltSemantics*)&IEEEsingle)
     return convertFloatAPFloatToAPInt();
@@ -3400,6 +3486,72 @@ APFloat::initFromBFloat16APInt(const APInt & api)
   }
 }
 
+  // HLSL Change Begin - SPV_EXT_float8 (FP8 E4M3 / E5M2 bit patterns).
+  void
+  APFloat::initFromFloat8E4M3APInt(const APInt & api)
+  {
+    assert(api.getBitWidth()==8);
+    uint32_t i = (uint32_t)*api.getRawData();
+    uint32_t myexponent = (i >> 3) & 0xf;
+    uint32_t mysignificand = i & 0x7;
+
+    initialize(&APFloat::Float8E4M3);
+    assert(partCount()==1);
+
+    sign = i >> 7;
+    if (myexponent==0 && mysignificand==0) {
+      // exponent, significand meaningless
+      category = fcZero;
+    } else if (myexponent==0xf && mysignificand==0x7) {
+      // sign, exponent, significand meaningless
+      category = fcNaN;
+      *significandParts() = mysignificand;
+    } else {
+      category = fcNormal;
+      exponent = myexponent - 7;  //bias
+      *significandParts() = mysignificand;
+      if (myexponent==0) // denormal
+        exponent = -6;
+      else
+        *significandParts() |= 0x8; // integer bit
+    }
+  }
+
+  void
+  APFloat::initFromFloat8E5M2APInt(const APInt & api)
+  {
+    assert(api.getBitWidth()==8);
+    uint32_t i = (uint32_t)*api.getRawData();
+    uint32_t myexponent = (i >> 2) & 0x1f;
+    uint32_t mysignificand = i & 0x3;
+
+    initialize(&APFloat::Float8E5M2);
+    assert(partCount()==1);
+
+    sign = i >> 7;
+    if (myexponent==0 && mysignificand==0) {
+      // exponent, significand meaningless
+      category = fcZero;
+    } else if (myexponent==0x1f && mysignificand==0) {
+      // exponent, significand meaningless
+      category = fcInfinity;
+    } else if (myexponent==0x1f && mysignificand!=0) {
+      // sign, exponent, significand meaningless
+      category = fcNaN;
+      *significandParts() = mysignificand;
+    } else {
+      category = fcNormal;
+      exponent = myexponent - 15;  //bias
+      *significandParts() = mysignificand;
+      if (myexponent==0) // denormal
+        exponent = -14;
+      else
+        *significandParts() |= 0x4; // integer bit
+    }
+  }
+  // HLSL Change End.
+
+
 /// Treat api as containing the bits of a floating point number.  Currently
 /// we infer the floating point type from the size of the APInt.  The
 /// isIEEE argument distinguishes between PPC128 and IEEE128 (not meaningful
@@ -3411,6 +3563,12 @@ APFloat::initFromAPInt(const fltSemantics* Sem, const APInt& api)
     return initFromHalfAPInt(api);
   if (Sem == &BFloat16)
     return initFromBFloat16APInt(api);
+    // HLSL Change Begin - SPV_EXT_float8.
+    if (Sem == &Float8E4M3)
+      return initFromFloat8E4M3APInt(api);
+    if (Sem == &Float8E5M2)
+      return initFromFloat8E5M2APInt(api);
+    // HLSL Change End.
   if (Sem == &IEEEsingle)
     return initFromFloatAPInt(api);
   if (Sem == &IEEEdouble)

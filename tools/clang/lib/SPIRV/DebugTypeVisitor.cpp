@@ -314,6 +314,13 @@ SpirvDebugType *DebugTypeVisitor::lowerToDebugType(const SpirvType *spirvType) {
     // it is not confused with float16_t.
     if (floatType->isBFloat16()) {
       debugName = "bfloat16_t";
+      // HLSL Change Begin - SPV_EXT_float8: keep the two float8 encodings
+      // distinct in debug info instead of reporting "float8_t".
+    } else if (floatType->isFloat8E4M3()) {
+      debugName = "float8_e4m3_t";
+    } else if (floatType->isFloat8E5M2()) {
+      debugName = "float8_e5m2_t";
+      // HLSL Change End.
     } else if (size == 32) {
       debugName = "float";
     } else {

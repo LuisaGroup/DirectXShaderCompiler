@@ -7650,6 +7650,12 @@ def err_hlsl_unsupported_bfloat16_op : Error<
   "operator is not supported for bfloat16_t; SPV_KHR_bfloat16 defines no "
   "arithmetic or comparison operations - convert operands to float or "
   "double explicitly">;
+// HLSL Change Begin - SPV_EXT_float8.
+def err_hlsl_unsupported_float8_op : Error<
+  "operator is not supported for float8_e4m3_t or float8_e5m2_t; "
+  "SPV_EXT_float8 defines no arithmetic, comparison or bitwise operations - "
+  "convert the operand to float or double explicitly">;
+// HLSL Change End.
 def err_hlsl_unsupported_lvalue_cast_op : Error<
   "cannot truncate lvalue vector/matrix">;
 def err_hlsl_unsupported_buffer_packoffset : Error<

@@ -161,6 +161,16 @@ public:
     return fpEncoding == spv::FPEncoding::BFloat16KHR;
   }
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_float8. An 8-bit OpTypeFloat carrying one of the
+  // two float8 encodings. isFloat8() covers both formats.
+  bool isFloat8E4M3() const {
+    return fpEncoding == spv::FPEncoding::Float8E4M3EXT;
+  }
+  bool isFloat8E5M2() const {
+    return fpEncoding == spv::FPEncoding::Float8E5M2EXT;
+  }
+  bool isFloat8() const { return isFloat8E4M3() || isFloat8E5M2(); }
+  // HLSL Change End.
 
 private:
   // HLSL Change

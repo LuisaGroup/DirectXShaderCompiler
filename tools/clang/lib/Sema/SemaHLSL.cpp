@@ -81,6 +81,10 @@ enum ArBasicKind {
   AR_BASIC_UINT8_4PACKED,
   AR_BASIC_ENUM,
   AR_BASIC_BFLOAT16,
+  // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+  AR_BASIC_FLOAT8_E4M3,
+  AR_BASIC_FLOAT8_E5M2,
+  // HLSL Change End.
 
   AR_BASIC_COUNT,
 
@@ -457,6 +461,10 @@ const UINT g_uBasicKindProps[] = {
     BPROP_ENUM | BPROP_NUMERIC | BPROP_INTEGER, // AR_BASIC_ENUM
     BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
         BPROP_BITS16, // AR_BASIC_BFLOAT16
+    BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS8, // AR_BASIC_FLOAT8_E4M3
+    BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS8, // AR_BASIC_FLOAT8_E5M2
     BPROP_OTHER,    // AR_BASIC_COUNT
 
     //
@@ -1831,6 +1839,10 @@ static const char *g_ArBasicTypeNames[] = {
     "uint8_t4_packed",
     "enum",
     "bfloat16_t",
+    // HLSL Change Begin - SPV_EXT_float8.
+    "float8_e4m3_t",
+    "float8_e5m2_t",
+    // HLSL Change End.
 
     "<count>",
     "<none>",
@@ -2348,6 +2360,42 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
     *pOutKind = LeftKind;
     return true;
   }
+
+  // HLSL Change Begin - SPV_EXT_float8: float8_e4m3_t and float8_e5m2_t are
+  // distinct types. A float8 operand widens to float32/float64, keeps its own
+  // kind against a literal (so that arithmetic on it is diagnosed below instead
+  // of being silently performed in float32), and is a type mismatch against
+  // every other type - including the other float8 format, bfloat16_t and
+  // float16_t - because SPV_EXT_float8 defines no conversion that would make
+  // such a combination well defined.
+  {
+    const bool bLeftIsFloat8 =
+        LeftKind == AR_BASIC_FLOAT8_E4M3 || LeftKind == AR_BASIC_FLOAT8_E5M2;
+    const bool bRightIsFloat8 =
+        RightKind == AR_BASIC_FLOAT8_E4M3 || RightKind == AR_BASIC_FLOAT8_E5M2;
+    if (bLeftIsFloat8 || bRightIsFloat8) {
+      if (bLeftIsFloat8 && bRightIsFloat8)
+        return false;
+      const ArBasicKind f8Kind = bLeftIsFloat8 ? LeftKind : RightKind;
+      const ArBasicKind other = bLeftIsFloat8 ? RightKind : LeftKind;
+      switch (other) {
+      case AR_BASIC_FLOAT32:
+      case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
+        *pOutKind = AR_BASIC_FLOAT32;
+        return true;
+      case AR_BASIC_FLOAT64:
+        *pOutKind = AR_BASIC_FLOAT64;
+        return true;
+      case AR_BASIC_LITERAL_FLOAT:
+      case AR_BASIC_LITERAL_INT:
+        *pOutKind = f8Kind;
+        return true;
+      default:
+        return false;
+      }
+    }
+  }
+  // HLSL Change End.
 
   // HLSL Change Begin - bfloat16_t must never be silently reclassified as
   // float16_t or another type. It does not combine with float16_t or
@@ -4629,6 +4677,10 @@ public:
       case HLSLScalarType_int8:
       case HLSLScalarType_uint8:
       case HLSLScalarType_bfloat16:
+      // HLSL Change Begin - SPV_EXT_float8.
+      case HLSLScalarType_float8_e4m3:
+      case HLSLScalarType_float8_e5m2:
+      // HLSL Change End.
         m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
             << HLSLScalarTypeNames[type] << "2018";
         return false;
@@ -4648,8 +4700,12 @@ public:
         break;
       }
     }
+    // HLSL Change Begin - SPV_EXT_float8 (float8 types are SPIR-V only).
     if (!getSema()->getLangOpts().SPIRV &&
-        type == HLSLScalarType_bfloat16) {
+        (type == HLSLScalarType_bfloat16 ||
+         type == HLSLScalarType_float8_e4m3 ||
+         type == HLSLScalarType_float8_e5m2)) {
+      // HLSL Change End.
       m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_spirv)
           << HLSLScalarTypeNames[type];
       return false;
@@ -4971,6 +5027,12 @@ public:
         return AR_BASIC_FLOAT16;
       case BuiltinType::BFloat16:
         return AR_BASIC_BFLOAT16;
+      // HLSL Change Begin - SPV_EXT_float8.
+      case BuiltinType::Float8E4M3:
+        return AR_BASIC_FLOAT8_E4M3;
+      case BuiltinType::Float8E5M2:
+        return AR_BASIC_FLOAT8_E5M2;
+      // HLSL Change End.
       case BuiltinType::HalfFloat:
         return AR_BASIC_FLOAT32_PARTIAL_PRECISION;
       case BuiltinType::Int:
@@ -5083,6 +5145,12 @@ public:
       return HLSLScalarType_half;
     case AR_BASIC_BFLOAT16:
       return HLSLScalarType_bfloat16;
+    // HLSL Change Begin - SPV_EXT_float8.
+    case AR_BASIC_FLOAT8_E4M3:
+      return HLSLScalarType_float8_e4m3;
+    case AR_BASIC_FLOAT8_E5M2:
+      return HLSLScalarType_float8_e5m2;
+    // HLSL Change End.
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return HLSLScalarType_float;
     case AR_BASIC_FLOAT32:
@@ -5143,6 +5211,12 @@ public:
       return m_context->HalfTy;
     case AR_BASIC_BFLOAT16:
       return m_context->BFloat16Ty;
+    // HLSL Change Begin - SPV_EXT_float8.
+    case AR_BASIC_FLOAT8_E4M3:
+      return m_context->Float8E4M3Ty;
+    case AR_BASIC_FLOAT8_E5M2:
+      return m_context->Float8E5M2Ty;
+    // HLSL Change End.
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return m_context->HalfFloatTy;
     case AR_BASIC_FLOAT32:
@@ -6789,6 +6863,10 @@ void HLSLExternalSource::AddBaseTypes() {
   m_baseTypes[HLSLScalarType_uint64] = m_context->UnsignedLongLongTy;
   m_baseTypes[HLSLScalarType_float16] = m_context->HalfTy;
   m_baseTypes[HLSLScalarType_bfloat16] = m_context->BFloat16Ty;
+  // HLSL Change Begin - SPV_EXT_float8.
+  m_baseTypes[HLSLScalarType_float8_e4m3] = m_context->Float8E4M3Ty;
+  m_baseTypes[HLSLScalarType_float8_e5m2] = m_context->Float8E5M2Ty;
+  // HLSL Change End.
   m_baseTypes[HLSLScalarType_float32] = m_context->FloatTy;
   m_baseTypes[HLSLScalarType_float64] = m_context->DoubleTy;
   m_baseTypes[HLSLScalarType_int8] = m_context->SignedCharTy;
@@ -8345,6 +8423,16 @@ bool HLSLExternalSource::IsPromotion(ArBasicKind leftKind,
       return false; // No other type is a promotion.
     }
     break;
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
+    switch (leftKind) {
+    case AR_BASIC_FLOAT32:
+    case AR_BASIC_FLOAT64:
+      return true;
+    default:
+      return false; // No other type is a promotion.
+    }
+    break;
   case AR_BASIC_BFLOAT16:
     switch (leftKind) {
     case AR_BASIC_FLOAT32:
@@ -8587,6 +8675,9 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
     case AR_BASIC_FLOAT16:
+  // HLSL Change - SPV_EXT_float8.
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
     case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -8598,6 +8689,9 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
     break;
 
   case AR_BASIC_FLOAT16:
+  // HLSL Change - SPV_EXT_float8.
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
   case AR_BASIC_BFLOAT16:
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
@@ -8689,6 +8783,9 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
     case AR_BASIC_FLOAT16:
+  // HLSL Change - SPV_EXT_float8.
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
     case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -8700,6 +8797,9 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
     break;
 
   case AR_BASIC_FLOAT16:
+  // HLSL Change - SPV_EXT_float8.
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
   case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -10339,6 +10439,45 @@ static bool ValidateBFloat16Conversion(ArBasicKind targetKind,
   return explicitConversion;
 }
 
+// HLSL Change Begin - SPV_EXT_float8.
+/// <summary>Applies the SPV_EXT_float8 conversion model to a component
+/// conversion.</summary>
+/// float8_e4m3_t and float8_e5m2_t implicitly widen to float32/float64
+/// (including vector and matrix forms) and accept implicit conversions from
+/// numeric literals, whose value is rounded to the nearest representable float8
+/// value. Every other conversion involving a float8 type requires an explicit
+/// cast: narrowing from float/double/half, converting to or from integer types,
+/// converting to or from bfloat16_t or float16_t, and converting between the two
+/// float8 formats. No conversion to or from bool is supported at all.
+static bool IsFloat8Kind(ArBasicKind kind) {
+  return kind == AR_BASIC_FLOAT8_E4M3 || kind == AR_BASIC_FLOAT8_E5M2;
+}
+
+static bool ValidateFloat8Conversion(ArBasicKind targetKind,
+                                     ArBasicKind sourceKind,
+                                     bool explicitConversion) {
+  if (!IsFloat8Kind(targetKind) && !IsFloat8Kind(sourceKind))
+    return true;
+  if (IS_BASIC_BOOL(targetKind) || IS_BASIC_BOOL(sourceKind))
+    return false;
+  if (IsFloat8Kind(targetKind)) {
+    if (explicitConversion)
+      return true;
+    // Implicit conversions into a float8 type are limited to literals.
+    return sourceKind == AR_BASIC_LITERAL_FLOAT ||
+           sourceKind == AR_BASIC_LITERAL_INT;
+  }
+  // sourceKind is a float8 type: only widening to a wider float is allowed
+  // without a cast. bfloat16_t and float16_t have a wider mantissa but are
+  // deliberately excluded: SPV_EXT_float8 does not define the mixed case, and
+  // silently picking one of the two formats would hide a format mix-up.
+  if (targetKind == AR_BASIC_FLOAT32 || targetKind == AR_BASIC_FLOAT64 ||
+      targetKind == AR_BASIC_FLOAT32_PARTIAL_PRECISION)
+    return true;
+  return explicitConversion;
+}
+// HLSL Change End.
+
 static bool ConvertComponent(ArTypeInfo TargetInfo, ArTypeInfo SourceInfo,
                              ImplicitConversionKind &ComponentConversion,
                              TYPE_CONVERSION_REMARKS &Remarks) {
@@ -10648,6 +10787,14 @@ bool HLSLExternalSource::CanConvert(SourceLocation loc, Expr *sourceExpr,
   // to or from bool are not supported.
   if (!ValidateBFloat16Conversion(TargetInfo.EltKind, SourceInfo.EltKind,
                                   explicitConversion))
+    return false;
+  // HLSL Change End.
+
+  // HLSL Change Begin - SPV_EXT_float8: float8 types only convert implicitly to
+  // float32/float64 (and from numeric literals); every other conversion
+  // requires an explicit cast.
+  if (!ValidateFloat8Conversion(TargetInfo.EltKind, SourceInfo.EltKind,
+                                explicitConversion))
     return false;
   // HLSL Change End.
 
@@ -11062,6 +11209,19 @@ void HLSLExternalSource::CheckBinOpForHLSL(SourceLocation OpLoc,
     return;
   }
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_float8. SPV_EXT_float8 defines no arithmetic,
+  // comparison, or bitwise operations on float8 values, so an operation whose
+  // computation would be performed in a float8 type is rejected; the operands
+  // must be converted to float or double explicitly. Simple assignment, comma,
+  // and operations whose combined element kind widens the float8 value to
+  // float32/float64 remain valid.
+  if (resultElementKind == AR_BASIC_FLOAT8_E4M3 ||
+      resultElementKind == AR_BASIC_FLOAT8_E5M2) {
+    m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_float8_op);
+    ResultTy = QualType();
+    return;
+  }
+  // HLSL Change End.
 
   bool bFailedFirstRHSCast = false;
 
@@ -11212,6 +11372,17 @@ QualType HLSLExternalSource::CheckUnaryOpForHLSL(SourceLocation OpLoc,
       (Opc == UO_Plus || Opc == UO_Minus || Opc == UO_PreInc ||
        Opc == UO_PostInc || Opc == UO_PreDec || Opc == UO_PostDec)) {
     m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_bfloat16_op);
+    return QualType();
+  }
+  // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_float8. Unary arithmetic on a float8 value is
+  // not defined by SPV_EXT_float8. UO_LNot is rejected separately because
+  // conversions to bool are not supported.
+  if ((elementKind == AR_BASIC_FLOAT8_E4M3 ||
+       elementKind == AR_BASIC_FLOAT8_E5M2) &&
+      (Opc == UO_Plus || Opc == UO_Minus || Opc == UO_PreInc ||
+       Opc == UO_PostInc || Opc == UO_PreDec || Opc == UO_PostDec)) {
+    m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_float8_op);
     return QualType();
   }
   // HLSL Change End.
@@ -11855,6 +12026,18 @@ static void GetFloatLimits(ArBasicKind basicKind, double *minValue,
     return;
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT32:
+  // HLSL Change Begin - SPV_EXT_float8. Largest finite is
+  // 448 for E4M3 and 57344 for E5M2; smallest normal
+  // is 2^-6 and 2^-14 respectively.
+  case AR_BASIC_FLOAT8_E4M3:
+    *minValue = -(0x1p-6);
+    *maxValue = 448.0;
+    return;
+  case AR_BASIC_FLOAT8_E5M2:
+    *minValue = -(0x1p-14);
+    *maxValue = 57344.0;
+    return;
+  // HLSL Change End.
   case AR_BASIC_BFLOAT16: // Same exponent range as float32.
     *minValue = -(FLT_MIN);
     *maxValue = FLT_MAX;
@@ -12190,6 +12373,9 @@ void hlsl::DiagnoseRegisterType(clang::Sema *self, clang::SourceLocation loc,
   case AR_BASIC_BOOL:
   case AR_BASIC_LITERAL_FLOAT:
   case AR_BASIC_FLOAT16:
+  // HLSL Change - SPV_EXT_float8.
+  case AR_BASIC_FLOAT8_E4M3:
+  case AR_BASIC_FLOAT8_E5M2:
   case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT32:

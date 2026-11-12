@@ -155,6 +155,22 @@ const FloatType *SpirvContext::getBFloat16Type() {
   return bfloat16Type;
 }
 
+// HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
+const FloatType *SpirvContext::getFloat8E4M3Type() {
+  if (float8E4M3Type == nullptr) {
+    float8E4M3Type = new (this) FloatType(8, spv::FPEncoding::Float8E4M3EXT);
+  }
+  return float8E4M3Type;
+}
+
+const FloatType *SpirvContext::getFloat8E5M2Type() {
+  if (float8E5M2Type == nullptr) {
+    float8E5M2Type = new (this) FloatType(8, spv::FPEncoding::Float8E5M2EXT);
+  }
+  return float8E5M2Type;
+}
+// HLSL Change End.
+
 const VectorType *SpirvContext::getVectorType(const SpirvType *elemType,
                                               uint32_t count) {
   // We are certain this should be a scalar type. Otherwise, cast causes an
