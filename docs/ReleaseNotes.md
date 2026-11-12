@@ -27,6 +27,20 @@ The included licenses apply to the following files:
   extended instruction. The extension is opt-in (modules using `OpFmaKHR` need
   `VK_KHR_shader_fma` and the `shaderFmaFloat32` feature), and without
   `-fspv-extension=SPV_KHR_fma` code generation is unchanged.
+- Added support for `SPV_KHR_opacity_micromap`: with
+  `-fspv-extension=SPV_KHR_opacity_micromap`, a shader whose ray queries opt in
+  to opacity micromaps (`RayQuery<..., RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>` or
+  a `RAY_FLAG_FORCE_OMM_2_STATE` ray flags argument) gets the
+  `OpacityMicromapIdKHR` execution mode attached to the entry points that request
+  it, emitted as `OpExecutionModeId %entry OpacityMicromapIdKHR %spec` with the
+  `RayTracingOpacityMicromapExecutionModeKHR` capability (plus
+  `RayTracingOpacityMicromapKHR` when the force-2-state ray flag is used),
+  `OpExtension "SPV_KHR_opacity_micromap"`, and a boolean specialization
+  constant decorated with `SpecId` (default true, id chosen with
+  `-fvk-opacity-micromap-spec-id=N`) so that the host can specialize it. The
+  extension is opt-in; without the flag the module is unchanged and a warning
+  reports the ignored opt-in. See the "Opacity micromaps" section of
+  docs/SPIR-V.rst.
 - Added support for `SPV_EXT_split_barrier`: with
   `-fspv-extension=SPV_EXT_split_barrier`, `vk::SplitBarrierArrive()` and
   `vk::SplitBarrierWait()` from `<vk/ext/split_barrier.h>` are emitted as

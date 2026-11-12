@@ -460,6 +460,10 @@ def fvk_resource_heap_stride : Separate<["-"], "fvk-resource-heap-stride">, Meta
   HelpText<"Override the resource descriptor heap array stride with a literal ArrayStride of <stride> bytes. Requires -spirv and -fspv-use-descriptor-heap. Must be a power of 2 in [8, 256].">;
 def fvk_sampler_heap_stride : Separate<["-"], "fvk-sampler-heap-stride">, MetaVarName<"<stride>">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"Override the sampler descriptor heap array stride with a literal ArrayStride of <stride> bytes. Requires -spirv and -fspv-use-descriptor-heap. Must be a power of 2 in [8, 256].">;
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+def fvk_opacity_micromap_spec_id : Joined<["-"], "fvk-opacity-micromap-spec-id=">, MetaVarName<"<id>">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
+  HelpText<"SpecId of the boolean specialization constant that the OpacityMicromapIdKHR execution mode uses as its operand. Requires -spirv and -fspv-extension=SPV_KHR_opacity_micromap. Default is 0.">;
+// HLSL Change End
 // SPIRV Change Ends
 
 ////////////////////////////////////////////////////////////////////////////////

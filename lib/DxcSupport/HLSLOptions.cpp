@@ -403,6 +403,51 @@ static bool handleHeapStride(const InputArgList &args, OptSpecifier id,
   return true;
 }
 
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+// Parses the single-integer |id| flag in |args| (the SpecId of the boolean
+// specialization constant used by the OpacityMicromapIdKHR execution mode). If
+// present, requires -spirv, validates that the value fits in a 32-bit SpecId
+// literal and stores it in |specId|. Returns true on success (including when the
+// flag is absent). Returns false and writes to |errors| otherwise, using |name|
+// as the pretty flag name.
+static bool handleOpacityMicromapSpecId(const InputArgList &args,
+                                        OptSpecifier id, uint32_t *specId,
+                                        llvm::StringRef name,
+                                        llvm::raw_ostream &errors) {
+  Arg *arg = args.getLastArg(id);
+  if (!arg)
+    return true;
+
+  if (!args.hasArg(OPT_spirv)) {
+    errors << name << " requires -spirv\n";
+    return false;
+  }
+
+  // The SpecId only reaches the module through the OpacityMicromapIdKHR
+  // execution mode, which is only emitted for
+  // -fspv-extension=SPV_KHR_opacity_micromap. Without it the option would be
+  // accepted and silently have no effect.
+  bool extensionRequested = false;
+  for (const Arg *a : args.filtered(OPT_fspv_extension_EQ))
+    if (llvm::StringRef(a->getValue()) == "SPV_KHR_opacity_micromap")
+      extensionRequested = true;
+  if (!extensionRequested) {
+    errors << name << " requires -fspv-extension=SPV_KHR_opacity_micromap\n";
+    return false;
+  }
+
+  llvm::StringRef value = arg->getValue();
+  uint32_t number = 0;
+  if (value.getAsInteger(10, number)) {
+    errors << "invalid " << name << " argument: '" << value << "'\n";
+    return false;
+  }
+
+  *specId = number;
+  return true;
+}
+// HLSL Change End
+
 // Check if any options that are unsupported with SPIR-V are used.
 static bool hasUnsupportedSpirvOption(const InputArgList &args,
                                       llvm::raw_ostream &errors) {
@@ -1245,6 +1290,12 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
   strideOk &= handleHeapStride(Args, OPT_fvk_sampler_heap_stride,
                                &opts.SpirvOptions.samplerHeapStride,
                                "-fvk-sampler-heap-stride", errors);
+  // HLSL Change Begin - SPV_KHR_opacity_micromap.
+  strideOk &= handleOpacityMicromapSpecId(
+      Args, OPT_fvk_opacity_micromap_spec_id,
+      &opts.SpirvOptions.opacityMicromapSpecId,
+      "-fvk-opacity-micromap-spec-id", errors);
+  // HLSL Change End
   if (!strideOk)
     return 1;
 

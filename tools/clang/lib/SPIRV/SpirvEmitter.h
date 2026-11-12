@@ -880,6 +880,25 @@ private:
   /// Process ray query intrinsics
   SpirvInstruction *processRayQueryIntrinsics(const CXXMemberCallExpr *expr,
                                               hlsl::IntrinsicOp opcode);
+  // HLSL Change Begin - SPV_KHR_opacity_micromap.
+  /// Records that the current function requests opacity-micromap ray query
+  /// traversal. The HLSL ray flag has no SPIR-V counterpart: SPIR-V expresses
+  /// the opt-in as the module-level OpacityMicromapIdKHR execution mode, so it
+  /// is derived here and emitted per entry point after translation.
+  /// Requires -fspv-extension=SPV_KHR_opacity_micromap; warns and does nothing
+  /// otherwise, so that the default output stays byte-identical.
+  void requestOpacityMicromapExecutionMode(bool rayFlagBitUsed,
+                                           SourceLocation loc);
+  /// Returns true if the given function, or any function it transitively calls,
+  /// requested opacity-micromap ray query traversal.
+  bool functionRequestsOpacityMicromap(const FunctionDecl *fn);
+  /// Returns the boolean specialization constant used as the
+  /// OpacityMicromapIdKHR operand, creating it on first use.
+  SpirvConstant *getOpacityMicromapEnableSpecConstant();
+  /// Emits OpExecutionModeId %entry OpacityMicromapIdKHR <spec-const> for every
+  /// entry point that requests opacity-micromap traversal.
+  void emitOpacityMicromapExecutionModes();
+  // HLSL Change End.
   /// Process spirv intrinsic instruction
   SpirvInstruction *processSpvIntrinsicCallExpr(const CallExpr *expr);
 
@@ -1792,6 +1811,18 @@ private:
   const FunctionDecl *curFunction;
   /// The SPIR-V function parameter for the current this object.
   SpirvInstruction *curThis;
+
+  // HLSL Change Begin - SPV_KHR_opacity_micromap.
+  /// Functions whose body requested opacity-micromap ray query traversal.
+  llvm::SmallPtrSet<const FunctionDecl *, 4> opacityMicromapRequestingFunctions;
+  /// The OpSpecConstantTrue used as the OpacityMicromapIdKHR operand. Created
+  /// lazily so that a module without the ray flag is unchanged.
+  SpirvConstant *opacityMicromapEnableSpecConstant = nullptr;
+  /// Whether the module uses the ForceOpacityMicromap2StateKHR ray flag bit.
+  bool opacityMicromapRayFlagUsed = false;
+  /// Whether the "extension not enabled" warning was already reported.
+  bool opacityMicromapWarningEmitted = false;
+  // HLSL Change End.
 
   // TODO: The following ~15 descriptorHeap* members and their methods are good
   // candidates for refactoring into a dedicated DescriptorHeapAliasEmitter

@@ -253,6 +253,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_VALVE_mixed_float_dot_product.
         .Case("SPV_VALVE_mixed_float_dot_product",
               Extension::VALVE_mixed_float_dot_product)
+        // HLSL Change - SPV_KHR_opacity_micromap.
+        .Case("SPV_KHR_opacity_micromap", Extension::KHR_opacity_micromap)
         .Default(Extension::Unknown);
 }
 
@@ -361,6 +363,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_VALVE_mixed_float_dot_product.
     case Extension::VALVE_mixed_float_dot_product:
       return "SPV_VALVE_mixed_float_dot_product";
+    // HLSL Change - SPV_KHR_opacity_micromap.
+    case Extension::KHR_opacity_micromap:
+      return "SPV_KHR_opacity_micromap";
     default:
     break;
   }
@@ -537,6 +542,18 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // -fspv-extension=SPV_VALVE_mixed_float_dot_product the pre-existing
     // lowering is kept byte for byte.
     case Extension::VALVE_mixed_float_dot_product:
+      return false;
+    // HLSL Change - SPV_KHR_opacity_micromap. The extension exists to carry the
+    // OpacityMicromapIdKHR execution mode, whose operand is a specialization
+    // constant the host sets to true to make ray query traversal evaluate
+    // opacity micromaps. Enabling it changes the module interface (a new
+    // specialization constant) and the emitted module declares
+    // RayTracingOpacityMicromapExecutionModeKHR plus
+    // OpExtension "SPV_KHR_opacity_micromap", which a driver without
+    // VK_KHR_opacity_micromap rejects. It is therefore opt-in: without
+    // -fspv-extension=SPV_KHR_opacity_micromap the HLSL opacity-micromap ray
+    // flags keep their pre-existing, flag-only code generation.
+    case Extension::KHR_opacity_micromap:
       return false;
     default:
     return true;

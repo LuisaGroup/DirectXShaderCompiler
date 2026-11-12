@@ -117,6 +117,13 @@ struct SpirvCodeGenOptions {
   std::optional<uint32_t> resourceHeapStride;
   std::optional<uint32_t> samplerHeapStride;
 
+  // -fvk-opacity-micromap-spec-id
+  // SpecId of the boolean specialization constant that the
+  // OpacityMicromapIdKHR execution mode uses as its operand
+  // (SPV_KHR_opacity_micromap). The host sets that constant to VK_TRUE to make
+  // ray query traversal evaluate opacity micromaps.
+  uint32_t opacityMicromapSpecId = 0;
+
   bool signaturePacking =
       false; ///< Whether signature packing is enabled or not
 

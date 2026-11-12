@@ -93,6 +93,9 @@ enum class Extension {
   // HLSL Change - SPV_VALVE_mixed_float_dot_product (OpFDot2MixAcc32VALVE for
   // HLSL's dot2add intrinsic).
   VALVE_mixed_float_dot_product,
+  // HLSL Change - SPV_KHR_opacity_micromap (the OpacityMicromapIdKHR execution
+  // mode derived from the HLSL opacity-micromap ray flags).
+  KHR_opacity_micromap,
   Unknown,
 };
 

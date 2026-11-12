@@ -926,6 +926,12 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
     }
   }
 
+  // HLSL Change Begin - SPV_KHR_opacity_micromap. Every entry point translated
+  // above is known now, so the execution mode can be attached to exactly the
+  // entry points whose ray query traversal requests opacity micromaps.
+  emitOpacityMicromapExecutionModes();
+  // HLSL Change End.
+
   // Add Location decorations to stage input/output variables.
   if (!declIdMapper.decorateStageIOLocations())
     return;
@@ -15762,6 +15768,18 @@ void SpirvEmitter::processTraceRay(const CallExpr *callExpr) {
   traceArgs.push_back(direction);
   traceArgs.push_back(tMax);
 
+  // HLSL Change Begin - SPV_KHR_opacity_micromap. TraceRay's RayFlags argument
+  // is a RAY_FLAG_* value, in which RAY_FLAG_FORCE_OMM_2_STATE (0x400) is the
+  // opacity-micromap opt-in. It is passed through as the SPIR-V
+  // ForceOpacityMicromap2StateKHR bit, and the execution mode that actually
+  // enables opacity micromaps for ray queries is derived from it here.
+  if (const auto *flagsConst = dyn_cast<SpirvConstantInteger>(traceArgs[1]))
+    if (flagsConst->getValue().getZExtValue() &
+        uint64_t(hlsl::DXIL::RayFlag::ForceOMM2State))
+      requestOpacityMicromapExecutionMode(
+          /*rayFlagBitUsed=*/true, args[1]->getLocStart());
+  // HLSL Change End.
+
   if (nvRayTracing) {
     traceArgs.push_back(rayPayloadLocInst);
     spvBuilder.createRayTracingOpsNV(spv::Op::OpTraceNV, QualType(), traceArgs,
@@ -17518,6 +17536,24 @@ void SpirvEmitter::addFunctionToWorkQueue(hlsl::DXIL::ShaderKind shaderKind,
   }
 }
 
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+// Opacity-micromap opt-in is HLSL's RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS,
+// which is the second template argument of RayQuery<RayFlags, RayQueryFlags>.
+// Unlike the first argument (RAY_FLAG_*) DXC does not translate it to SPIR-V at
+// all, so it has to be read from the instantiated template argument list.
+static uint32_t getRayQueryFlagsTemplateArg(QualType type) {
+  const auto *recordType = type->getAs<RecordType>();
+  if (!recordType)
+    return 0;
+  const auto *templateDecl =
+      dyn_cast<ClassTemplateSpecializationDecl>(recordType->getDecl());
+  if (!templateDecl || templateDecl->getTemplateArgs().size() < 2)
+    return 0;
+  return static_cast<uint32_t>(
+      templateDecl->getTemplateArgs()[1].getAsIntegral().getZExtValue());
+}
+// HLSL Change End.
+
 SpirvInstruction *
 SpirvEmitter::processTraceRayInline(const CXXMemberCallExpr *expr) {
   const auto object = expr->getImplicitObjectArgument();
@@ -17565,6 +17601,24 @@ SpirvEmitter::processTraceRayInline(const CXXMemberCallExpr *expr) {
     templateFlags |= interRayFlags;
   }
 
+  // HLSL Change Begin - SPV_KHR_opacity_micromap.
+  // Derive the OpacityMicromapIdKHR execution mode from the HLSL opt-in instead
+  // of translating it: SPIR-V has no ray flag for it. Two spellings exist:
+  //  - RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS (RayQueryFlags, value 1) is not
+  //    translated and is only visible here.
+  //  - RAY_FLAG_FORCE_OMM_2_STATE (RAY_FLAG_*, value 0x400, the value of
+  //    SPIR-V's ForceOpacityMicromap2StateKHR) reaches the ray-flags operand
+  //    either through the RayQuery<> ray flags or through RayFlags; the latter
+  //    is already folded into templateFlags above.
+  const uint32_t ommRayFlag = uint32_t(hlsl::DXIL::RayFlag::ForceOMM2State);
+  const bool usesRayFlagBit = (templateFlags & ommRayFlag) != 0;
+  const bool usesRayQueryFlag =
+      (getRayQueryFlagsTemplateArg(object->getType()) &
+       uint32_t(hlsl::DXIL::RayQueryFlag::AllowOpacityMicromaps)) != 0;
+  if (usesRayFlagBit || usesRayQueryFlag)
+    requestOpacityMicromapExecutionMode(usesRayFlagBit, args[1]->getLocStart());
+  // HLSL Change End.
+
   bool hasCullFlags =
       templateFlags & (uint32_t(hlsl::DXIL::RayFlag::SkipTriangles) |
                        uint32_t(hlsl::DXIL::RayFlag::SkipProceduralPrimitives));
@@ -17597,6 +17651,125 @@ SpirvEmitter::processTraceRayInline(const CXXMemberCallExpr *expr) {
                                          QualType(), traceArgs, hasCullFlags,
                                          expr->getExprLoc());
 }
+
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+void SpirvEmitter::requestOpacityMicromapExecutionMode(bool rayFlagBitUsed,
+                                                       SourceLocation loc) {
+  if (!featureManager.isExtensionEnabled(Extension::KHR_opacity_micromap)) {
+    // Without the extension the ray flags keep their pre-existing, flag-only
+    // code generation and the module has to stay byte-identical, so nothing is
+    // emitted here. Report it once instead of dropping the opt-in silently.
+    // Note that for RAY_FLAG_FORCE_OMM_2_STATE the resulting module is also
+    // rejected by SPIRV-Tools, because the ForceOpacityMicromap2StateKHR flag
+    // bit in the operand requires the RayTracingOpacityMicromapKHR capability.
+    if (!opacityMicromapWarningEmitted) {
+      opacityMicromapWarningEmitted = true;
+      emitWarning("opacity micromap ray flag ignored; use "
+                  "-fspv-extension=SPV_KHR_opacity_micromap to emit the "
+                  "OpacityMicromapIdKHR execution mode",
+                  loc);
+    }
+    return;
+  }
+  if (!curFunction)
+    return;
+  opacityMicromapRequestingFunctions.insert(curFunction->getCanonicalDecl());
+  opacityMicromapRayFlagUsed |= rayFlagBitUsed;
+}
+// HLSL Change End.
+
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+bool SpirvEmitter::functionRequestsOpacityMicromap(const FunctionDecl *fn) {
+  if (opacityMicromapRequestingFunctions.empty() || !fn)
+    return false;
+  // The request can be in the entry function itself or in any function it
+  // reaches, so walk the call graph. There is no call graph to query here, so
+  // the callees are collected by scanning the body of each function.
+  llvm::SmallPtrSet<const FunctionDecl *, 16> visited;
+  llvm::SmallVector<const FunctionDecl *, 8> functionsToScan;
+  functionsToScan.push_back(fn->getCanonicalDecl());
+  while (!functionsToScan.empty()) {
+    const FunctionDecl *current = functionsToScan.pop_back_val();
+    if (!visited.insert(current).second)
+      continue;
+    if (opacityMicromapRequestingFunctions.count(current))
+      return true;
+    const Stmt *body = current->getBody();
+    if (!body)
+      continue;
+    llvm::SmallVector<const Stmt *, 16> workList{body};
+    while (!workList.empty()) {
+      const Stmt *stmt = workList.pop_back_val();
+      if (!stmt)
+        continue;
+      if (const auto *call = dyn_cast<CallExpr>(stmt))
+        if (const FunctionDecl *callee = call->getDirectCallee())
+          functionsToScan.push_back(callee->getCanonicalDecl());
+      for (const Stmt *child : stmt->children())
+        workList.push_back(child);
+    }
+  }
+  return false;
+}
+// HLSL Change End.
+
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+SpirvConstant *SpirvEmitter::getOpacityMicromapEnableSpecConstant() {
+  if (opacityMicromapEnableSpecConstant)
+    return opacityMicromapEnableSpecConstant;
+  // SPV_KHR_opacity_micromap defines the OpacityMicromapIdKHR operand as the
+  // <id> of a constant instruction of OpTypeBool that may be a specialization
+  // constant, so this reuses the [[vk::constant_id(N)]] machinery: an
+  // OpSpecConstantTrue carrying OpDecorate SpecId. The default is true, so a
+  // pipeline that opts in with
+  // VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR gets opacity
+  // micromaps without specializing anything, while a host that wants them off
+  // only has to specialize this one constant to false. The constant must not be
+  // folded to a literal: the host could no longer override it.
+  auto *enable = spvBuilder.getConstantBool(/*value=*/true,
+                                            /*specConst=*/true);
+  enable->setDebugName("opacityMicromapEnable");
+  spvBuilder.decorateSpecId(enable, spirvOptions.opacityMicromapSpecId,
+                            SourceLocation());
+  opacityMicromapEnableSpecConstant = enable;
+  return enable;
+}
+// HLSL Change End.
+
+// HLSL Change Begin - SPV_KHR_opacity_micromap.
+void SpirvEmitter::emitOpacityMicromapExecutionModes() {
+  if (opacityMicromapRequestingFunctions.empty())
+    return;
+  if (!featureManager.isExtensionEnabled(Extension::KHR_opacity_micromap))
+    return;
+  for (const FunctionInfo *entryInfo : workQueue) {
+    if (!entryInfo->isEntryFunction)
+      continue;
+    if (!functionRequestsOpacityMicromap(
+            cast<FunctionDecl>(entryInfo->funcDecl)))
+      continue;
+    const auto loc = entryInfo->funcDecl->getLocStart();
+    // The extension, the capabilities and the mode are emitted together, so a
+    // module never declares the extension without using it.
+    // SPV_KHR_opacity_micromap is not folded into any Vulkan version, so the
+    // extension string is always required. Only the KHR spelling is emitted:
+    // the extension allows SPV_EXT_opacity_micromap as well, but a module that
+    // uses the OpacityMicromapIdKHR execution mode must declare the KHR
+    // spelling, and declaring both would be redundant.
+    spvBuilder.requireExtension("SPV_KHR_opacity_micromap", loc);
+    spvBuilder.requireCapability(
+        spv::Capability::RayTracingOpacityMicromapExecutionModeKHR, loc);
+    // ForceOpacityMicromap2StateKHR (the value RAY_FLAG_FORCE_OMM_2_STATE
+    // reaches the ray-flags operand with) needs its own capability.
+    if (opacityMicromapRayFlagUsed)
+      spvBuilder.requireCapability(
+          spv::Capability::RayTracingOpacityMicromapKHR, loc);
+    spvBuilder.addExecutionModeId(
+        entryInfo->entryFunction, spv::ExecutionMode::OpacityMicromapIdKHR,
+        {getOpacityMicromapEnableSpecConstant()}, loc);
+  }
+}
+// HLSL Change End.
 
 SpirvInstruction *
 SpirvEmitter::processRayQueryIntrinsics(const CXXMemberCallExpr *expr,
