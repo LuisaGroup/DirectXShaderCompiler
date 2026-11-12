@@ -155,6 +155,13 @@ public:
 
   // Adds a constant to the module.
   void addConstant(SpirvConstant *);
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  // Drops the given instructions from the module's constant list. Used for the
+  // OpConstant instructions that were created only to build an array value which
+  // is now carried by one OpConstantDataKHR: they are unreachable, so emitting
+  // them would only add dead words to the module.
+  void removeConstants(llvm::ArrayRef<SpirvInstruction *> superseded);
+  // HLSL Change End - SPV_KHR_constant_data.
 
   // Adds an OpSpecConstantOp to the module. These are emitted after all
   // constants, in insertion order.

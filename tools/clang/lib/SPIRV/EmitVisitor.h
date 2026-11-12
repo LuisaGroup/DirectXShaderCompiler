@@ -113,6 +113,8 @@ public:
   uint32_t getOrCreateUndef(SpirvUndef *);
   uint32_t getOrCreateConstantBool(SpirvConstantBoolean *);
   uint32_t getOrCreateConstantString(SpirvConstantString *);
+  // HLSL Change - SPV_KHR_constant_data.
+  uint32_t getOrCreateConstantDataKHR(SpirvConstantDataKHR *);
   template <typename vecType>
   void emitLiteral(const SpirvConstant *, vecType &outInst);
   template <typename vecType>
@@ -183,6 +185,8 @@ private:
   llvm::DenseMap<StringRef, const SpirvConstantString *> emittedConstantStrings;
   llvm::SmallVector<SpirvConstantComposite *, 8> emittedConstantComposites;
   llvm::SmallVector<SpirvConstantNull *, 8> emittedConstantNulls;
+  // HLSL Change - SPV_KHR_constant_data.
+  llvm::SmallVector<SpirvConstantDataKHR *, 8> emittedConstantData;
   llvm::SmallVector<SpirvUndef *, 8> emittedUndef;
   SpirvConstantBoolean *emittedConstantBools[2];
   llvm::DenseSet<const SpirvInstruction *> emittedSpecConstantInstructions;
@@ -273,6 +277,8 @@ public:
   bool visit(SpirvConstantComposite *) override;
   bool visit(SpirvConstantString *) override;
   bool visit(SpirvConstantSizeOfEXT *) override;
+  // HLSL Change - SPV_KHR_constant_data.
+  bool visit(SpirvConstantDataKHR *) override;
   bool visit(SpirvConstantNull *) override;
   bool visit(SpirvConvertPtrToU *) override;
   bool visit(SpirvConvertUToPtr *) override;

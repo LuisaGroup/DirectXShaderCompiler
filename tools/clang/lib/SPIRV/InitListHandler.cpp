@@ -503,6 +503,7 @@ SpirvInstruction *InitListHandler::createInitForConstantArrayType(
   // TODO: handle (unlikely) extra large array size?
   const auto size = static_cast<uint32_t>(arrType->getSize().getZExtValue());
 
+
   llvm::SmallVector<SpirvInstruction *, 4> elements;
   for (uint32_t i = 0; i < size; ++i) {
     auto *it = createInitForType(elemType, srcLoc, range);
@@ -510,6 +511,26 @@ SpirvInstruction *InitListHandler::createInitForConstantArrayType(
       return nullptr;
     elements.push_back(it);
   }
+
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  // This is the shape of a lookup table written as
+  //   static const uint table[N] = { ... };
+  // and the only place where an HLSL initializer list becomes an array value, so
+  // it is where an element list that is fully known at compile time can be
+  // encoded as one OpConstantDataKHR instead of an OpCompositeConstruct over N
+  // separate OpConstant instructions. getConstantDataKHR() returns nullptr when
+  // -fspv-constant-data is not given, when the array is below the threshold, or
+  // when an element is not a plain integer constant, so every other initializer
+  // list keeps its OpCompositeConstruct.
+  if (SpirvConstant *constantData =
+          spvBuilder.getConstantDataKHR(type, elements, srcLoc)) {
+    // Every element instruction was created for this initializer and its value
+    // is now carried by the packed constant, so the element instructions are
+    // unreachable: drop them instead of emitting one dead OpConstant each.
+    spvBuilder.removeConstants(elements);
+    return constantData;
+  }
+  // HLSL Change End - SPV_KHR_constant_data.
 
   // TODO: use OpConstantComposite when all components are constants
   return spvBuilder.createCompositeConstruct(type, elements, srcLoc, range);

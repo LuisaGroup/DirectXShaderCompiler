@@ -264,6 +264,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_QCOM_image_processing3.
         .Case("SPV_QCOM_image_processing3",
               Extension::QCOM_image_processing3)
+        // HLSL Change - SPV_KHR_constant_data.
+        .Case("SPV_KHR_constant_data",
+              Extension::KHR_constant_data)
         .Default(Extension::Unknown);
 }
 
@@ -384,6 +387,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_QCOM_image_processing3.
     case Extension::QCOM_image_processing3:
       return "SPV_QCOM_image_processing3";
+    // HLSL Change - SPV_KHR_constant_data.
+    case Extension::KHR_constant_data:
+      return "SPV_KHR_constant_data";
     default:
     break;
   }
@@ -610,6 +616,14 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // and a shader that does not gather with one of the modes - including one
     // that includes the header - is unchanged.
     case Extension::QCOM_image_processing3:
+      return false;
+    // HLSL Change - SPV_KHR_constant_data. OpConstantDataKHR is only
+    // emitted when -fspv-constant-data asks for it, it changes the encoding
+    // of existing array constants, and a driver or offline tool that does
+    // not know SPV_KHR_constant_data rejects the module, so the extension
+    // is opt-in: without -fspv-extension=SPV_KHR_constant_data the
+    // instruction is a compile error instead of an implicit request.
+    case Extension::KHR_constant_data:
       return false;
     default:
     return true;

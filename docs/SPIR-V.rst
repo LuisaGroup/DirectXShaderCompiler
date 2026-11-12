@@ -1594,6 +1594,120 @@ self-contained example and
 ``tools/clang/test/CodeGenSPIRV/ext.unsized-array*.hlsl`` for the tests that pin
 the encoding, the off path and the diagnostics.
 
+Constant data arrays
+~~~~~~~~~~~~~~~~~~~~
+``SPV_KHR_constant_data`` adds ``OpConstantDataKHR`` (5147) and
+``OpSpecConstantDataKHR`` (5148), which declare an array constant in a single
+instruction: after *Result Type* and *Result <id>* the operands are the literal
+words of the data, instead of one ``OpConstant`` per element plus an
+``OpConstantComposite``. The extension introduces the ``ConstantDataKHR``
+capability (5146), the ``UTFEncodedKHR`` decoration (5145) and the
+``OpExtension "SPV_KHR_constant_data"`` string; on the Vulkan side it is
+``VK_KHR_shader_constant_data``, whose feature struct carries one bit for the
+extension.
+
+HLSL has no syntax for the instruction: it is an encoding choice for an array
+constant the source already contains, so it is selected by an option rather than
+by a keyword. With ``-fspv-constant-data[=<threshold>]`` an integer array whose
+elements are all known at compile time
+
+.. code:: hlsl
+
+  static const uint table[8] = {
+    0x01234567, 0x89abcdef, 1, 2, 3, 4, 5, 6
+  };
+
+becomes one instruction instead of an ``OpConstantComposite`` over eight
+``OpConstant`` instructions:
+
+.. code:: text
+
+  %uint_8 = OpConstant %uint 8
+  %_arr_uint_uint_8 = OpTypeArray %uint %uint_8
+  %15 = OpConstantDataKHR %_arr_uint_uint_8 19088743 2309737967 1 2 3 4 5 6
+
+The words are the elements packed with no padding between them (below, and
+``OpConstantDataKHR`` in the extension text): elements narrower than 32 bits are
+packed from the least significant bits of each word upwards, and the most
+significant bits of the final word are ignored. For the table above, which holds
+32-bit elements, each word is one element:
+
+* 8-bit elements: four per word, element 0 in the low byte, so
+  ``{ 0x01, 0x23, 0x45, 0x67, ... }`` starts with ``0x67452301 0xefcdab89``.
+  Signed elements are packed as their two's complement bit pattern at that width
+  (``-1`` is the byte ``0xff``, not ``0xffffffff``).
+* 16-bit elements: two per word, element 0 in the low half word, so
+  ``{ 0x0123, 0x4567, ... }`` starts with ``0x45670123``.
+* 32-bit elements: one per word.
+* 64-bit elements: two words each, the low word first, so
+  ``{ 0x0123456789abcdef, ... }`` starts with ``0x89abcdef 0x01234567``.
+* An array whose size is not a multiple of the word size is padded with zero
+  high bits in the final word, which the instruction defines as ignored.
+
+Which arrays it applies to. The result type of ``OpConstantDataKHR`` must be an
+``OpTypeArray`` of *integer scalar* elements, and must not be decorated with
+``ArrayStride``. DXC therefore only encodes an array when all of the following
+hold, and keeps the ``OpConstantComposite`` form otherwise:
+
+* the element type is an integer scalar (``bool`` is ``OpTypeBool``, not
+  ``OpTypeInt``, and HLSL enums are left alone), so arrays of ``float``,
+  ``half``, vectors, matrices or structs are never packed;
+* every element is a plain integer constant, not a specialization constant;
+* the array has at least ``<threshold>`` elements (see below);
+* the data fits in one instruction: the *Word Count* field of a SPIR-V
+  instruction is 16 bits, so at most 65532 data words (issue 3 of the
+  extension). A larger array keeps the composite form instead of being split.
+
+The ``ArrayStride`` restriction needs no check in practice: the array type of a
+constant is lowered with the void layout rule, which produces an ``OpTypeArray``
+without a stride, and an array type that does have a stride is a different
+``OpTypeArray``.
+
+Threshold and cost. ``OpConstantDataKHR`` is not always smaller: it needs one
+32-bit word per element, exactly what the ``<id>`` operands of the composite
+cost, so the saving comes from not emitting the per-element ``OpConstant``
+instructions. Below ``<threshold>`` elements those instructions are likely to be
+shared with the rest of the shader, and the instruction only adds a capability
+and an extension, so the default threshold is 8 and
+``-fspv-constant-data=1`` is the way to ask for the encoding everywhere. For an
+array of 256 ``uint`` elements the effect on the module ``-Fo`` writes is
+5860 bytes to 1816 bytes with the default (legalizing and optimizing) pipeline,
+and 6128 bytes to 2084 bytes with ``-fcgl``; the per-element ``OpConstant``
+instructions that the DXC front end created for the initializer are dropped when
+the array becomes constant data, and the optimizer would have removed the unused
+remainder anyway.
+
+Gating. The option is off by default, because the instruction changes the
+module in a way that a driver, a validator or an offline tool has to understand.
+It also requires the extension to be allowed: ``-fspv-constant-data`` without
+``-fspv-extension=SPV_KHR_constant_data`` (or the ``KHR`` shorthand that allows
+every ``SPV_KHR_*`` extension) is an error, so an explicit
+``-fspv-extension=`` list stays an effective allow-list and a module never
+declares an extension the host was not offered.
+``-fspv-target-env`` does not suppress the ``OpExtension``: no released Vulkan
+version makes the capability core, so ``isExtensionRequiredForTargetEnv`` is
+true for every target.
+
+What the compiler cannot check. The module validates with the SPIRV-Tools that
+ship (the word count, the element type and the missing ``ArrayStride`` are all
+validator rules), but whether the device has ``VK_KHR_shader_constant_data``
+enabled is the application's responsibility: enable the extension at
+``vkCreateDevice`` and set its feature bit, or the pipeline is rejected.
+
+Not implemented. ``OpSpecConstantDataKHR`` is not emitted: HLSL has no
+specialization surface for an array (``[[vk::constant_id]]`` applies to scalar
+globals only, and ``OpSpecConstantDataKHR`` additionally wants the array
+``Length`` to be a specialization constant so that a client can change the number
+of words). ``UTFEncodedKHR`` is also not emitted - it is a debugging aid for
+string data, and DXC has no HLSL construct that means "this integer array is a
+string". The plain ``OpConstantDataKHR`` form below is complete.
+
+See ``examples/spirv-extensions/khr-constant-data.hlsl`` for a self-contained
+example (a 256-entry CRC-8 table, next to a 4-entry table that stays a
+composite) and ``tools/clang/test/CodeGenSPIRV/constant-data*.hlsl`` for the
+tests that pin the packing of every element width, the threshold, the off path,
+the optimizer-survival path and the diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1639,6 +1753,7 @@ Supported extensions
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap
 * SPV_KHR_fma
+* SPV_KHR_constant_data
 * SPV_QCOM_image_processing3
 * SPV_QCOM_multiple_wait_queues
 * SPV_NV_push_constant_bank
@@ -1809,6 +1924,11 @@ block be an unsized array, so neither a target environment nor an extension
 string can express it. It is off by default; see `Unsized array as the last
 uniform buffer member`_ for the emitted types, the restrictions and the host
 requirements.
+
+``-fspv-constant-data[=<threshold>]`` selects the ``OpConstantDataKHR`` encoding
+for integer array constants (``SPV_KHR_constant_data``); it is off by default and
+requires ``-fspv-extension=SPV_KHR_constant_data``, see `Constant data arrays`_
+above.
 
 ``-fspv-enable-maintenance9`` is a third, independent kind of option: it is not
 a version and not an extension, but a statement about the *device*. It declares

@@ -2043,10 +2043,101 @@ SpirvConstant *SpirvBuilder::getConstantBool(bool value, bool specConst) {
   return boolConst;
 }
 
+// HLSL Change Begin - SPV_KHR_constant_data.
+SpirvConstant *SpirvBuilder::getConstantDataKHR(
+    QualType arrayType, llvm::ArrayRef<SpirvInstruction *> elements,
+    SourceLocation loc) {
+  // Opt-in: without -fspv-constant-data every array constant keeps its
+  // OpConstantComposite form, so the default output is unchanged.
+  if (!spirvOptions.useConstantData)
+    return nullptr;
+
+  const auto *constArrayType =
+      astContext.getAsConstantArrayType(arrayType.getCanonicalType());
+  if (!constArrayType)
+    return nullptr;
+
+  const QualType elemType = constArrayType->getElementType().getCanonicalType();
+  // OpConstantDataKHR declares "an array of scalar integer type elements"
+  // (SPV_KHR_constant_data). Booleans are OpTypeBool rather than OpTypeInt, and
+  // an HLSL enum is not guaranteed to lower to an integer type, so both keep
+  // the OpConstantComposite form.
+  if (!elemType->isIntegralOrEnumerationType() || elemType->isBooleanType() ||
+      elemType->isEnumeralType())
+    return nullptr;
+
+  const uint32_t elemWidth = astContext.getIntWidth(elemType);
+  if (elemWidth != 8 && elemWidth != 16 && elemWidth != 32 && elemWidth != 64)
+    return nullptr;
+
+  const uint64_t elemCount = constArrayType->getSize().getZExtValue();
+  // OpConstantDataKHR must have at least one data word, i.e. an array of zero
+  // elements cannot be encoded with it.
+  if (elemCount == 0 || elemCount != elements.size())
+    return nullptr;
+  // Below the threshold the OpConstantComposite form is not larger: one 32-bit
+  // word per element versus one <id> per element, and the elements are shared
+  // with the rest of the module.
+  if (elemCount < spirvOptions.constantDataThreshold)
+    return nullptr;
+
+  // Data is packed with no padding between elements and the final word is
+  // padded to 32 bits with ignored high bits (SPV_KHR_constant_data,
+  // "OpConstantDataKHR"). The instruction Word Count field is 16 bits, so a
+  // single instruction can carry at most 65532 data words (issue 3 of the
+  // extension); larger arrays keep the composite form instead of splitting.
+  const uint64_t wordCount = (elemCount * elemWidth + 31) / 32;
+  if (wordCount > 65532)
+    return nullptr;
+
+  std::vector<uint32_t> words(static_cast<size_t>(wordCount), 0);
+  for (uint64_t i = 0; i < elemCount; ++i) {
+    const auto *element = dyn_cast<SpirvConstantInteger>(elements[i]);
+    if (!element || element->isSpecConstant())
+      return nullptr;
+
+    const llvm::APInt value = element->getValue();
+    if (value.getBitWidth() > 64)
+      return nullptr;
+    // Two's complement bit pattern of the element at its own width.
+    uint64_t bits = value.getZExtValue();
+    if (elemWidth < 64)
+      bits &= (uint64_t(1) << elemWidth) - 1;
+
+    // Element 0 occupies the least significant bits of the first word; elements
+    // narrower than 32 bits are packed from least to most significant bits.
+    const uint64_t bitPos = i * elemWidth;
+    const uint32_t wordIndex = static_cast<uint32_t>(bitPos / 32);
+    const uint32_t shift = static_cast<uint32_t>(bitPos % 32);
+    words[wordIndex] |= static_cast<uint32_t>(bits << shift);
+    if (shift + elemWidth > 32)
+      words[wordIndex + 1] |= static_cast<uint32_t>(bits >> (32 - shift));
+  }
+
+  auto *constantData = new (context) SpirvConstantDataKHR(arrayType, words, loc);
+  mod->addConstant(constantData);
+  return constantData;
+}
+void SpirvBuilder::removeConstants(
+    llvm::ArrayRef<SpirvInstruction *> superseded) {
+  mod->removeConstants(superseded);
+}
+// HLSL Change End - SPV_KHR_constant_data.
+
 SpirvConstant *
 SpirvBuilder::getConstantComposite(QualType compositeType,
                                    llvm::ArrayRef<SpirvConstant *> constituents,
                                    bool specConst) {
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  if (!specConst && spirvOptions.useConstantData &&
+      compositeType->isConstantArrayType()) {
+    llvm::SmallVector<SpirvInstruction *, 8> constElements(
+        constituents.begin(), constituents.end());
+    if (SpirvConstant *constantData =
+            getConstantDataKHR(compositeType, constElements))
+      return constantData;
+  }
+  // HLSL Change End - SPV_KHR_constant_data.
   // We do not care about making unique constants at this point.
   auto *compositeConst = new (context)
       SpirvConstantComposite(compositeType, constituents, specConst);

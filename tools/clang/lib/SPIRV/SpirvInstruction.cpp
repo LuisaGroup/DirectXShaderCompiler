@@ -68,6 +68,8 @@ DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantFloat)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantComposite)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantString)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantSizeOfEXT)
+// HLSL Change - SPV_KHR_constant_data.
+DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantDataKHR)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConstantNull)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConvertPtrToU)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvConvertUToPtr)
@@ -613,6 +615,12 @@ SpirvConstant::SpirvConstant(Kind kind, spv::Op op, QualType resultType,
                        /*SourceLocation*/ {}),
       literalConstant(literal) {}
 
+// HLSL Change - SPV_KHR_constant_data: a constant that carries its source
+// location so that its diagnostics can point at the source.
+SpirvConstant::SpirvConstant(Kind kind, spv::Op op, QualType resultType,
+                             SourceLocation loc, bool literal)
+    : SpirvInstruction(kind, op, resultType, loc), literalConstant(literal) {}
+
 bool SpirvConstant::operator==(const SpirvConstant &that) const {
   if (auto *booleanInst = dyn_cast<SpirvConstantBoolean>(this)) {
     auto *thatBooleanInst = dyn_cast<SpirvConstantBoolean>(&that);
@@ -644,6 +652,13 @@ bool SpirvConstant::operator==(const SpirvConstant &that) const {
     if (thatSizeOfInst == nullptr)
       return false;
     return *sizeOfInst == *thatSizeOfInst;
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  } else if (auto *dataInst = dyn_cast<SpirvConstantDataKHR>(this)) {
+    auto *thatDataInst = dyn_cast<SpirvConstantDataKHR>(&that);
+    if (thatDataInst == nullptr)
+      return false;
+    return *dataInst == *thatDataInst;
+  // HLSL Change End - SPV_KHR_constant_data.
   } else if (auto *nullInst = dyn_cast<SpirvUndef>(this)) {
     auto *thatNullInst = dyn_cast<SpirvUndef>(&that);
     if (thatNullInst == nullptr)
@@ -728,6 +743,19 @@ bool SpirvConstantString::operator==(const SpirvConstantString &that) const {
          str == that.str;
 }
 
+// HLSL Change Begin - SPV_KHR_constant_data.
+SpirvConstantDataKHR::SpirvConstantDataKHR(QualType type,
+                                           llvm::ArrayRef<uint32_t> wordsVec,
+                                           SourceLocation loc)
+    : SpirvConstant(IK_ConstantDataKHR, spv::Op::OpConstantDataKHR, type, loc),
+      words(wordsVec.begin(), wordsVec.end()) {}
+
+bool SpirvConstantDataKHR::operator==(const SpirvConstantDataKHR &that) const {
+  return resultType == that.resultType && astResultType == that.astResultType &&
+         opcode == that.opcode && words == that.words;
+}
+// HLSL Change End - SPV_KHR_constant_data.
+
 SpirvConstantSizeOfEXT::SpirvConstantSizeOfEXT(QualType resultType,
                                                const SpirvType *operandType)
     : SpirvConstant(IK_ConstantSizeOfEXT, spv::Op::OpConstantSizeOfEXT,
@@ -736,6 +764,7 @@ SpirvConstantSizeOfEXT::SpirvConstantSizeOfEXT(QualType resultType,
 
 bool SpirvConstantSizeOfEXT::operator==(
     const SpirvConstantSizeOfEXT &that) const {
+
   return resultType == that.resultType && astResultType == that.astResultType &&
          operandType == that.operandType;
 }

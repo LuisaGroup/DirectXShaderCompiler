@@ -70,6 +70,10 @@ public:
     IK_ConstantComposite,
     IK_ConstantString,
     IK_ConstantSizeOfEXT,
+    // HLSL Change - SPV_KHR_constant_data (OpConstantDataKHR). Kept inside
+    // the IK_ConstantBoolean..IK_ConstantNull range used by
+    // SpirvConstant::classof.
+    IK_ConstantDataKHR,
     IK_ConstantNull,
 
     // Pointer <-> uint conversions.
@@ -1457,6 +1461,10 @@ public:
 protected:
   SpirvConstant(Kind, spv::Op, const SpirvType *, bool literal = false);
   SpirvConstant(Kind, spv::Op, QualType, bool literal = false);
+  // HLSL Change - SPV_KHR_constant_data: a constant that keeps a source
+  // location for diagnostics.
+  SpirvConstant(Kind, spv::Op, QualType, SourceLocation loc,
+                bool literal = false);
   bool literalConstant;
 };
 
@@ -1564,6 +1572,39 @@ public:
 
   bool operator==(const SpirvConstantNull &that) const;
 };
+
+// HLSL Change Begin - SPV_KHR_constant_data.
+/// \brief Represents OpConstantDataKHR (SPV_KHR_constant_data).
+///
+/// Declares an array of constant data in a single instruction. The operands
+/// after Result Type and Result <id> are literal words holding the array
+/// elements tightly packed, with no padding between elements: elements
+/// narrower than 32 bits are packed from the least significant bits of each
+/// word upwards, and the most significant bits of the final word are ignored.
+/// The result type must be an OpTypeArray of an integer scalar type and must
+/// not be decorated with ArrayStride.
+class SpirvConstantDataKHR : public SpirvConstant {
+public:
+  SpirvConstantDataKHR(QualType type, llvm::ArrayRef<uint32_t> words,
+                       SourceLocation loc = {});
+
+  DEFINE_RELEASE_MEMORY_FOR_CLASS(SpirvConstantDataKHR)
+
+  // For LLVM-style RTTI
+  static bool classof(const SpirvInstruction *inst) {
+    return inst->getKind() == IK_ConstantDataKHR;
+  }
+
+  bool invokeVisitor(Visitor *v) override;
+
+  bool operator==(const SpirvConstantDataKHR &that) const;
+
+  llvm::ArrayRef<uint32_t> getWords() const { return words; }
+
+private:
+  llvm::SmallVector<uint32_t, 4> words;
+};
+// HLSL Change End - SPV_KHR_constant_data.
 
 /// \brief Represents OpConstantSizeOfEXT (SPV_EXT_descriptor_heap).
 ///

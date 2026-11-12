@@ -375,6 +375,17 @@ void SpirvModule::addConstant(SpirvConstant *constant) {
   constants.push_back(constant);
 }
 
+// HLSL Change Begin - SPV_KHR_constant_data.
+void SpirvModule::removeConstants(
+    llvm::ArrayRef<SpirvInstruction *> superseded) {
+  for (SpirvInstruction *inst : superseded) {
+    auto found = std::find(constants.begin(), constants.end(), inst);
+    if (found != constants.end())
+      constants.erase(found);
+  }
+}
+// HLSL Change End - SPV_KHR_constant_data.
+
 void SpirvModule::addSpecConstantOp(SpirvInstruction *op) {
   assert(op && (isa<SpirvSpecConstantUnaryOp>(op) ||
                 isa<SpirvSpecConstantBinaryOp>(op) ||

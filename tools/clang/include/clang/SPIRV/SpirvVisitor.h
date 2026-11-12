@@ -97,6 +97,8 @@ public:
   DEFINE_VISIT_METHOD(SpirvConstantFloat)
   DEFINE_VISIT_METHOD(SpirvConstantComposite)
   DEFINE_VISIT_METHOD(SpirvConstantString)
+  // HLSL Change - SPV_KHR_constant_data.
+  DEFINE_VISIT_METHOD(SpirvConstantDataKHR)
   DEFINE_VISIT_METHOD(SpirvConstantSizeOfEXT)
   DEFINE_VISIT_METHOD(SpirvConstantNull)
   DEFINE_VISIT_METHOD(SpirvConvertPtrToU)

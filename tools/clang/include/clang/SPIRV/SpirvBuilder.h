@@ -843,6 +843,27 @@ public:
   SpirvConstant *getConstantFloat(QualType type, llvm::APFloat value,
                                   bool specConst = false);
   SpirvConstant *getConstantBool(bool value, bool specConst = false);
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  /// \brief Returns an OpConstantDataKHR (SPV_KHR_constant_data) that packs the
+  /// given constant integers into literal words, or nullptr if the feature is
+  /// disabled (-fspv-constant-data), the array has fewer than
+  /// -fspv-constant-data=<threshold> elements, or the elements cannot be
+  /// encoded that way (non-integer elements, specialization constants).
+  ///
+  /// The result type must be an OpTypeArray of an integer scalar type without
+  /// an ArrayStride decoration; the array types created for a constant are
+  /// lowered with SpirvLayoutRule::Void, so they never carry a stride.
+  SpirvConstant *getConstantDataKHR(QualType arrayType,
+                                    llvm::ArrayRef<SpirvInstruction *> elements,
+                                    SourceLocation loc = {});
+  /// \brief Drops the given instructions from the module's constant list.
+  ///
+  /// Only for instructions that no other instruction can refer to: they were
+  /// created to build one array value which is now carried by one
+  /// OpConstantDataKHR, so emitting them would only add dead words.
+  void removeConstants(llvm::ArrayRef<SpirvInstruction *> superseded);
+  // HLSL Change End - SPV_KHR_constant_data.
+
   SpirvConstant *
   getConstantComposite(QualType compositeType,
                        llvm::ArrayRef<SpirvConstant *> constituents,

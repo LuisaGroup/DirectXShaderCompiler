@@ -106,6 +106,9 @@ enum class Extension {
   // HLSL Change - SPV_QCOM_image_processing3 (OpImageGatherQCOM, the gather
   // entry points in <vk/qcom/image_processing3.h>).
   QCOM_image_processing3,
+  // HLSL Change - SPV_KHR_constant_data (OpConstantDataKHR for
+  // -fspv-constant-data).
+  KHR_constant_data,
   Unknown,
 };
 

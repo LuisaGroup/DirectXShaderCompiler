@@ -1172,6 +1172,15 @@ bool EmitVisitor::visit(SpirvConstantSizeOfEXT *inst) {
   return true;
 }
 
+// HLSL Change Begin - SPV_KHR_constant_data.
+bool EmitVisitor::visit(SpirvConstantDataKHR *inst) {
+  typeHandler.getOrCreateConstant(inst);
+  emitDebugNameForInstruction(getOrAssignResultId<SpirvInstruction>(inst),
+                              inst->getDebugName());
+  return true;
+}
+// HLSL Change End - SPV_KHR_constant_data.
+
 bool EmitVisitor::visit(SpirvConstantNull *inst) {
   typeHandler.getOrCreateConstant(inst);
   emitDebugNameForInstruction(getOrAssignResultId<SpirvInstruction>(inst),
@@ -2258,6 +2267,10 @@ uint32_t EmitTypeHandler::getOrCreateConstant(SpirvConstant *inst) {
     return getOrCreateConstantString(constString);
   } else if (auto *constSizeOf = dyn_cast<SpirvConstantSizeOfEXT>(inst)) {
     return emitConstantSizeOfEXT(constSizeOf);
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  } else if (auto *constData = dyn_cast<SpirvConstantDataKHR>(inst)) {
+    return getOrCreateConstantDataKHR(constData);
+  // HLSL Change End - SPV_KHR_constant_data.
   } else if (auto *constUndef = dyn_cast<SpirvUndef>(inst)) {
     return getOrCreateUndef(constUndef);
   }
@@ -2349,6 +2362,34 @@ uint32_t EmitTypeHandler::getOrCreateConstantNull(SpirvConstantNull *inst) {
 
   return inst->getResultId();
 }
+
+// HLSL Change Begin - SPV_KHR_constant_data.
+uint32_t
+EmitTypeHandler::getOrCreateConstantDataKHR(SpirvConstantDataKHR *inst) {
+  // Non-specialization constants are unique by (result type, literal words);
+  // reuse the result-id of an identical instruction if there is one.
+  for (SpirvConstantDataKHR *cached : emittedConstantData) {
+    if (*cached == *inst) {
+      inst->setResultId(cached->getResultId());
+      return inst->getResultId();
+    }
+  }
+
+  // The result type is an OpTypeArray of an integer scalar type with no
+  // ArrayStride decoration; emitType() emits the type and, if needed, the
+  // OpConstant for its length first.
+  const uint32_t typeId = emitType(inst->getResultType());
+  initTypeInstruction(inst->getopcode());
+  curTypeInst.push_back(typeId);
+  curTypeInst.push_back(getOrAssignResultId<SpirvInstruction>(inst));
+  for (uint32_t word : inst->getWords())
+    curTypeInst.push_back(word);
+  finalizeTypeInstruction();
+
+  emittedConstantData.push_back(inst);
+  return inst->getResultId();
+}
+// HLSL Change End - SPV_KHR_constant_data.
 
 uint32_t EmitTypeHandler::emitConstantSizeOfEXT(SpirvConstantSizeOfEXT *inst) {
   // Uniqueness is already guaranteed upstream by

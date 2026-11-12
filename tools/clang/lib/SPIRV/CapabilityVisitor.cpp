@@ -873,6 +873,24 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     }
     break;
   }
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  // OpConstantDataKHR declares an array constant as literal words, and
+  // OpSpecConstantDataKHR is its specialization-constant counterpart. Both are
+  // guarded by the ConstantDataKHR capability and by
+  // OpExtension "SPV_KHR_constant_data" (SPIRV-Tools: "Capability
+  // ConstantDataKHR is not allowed by Vulkan 1.0 specification (or requires
+  // extension)"). The extension is requested through the ordinary registration
+  // path - not through [[vk::ext_extension]] - so -fspv-extension= stays an
+  // allow-list: without SPV_KHR_constant_data in it, emitting the instruction
+  // with -fspv-constant-data is an error instead of a module that declares an
+  // extension the host never asked for.
+  case spv::Op::OpConstantDataKHR:
+  case spv::Op::OpSpecConstantDataKHR: {
+    addExtension(Extension::KHR_constant_data, "OpConstantDataKHR", loc);
+    addCapability(spv::Capability::ConstantDataKHR, loc);
+    break;
+  }
+  // HLSL Change End - SPV_KHR_constant_data.
   case spv::Op::OpConstantStringAMDX:
   case spv::Op::OpSpecConstantStringAMDX:
   case spv::Op::OpAllocateNodePayloadsAMDX:

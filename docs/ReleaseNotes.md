@@ -21,6 +21,30 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_KHR_constant_data` (`VK_KHR_shader_constant_data`): with
+  `-fspv-constant-data[=<threshold>]` and
+  `-fspv-extension=SPV_KHR_constant_data`, an integer array constant whose elements
+  are all known at compile time is declared by one `OpConstantDataKHR` (5147)
+  instead of an `OpConstantComposite` over one `OpConstant` per element, guarded by
+  `OpCapability ConstantDataKHR` (5146) and
+  `OpExtension "SPV_KHR_constant_data"`. The operands after the result type and
+  result id are the *literal words* of the data, packed with no padding between
+  elements: 8-bit elements four per word, 16-bit two per word, 64-bit two words with
+  the low word first, always with element 0 in the least significant bits and the
+  final word zero-padded. The encoding is only used where the extension allows it
+  (the result type must be an `OpTypeArray` of an integer scalar type and must not
+  carry `ArrayStride`), never below the threshold (default 8 elements, because the
+  instruction costs one word per element and only saves the per-element constants),
+  and never for a data set larger than the 65532 words one instruction can hold. The
+  option is off by default, so no module changes unless it is given, and it requires
+  the extension to be allowed so that an explicit `-fspv-extension=` list can refuse
+  it. For a 256-entry `uint` table the emitted module drops from 5860 to 1816 bytes
+  with the default pipeline and from 6128 to 2084 bytes with `-fcgl`.
+  `OpSpecConstantDataKHR` (5148) and the `UTFEncodedKHR` decoration (5145) are not
+  emitted: HLSL has no array specialization surface (`[[vk::constant_id]]` applies
+  to scalar globals only, and a specialization constant data array also has to
+  specialize the array length). See the "Constant data arrays" section of
+  `docs/SPIR-V.rst` and `examples/spirv-extensions/khr-constant-data.hlsl`.
 - Added support for `VK_EXT_shader_uniform_buffer_unsized_array`: with
   `-fspv-enable-uniform-buffer-unsized-array`, the last member of a uniform buffer
   block may be an unsized array (a trailing `float values[];` in the struct used as

@@ -71,6 +71,16 @@ struct SpirvCodeGenOptions {
   bool fixFuncCallArguments = false;
   bool enableMaximalReconvergence = false;
   bool enableMaintenance9 = false;
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  /// Encode an integer array constant whose elements are all known at compile
+  /// time as one OpConstantDataKHR (SPV_KHR_constant_data) instead of an
+  /// OpConstantComposite over one OpConstant per element.
+  bool useConstantData = false;
+  /// Minimum number of array elements for OpConstantDataKHR; arrays with fewer
+  /// elements keep the OpConstantComposite form, which is not larger for them.
+  /// Set by -fspv-constant-data=<threshold>.
+  uint32_t constantDataThreshold = 8;
+  // HLSL Change End
   // HLSL Change Begin - VK_EXT_shader_uniform_buffer_unsized_array.
   /// Allow an unsized array as the last member of a constant buffer (a
   /// Uniform-storage-class block), which is lowered to OpTypeRuntimeArray.

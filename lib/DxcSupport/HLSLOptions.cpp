@@ -448,6 +448,55 @@ static bool handleOpacityMicromapSpecId(const InputArgList &args,
 }
 // HLSL Change End
 
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  // Parses the -fspv-constant-data[=<threshold>] option into |enable| and
+  // |threshold|. The option changes the encoding of existing array constants and
+  // emits OpConstantDataKHR, so it requires both -spirv and an allow-list entry
+  // for SPV_KHR_constant_data: without the extension the instruction is not
+  // permitted to use, and the option would be accepted only to fail later.
+  // "KHR" is the existing shorthand that allows every KHR extension. Returns
+  // true when the option is absent or valid.
+  static bool handleConstantDataOption(const InputArgList &args, bool *enable,
+                                       uint32_t *threshold,
+                                       llvm::raw_ostream &errors) {
+    const Arg *arg =
+        args.getLastArg(OPT_fspv_constant_data, OPT_fspv_constant_data_EQ);
+    if (!arg)
+      return true;
+    if (!args.hasArg(OPT_spirv)) {
+      errors << "-fspv-constant-data requires -spirv\n";
+      return false;
+    }
+    bool extensionRequested = false;
+    for (const Arg *a : args.filtered(OPT_fspv_extension_EQ)) {
+      const llvm::StringRef value = a->getValue();
+      if (value == "SPV_KHR_constant_data" || value == "KHR")
+        extensionRequested = true;
+    }
+    if (!extensionRequested) {
+      errors << "-fspv-constant-data requires "
+                "-fspv-extension=SPV_KHR_constant_data\n";
+      return false;
+    }
+    *enable = true;
+    if (arg->getOption().getID() == OPT_fspv_constant_data)
+      return true;
+    const llvm::StringRef value = arg->getValue();
+    uint32_t number = 0;
+    if (value.getAsInteger(10, number)) {
+      errors << "invalid -fspv-constant-data argument: '" << value << "'\n";
+      return false;
+    }
+    if (number == 0) {
+      errors << "-fspv-constant-data requires a positive threshold; got "
+             << value << "\n";
+      return false;
+    }
+    *threshold = number;
+    return true;
+  }
+  // HLSL Change End - SPV_KHR_constant_data.
+
 // Check if any options that are unsupported with SPIR-V are used.
 static bool hasUnsupportedSpirvOption(const InputArgList &args,
                                       llvm::raw_ostream &errors) {
@@ -1302,6 +1351,12 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
   // HLSL Change End
   if (!strideOk)
     return 1;
+    // HLSL Change Begin - SPV_KHR_constant_data.
+    if (!handleConstantDataOption(Args, &opts.SpirvOptions.useConstantData,
+                                  &opts.SpirvOptions.constantDataThreshold,
+                                  errors))
+      return 1;
+    // HLSL Change End - SPV_KHR_constant_data.
 
   for (const Arg *A : Args.filtered(OPT_fspv_extension_EQ)) {
     opts.SpirvOptions.allowedExtensions.push_back(A->getValue());
@@ -1446,7 +1501,10 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
       !Args.getLastArgValue(OPT_fvk_bind_sampler_heap).empty() ||
       !Args.getLastArgValue(OPT_fvk_bind_counter_heap).empty() ||
       !Args.getLastArgValue(OPT_fvk_resource_heap_stride).empty() ||
-      !Args.getLastArgValue(OPT_fvk_sampler_heap_stride).empty()) {
+      !Args.getLastArgValue(OPT_fvk_sampler_heap_stride).empty() ||
+      // HLSL Change - SPV_KHR_constant_data.
+      Args.hasArg(OPT_fspv_constant_data) ||
+      Args.hasArg(OPT_fspv_constant_data_EQ)) {
     errors << "SPIR-V CodeGen not available. "
               "Please recompile with -DENABLE_SPIRV_CODEGEN=ON.";
     return 1;

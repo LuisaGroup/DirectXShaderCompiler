@@ -468,6 +468,12 @@ def fvk_sampler_heap_stride : Separate<["-"], "fvk-sampler-heap-stride">, MetaVa
 def fvk_opacity_micromap_spec_id : Joined<["-"], "fvk-opacity-micromap-spec-id=">, MetaVarName<"<id>">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"SpecId of the boolean specialization constant that the OpacityMicromapIdKHR execution mode uses as its operand. Requires -spirv and -fspv-extension=SPV_KHR_opacity_micromap. Default is 0.">;
 // HLSL Change End
+  // HLSL Change Begin - SPV_KHR_constant_data.
+  def fspv_constant_data : Flag<["-"], "fspv-constant-data">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
+    HelpText<"Encode integer array constants of at least 8 elements as OpConstantDataKHR (SPV_KHR_constant_data) instead of OpConstantComposite. Requires -spirv and -fspv-extension=SPV_KHR_constant_data.">;
+  def fspv_constant_data_EQ : Joined<["-"], "fspv-constant-data=">, MetaVarName<"<threshold>">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
+    HelpText<"Same as -fspv-constant-data, with an explicit minimum number of array elements: arrays with fewer elements keep the OpConstantComposite form.">;
+  // HLSL Change End
 // SPIRV Change Ends
 
 ////////////////////////////////////////////////////////////////////////////////
