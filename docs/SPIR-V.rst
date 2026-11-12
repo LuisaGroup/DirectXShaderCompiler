@@ -383,6 +383,81 @@ Limitations:
   from ``maxComputeSharedMemorySize`` when sizing groupshared arrays. The
   compiler cannot check either of these.
 
+Multiple wait queues
+~~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_QCOM_multiple_wait_queues`` extension lets a shader ask an
+implementation to keep several memory fills in flight for one loop instead of
+unrolling it. It is gated by the Vulkan ``VK_QCOM_shader_multiple_wait_queues``
+device extension, whose
+``VkPhysicalDeviceShaderMultipleWaitQueuesFeaturesQCOM`` structure carries the
+``shaderMultipleWaitQueues`` feature bit, and whose
+``VkPhysicalDeviceShaderMultipleWaitQueuesPropertiesQCOM`` structure reports the
+``maxShaderWaitQueues`` limit.
+
+In HLSL the hint is a loop annotation, available on ``for``, ``while`` and ``do``
+statements:
+
+.. code:: hlsl
+
+  [[vk::multiple_wait_queues]]
+  for (uint i = 0; i < count; ++i) {
+    acc += A[i] * B[i];          // OpLoopMerge ... MultipleWaitQueuesQCOM 0
+  }
+
+  [[vk::multiple_wait_queues(2)]]
+  while (remaining > 0) { ... }  // OpLoopMerge ... MultipleWaitQueuesQCOM 2
+
+The whole mechanism is one bit of the loop control of the annotated loop's
+``OpLoopMerge``, plus the extension's capability in the module header:
+
+.. code:: spirv
+
+  OpCapability MultipleWaitQueuesQCOM            ; 4539
+  OpExtension "SPV_QCOM_multiple_wait_queues"
+  OpLoopMerge %merge %continue MultipleWaitQueuesQCOM 2
+
+``MultipleWaitQueuesQCOM`` is loop control bit ``0x10000000``. It is not the
+whole encoding: the enumerant has one literal operand, so the instruction carries
+the maximum number of wait queues the compiler may use, and ``0`` means "all
+available". ``[[vk::multiple_wait_queues]]`` without an argument emits ``0``; the
+optional argument is that literal, so ``[[vk::multiple_wait_queues(2)]]`` emits
+``2``. A negative argument is rejected by a warning and encoded as ``0``.
+
+The bit is OR-ed with whatever loop control the loop already needs, so the
+annotation composes with the existing loop attributes:
+``[[vk::multiple_wait_queues]] [unroll]`` is encoded as
+``Unroll|MultipleWaitQueuesQCOM`` and ``[[vk::multiple_wait_queues]] [loop]`` as
+``DontUnroll|MultipleWaitQueuesQCOM``. The C++11 attribute list has to precede the
+HLSL one, because the HLSL parser reads ``[[...]]`` attributes before ``[...]``
+attributes; ``[unroll] [[vk::multiple_wait_queues]]`` is a parse error. The
+annotation is dropped together with the loop if post-processing unrolls it, so the
+bit is a property of the loop, not module-wide state.
+
+The annotation is only accepted with
+``-fspv-extension=SPV_QCOM_multiple_wait_queues``. A module using it declares the
+``MultipleWaitQueuesQCOM`` capability and the ``SPV_QCOM_multiple_wait_queues``
+extension, which a driver without ``VK_QCOM_shader_multiple_wait_queues`` rejects,
+so the extension is **not** enabled by default: without the flag every annotated
+loop is a compile error instead of a silently unannotated loop, and a module that
+does not use the annotation is unchanged. Misuse is diagnosed as an error as well:
+the attribute on anything that is not a ``for``/``while``/``do`` statement, and two
+copies of it on one statement.
+
+Limitations:
+
+* **It is a hint.** The module records what the shader asked for; whether more than
+  one wait queue is used, and whether that helps, is decided by the driver and by
+  the device. A shader must not depend on the hint for correctness, results are
+  identical either way, and no test can prove that a driver acts on it - DXC's
+  tests assert the encoding only.
+* **It implies no memory ordering.** Reads and writes that another invocation
+  publishes still need the appropriate barrier; the annotation does not synchronize
+  anything, and DXC does not insert a barrier around an annotated loop.
+* The host must enable the ``shaderMultipleWaitQueues`` feature and must not ask for
+  more queues than ``maxShaderWaitQueues`` reports. The compiler cannot check
+  either of these; an argument above the device limit is at best ignored.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -424,6 +499,7 @@ Supported extensions
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap
 * SPV_KHR_fma
+* SPV_QCOM_multiple_wait_queues
 
 Vulkan specific attributes
 --------------------------
@@ -499,6 +575,12 @@ The namespace ``vk`` will be used for all Vulkan attributes:
   ``SV_StencilRef`` will be less than or equal to the stencil reference value
   set by the API when the fragment is back facing. Sets the ``StencilRefLessBackAMD``
   execution mode in SPIR-V. Only valid on pixel shader entry points.
+- ``multiple_wait_queues[([N])]``: For marking a loop as a candidate for multiple
+  hardware wait queues. Sets the ``MultipleWaitQueuesQCOM`` loop control bit on the
+  annotated loop's ``OpLoopMerge``, with the optional ``N`` as the maximum number of
+  wait queues (``0``, the default, means all available). Only valid on ``for``,
+  ``while`` and ``do`` statements, at most once per statement. See
+  `Multiple wait queues`_ above.
 
 Only ``vk::`` attributes in the above list are supported. Other attributes will
 result in warnings and be ignored by the compiler. All C++11 attributes will

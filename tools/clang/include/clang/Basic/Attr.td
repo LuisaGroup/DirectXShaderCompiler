@@ -1709,6 +1709,19 @@ def VKStencilRefLessEqualBack : InheritableAttr {
   let LangOpts = [SPIRV];
   let Documentation = [Undocumented];
 }
+
+// HLSL Change - VK_QCOM_shader_multiple_wait_queues. A statement attribute on a
+// for/while/do loop; modeled on HLSLUnroll, which is also a loop-statement
+// attribute, rather than on the declaration attributes above. The optional
+// argument is the literal operand the MultipleWaitQueuesQCOM loop control
+// carries: "up to how many wait queues the compiler may use", 0 meaning all of
+// them.
+def VKMultipleWaitQueues : Attr {
+  let Spellings = [CXX11<"vk", "multiple_wait_queues">];
+  let LangOpts = [SPIRV];
+  let Args = [IntArgument<"MaxWaitQueues", 1>];
+  let Documentation = [Undocumented];
+}
 // SPIRV Change Ends
 
 def C11NoReturn : InheritableAttr {

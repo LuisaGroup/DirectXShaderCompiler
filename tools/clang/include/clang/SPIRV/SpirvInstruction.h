@@ -753,9 +753,16 @@ private:
 
 class SpirvLoopMerge : public SpirvMerge {
 public:
+  // HLSL Change - SPV_QCOM_multiple_wait_queues. Some loop control bits are
+  // followed by a literal operand; MultipleWaitQueuesQCOM carries the maximum
+  // number of wait queues the compiler may use (0 means "all available"), see
+  // VK_QCOM_shader_multiple_wait_queues. The operand is emitted after the mask
+  // word, in mask bit order; MultipleWaitQueuesQCOM (0x10000000) is the highest
+  // bit DXC can set that takes a literal, so it is always the last operand.
   SpirvLoopMerge(SourceLocation loc, SpirvBasicBlock *mergeBlock,
                  SpirvBasicBlock *contTarget, spv::LoopControlMask mask,
-                 SourceRange range = {});
+                 SourceRange range = {},
+                 uint32_t multipleWaitQueuesLimit = 0);
 
   DEFINE_RELEASE_MEMORY_FOR_CLASS(SpirvLoopMerge)
 
@@ -768,10 +775,16 @@ public:
 
   SpirvBasicBlock *getContinueTarget() const { return continueTarget; }
   spv::LoopControlMask getLoopControlMask() const { return loopControlMask; }
+  // HLSL Change - SPV_QCOM_multiple_wait_queues.
+  uint32_t getMultipleWaitQueuesLimit() const {
+    return multipleWaitQueuesLimit;
+  }
 
 private:
   SpirvBasicBlock *continueTarget;
   spv::LoopControlMask loopControlMask;
+  // HLSL Change - SPV_QCOM_multiple_wait_queues.
+  uint32_t multipleWaitQueuesLimit;
 };
 
 class SpirvSelectionMerge : public SpirvMerge {

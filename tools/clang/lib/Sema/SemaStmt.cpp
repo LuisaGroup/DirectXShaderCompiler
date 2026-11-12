@@ -489,10 +489,21 @@ StmtResult Sema::ActOnAttributedStmt(SourceLocation AttrLoc,
     bool loopFound = false;
     bool unrollFound = false;
     bool fastOptFound = false;
+    // HLSL Change - VK_QCOM_shader_multiple_wait_queues: the annotation sets
+    // one bit of the loop's OpLoopMerge control mask, so a second copy on the
+    // same statement would be merged away without effect. Diagnose it.
+    bool multipleWaitQueuesFound = false;
     for (const Attr* a : Attrs) {
       unrollFound = unrollFound || (a->getKind() == attr::HLSLUnroll);
       fastOptFound = fastOptFound || (a->getKind() == attr::HLSLFastOpt);
       loopFound = loopFound || (a->getKind() == attr::HLSLLoop);
+      if (a->getKind() == attr::VKMultipleWaitQueues) {
+        if (multipleWaitQueuesFound) {
+          Diag(a->getLocation(),
+               diag::err_hlsl_vk_multiple_wait_queues_duplicate);
+        }
+        multipleWaitQueuesFound = true;
+      }
     }
     if (loopFound && unrollFound) {
       Diag(AttrLoc, diag::err_attributes_are_not_compatible) << "loop" << "unroll";

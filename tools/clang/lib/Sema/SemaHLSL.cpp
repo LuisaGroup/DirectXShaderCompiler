@@ -14457,6 +14457,19 @@ static void ValidateAttributeOnLoop(Sema &S, Stmt *St,
   }
 }
 
+// HLSL Change Begin - VK_QCOM_shader_multiple_wait_queues. Same check as
+// ValidateAttributeOnLoop, but an error: a loop hint that never reaches an
+// OpLoopMerge is silently lost, so the misuse is reported instead.
+static void ValidateMultipleWaitQueuesOnLoop(Sema &S, Stmt *St,
+                                             const AttributeList &Attr) {
+  Stmt::StmtClass stClass = St->getStmtClass();
+  if (stClass != Stmt::ForStmtClass && stClass != Stmt::WhileStmtClass &&
+      stClass != Stmt::DoStmtClass) {
+    S.Diag(Attr.getLoc(), diag::err_hlsl_vk_multiple_wait_queues_not_loop);
+  }
+}
+// HLSL Change End - VK_QCOM_shader_multiple_wait_queues.
+
 static void ValidateAttributeOnSwitch(Sema &S, Stmt *St,
                                       const AttributeList &Attr) {
   Stmt::StmtClass stClass = St->getStmtClass();
@@ -15525,6 +15538,25 @@ Attr *hlsl::ProcessStmtAttributeForHLSL(Sema &S, Stmt *St,
       return ::new (S.Context) VKExtensionExtAttr(
           A.getRange(), S.Context, ValidateAttributeStringArg(S, A, nullptr),
           A.getAttributeSpellingListIndex());
+    // HLSL Change - VK_QCOM_shader_multiple_wait_queues. The attribute only has
+    // an effect on a loop (it sets a bit in that loop's OpLoopMerge control
+    // mask), so it is validated like the HLSL loop attributes. The optional
+    // argument is the loop control's literal operand: "up to how many wait
+    // queues the compiler may use", 0 meaning all of them.
+    case AttributeList::AT_VKMultipleWaitQueues: {
+      ValidateMultipleWaitQueuesOnLoop(S, St, A);
+      int maxWaitQueues = ValidateAttributeIntArg(S, A);
+      if (A.getNumArgs() == 0)
+        maxWaitQueues = 0;
+      // A negative count is a meaningless hint; ValidateAttributeIntArg has
+      // already warned about it. Encode "all available wait queues" instead of
+      // a huge unsigned value.
+      if (maxWaitQueues < 0)
+        maxWaitQueues = 0;
+      return ::new (S.Context) VKMultipleWaitQueuesAttr(
+          A.getRange(), S.Context, maxWaitQueues,
+          A.getAttributeSpellingListIndex());
+    }
     default:
       Handled = false;
       return nullptr;

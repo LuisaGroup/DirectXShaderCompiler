@@ -1025,6 +1025,18 @@ private:
   /// Emits an error if the given attribute is not a loop attribute.
   spv::LoopControlMask translateLoopAttribute(const Stmt *, const Attr &);
 
+    /// HLSL Change - VK_QCOM_shader_multiple_wait_queues. Translates every
+    /// attribute attached to a loop statement into one SPIR-V loop control
+    /// mask, or-ing the MultipleWaitQueuesQCOM bit in for
+    /// [[vk::multiple_wait_queues]]. \p multipleWaitQueuesLimit receives the
+    /// literal operand that bit carries ("up to how many wait queues the
+    /// compiler may use", 0 = all available); it is 0 when the mask has no
+    /// such bit.
+    spv::LoopControlMask
+    translateLoopAttributes(const Stmt *, llvm::ArrayRef<const Attr *> attrs,
+                            uint32_t &multipleWaitQueuesLimit);
+
+
   static hlsl::ShaderModel::Kind getShaderModelKind(StringRef stageName);
   static spv::ExecutionModel getSpirvShaderStage(hlsl::ShaderModel::Kind smk,
                                                  bool);

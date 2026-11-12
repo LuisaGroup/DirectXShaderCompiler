@@ -392,9 +392,11 @@ SpirvMerge::SpirvMerge(Kind kind, spv::Op op, SourceLocation loc,
 
 SpirvLoopMerge::SpirvLoopMerge(SourceLocation loc, SpirvBasicBlock *mergeBlock,
                                SpirvBasicBlock *contTarget,
-                               spv::LoopControlMask mask, SourceRange range)
+                               spv::LoopControlMask mask, SourceRange range,
+                               uint32_t multipleWaitQueuesLimit)
     : SpirvMerge(IK_LoopMerge, spv::Op::OpLoopMerge, loc, mergeBlock, range),
-      continueTarget(contTarget), loopControlMask(mask) {}
+      continueTarget(contTarget), loopControlMask(mask),
+      multipleWaitQueuesLimit(multipleWaitQueuesLimit) {}
 
 SpirvSelectionMerge::SpirvSelectionMerge(SourceLocation loc,
                                          SpirvBasicBlock *mergeBlock,

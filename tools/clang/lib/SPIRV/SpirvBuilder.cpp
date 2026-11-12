@@ -854,12 +854,15 @@ void SpirvBuilder::createBranch(SpirvBasicBlock *targetLabel,
                                 SourceLocation loc, SpirvBasicBlock *mergeBB,
                                 SpirvBasicBlock *continueBB,
                                 spv::LoopControlMask loopControl,
-                                SourceRange range) {
+                                SourceRange range,
+                                uint32_t multipleWaitQueuesLimit) {
   assert(insertPoint && "null insert point");
 
   if (mergeBB && continueBB) {
-    auto *loopMerge = new (context)
-        SpirvLoopMerge(loc, mergeBB, continueBB, loopControl, range);
+    // HLSL Change - SPV_QCOM_multiple_wait_queues (multipleWaitQueuesLimit).
+    auto *loopMerge =
+        new (context) SpirvLoopMerge(loc, mergeBB, continueBB, loopControl,
+                                     range, multipleWaitQueuesLimit);
     insertPoint->addInstruction(loopMerge);
   }
 
@@ -872,13 +875,16 @@ void SpirvBuilder::createConditionalBranch(
     SpirvBasicBlock *falseLabel, SourceLocation loc,
     SpirvBasicBlock *mergeLabel, SpirvBasicBlock *continueLabel,
     spv::SelectionControlMask selectionControl,
-    spv::LoopControlMask loopControl, SourceRange range) {
+    spv::LoopControlMask loopControl, SourceRange range,
+    uint32_t multipleWaitQueuesLimit) {
   assert(insertPoint && "null insert point");
 
   if (mergeLabel) {
     if (continueLabel) {
+      // HLSL Change - SPV_QCOM_multiple_wait_queues (multipleWaitQueuesLimit).
       auto *loopMerge = new (context)
-          SpirvLoopMerge(loc, mergeLabel, continueLabel, loopControl, range);
+          SpirvLoopMerge(loc, mergeLabel, continueLabel, loopControl, range,
+                         multipleWaitQueuesLimit);
       insertPoint->addInstruction(loopMerge);
     } else {
       auto *selectionMerge = new (context)

@@ -52,6 +52,23 @@ The included licenses apply to the following files:
   flag is unchanged; `-fspv-extension=SPV_NV_shader_subgroup_partitioned` keeps
   it available. Naming neither spelling in an explicit `-fspv-extension` list
   is now a compile error instead of an invalid module.
+  - Added support for `SPV_QCOM_multiple_wait_queues`:
+    `[[vk::multiple_wait_queues]]` (or `[[vk::multiple_wait_queues(N)]]`) on a
+    `for`, `while` or `do` statement sets the `MultipleWaitQueuesQCOM` loop
+    control bit (`0x10000000`) on that loop's `OpLoopMerge`, together with the
+    literal operand the enumerant carries - the maximum number of wait queues,
+    `0` meaning all available - and the module declares
+    `OpCapability MultipleWaitQueuesQCOM` (4539) and
+    `OpExtension "SPV_QCOM_multiple_wait_queues"`. The bit is OR-ed with the
+    loop control the loop already needs, so
+    `[[vk::multiple_wait_queues]] [unroll]` encodes
+    `Unroll|MultipleWaitQueuesQCOM`. The extension is opt-in
+    (`-fspv-extension=SPV_QCOM_multiple_wait_queues`): without the flag an
+    annotated loop is a compile error, and code generation without the
+    attribute is unchanged. The annotation on a statement that is not a loop,
+    and two copies of it on one statement, are compile errors. This is an
+    encoding-level performance hint only - a driver may ignore it, it implies
+    no memory ordering, and results are identical either way.
 - Added `-fvk-resource-heap-stride` and `-fvk-sampler-heap-stride`, which
   override the computed `ArrayStrideIdEXT` of the resource and sampler
   descriptor heaps with a literal `ArrayStride`. The value must be a power of

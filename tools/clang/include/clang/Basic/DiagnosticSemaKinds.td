@@ -8548,4 +8548,23 @@ def warn_objc_redundant_qualified_class_type : Warning<
   "parameterized class %0 already conforms to the protocols listed; did you "
   "forget a '*'?">, InGroup<ObjCProtocolQualifiers>;
 
+// HLSL Change Begin - VK_QCOM_shader_multiple_wait_queues.
+// Deliberately appended at the end of the file: the identifiers in
+// DiagnosticSemaKinds.inc are handed out in definition order, so inserting a
+// diagnostic in the middle renumbers every later one. Builds in this tree do
+// not track the generated .inc as a dependency of every translation unit that
+// includes clang/Sema/SemaDiagnostic.h, so an insert produces stale objects
+// that print the wrong message for an already-numbered diagnostic.
+// A misplaced [[vk::multiple_wait_queues]] is an error (unlike the HLSL loop
+// attributes above, which only warn): the annotation has no meaning unless it
+// reaches an OpLoopMerge, and silently dropping it would hide that the driver
+// was never told about the hint.
+def err_hlsl_vk_multiple_wait_queues_not_loop : Error<
+  "'[[vk::multiple_wait_queues]]' can only be applied to 'for', 'while' and "
+  "'do' loop statements">;
+def err_hlsl_vk_multiple_wait_queues_duplicate : Error<
+  "'[[vk::multiple_wait_queues]]' cannot be applied more than once to the same "
+  "statement">;
+// HLSL Change End - VK_QCOM_shader_multiple_wait_queues.
+
 } // end of sema component.

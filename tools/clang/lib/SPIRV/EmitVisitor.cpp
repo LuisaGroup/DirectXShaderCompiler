@@ -855,6 +855,16 @@ bool EmitVisitor::visit(SpirvLoopMerge *inst) {
   curInst.push_back(
       getOrAssignResultId<SpirvBasicBlock>(inst->getContinueTarget()));
   curInst.push_back(static_cast<uint32_t>(inst->getLoopControlMask()));
+  // HLSL Change Begin - SPV_QCOM_multiple_wait_queues.
+  // MultipleWaitQueuesQCOM is the only loop control bit DXC sets that has an
+  // associated literal operand ("up to how many wait queues the compiler may
+  // use"), and it is the highest such bit in mask order, so its operand is
+  // appended right after the mask word.
+  if (static_cast<uint32_t>(inst->getLoopControlMask()) &
+      static_cast<uint32_t>(
+          spv::LoopControlMask::MultipleWaitQueuesQCOM))
+    curInst.push_back(inst->getMultipleWaitQueuesLimit());
+  // HLSL Change End - SPV_QCOM_multiple_wait_queues.
   finalizeInstruction(&mainBinary);
   return true;
 }

@@ -2443,6 +2443,80 @@ spv::LoopControlMask SpirvEmitter::translateLoopAttribute(const Stmt *stmt,
   return spv::LoopControlMask::MaskNone;
 }
 
+// HLSL Change Begin - VK_QCOM_shader_multiple_wait_queues.
+// translateLoopAttribute() translates exactly one loop attribute. A loop
+// statement may carry several attributes at once, e.g.
+// [[vk::multiple_wait_queues]] [unroll], and each of them contributes its own
+// bit to the OpLoopMerge control mask, so every attribute is visited here
+// instead of only the first one.
+spv::LoopControlMask
+SpirvEmitter::translateLoopAttributes(const Stmt *stmt,
+                                      llvm::ArrayRef<const Attr *> attrs,
+                                      uint32_t &multipleWaitQueuesLimit) {
+  spv::LoopControlMask mask = spv::LoopControlMask::MaskNone;
+  bool hasLoopControlAttr = false;
+  const Attr *multipleWaitQueues = nullptr;
+  multipleWaitQueuesLimit = 0;
+  for (const Attr *attr : attrs) {
+    switch (attr->getKind()) {
+    case attr::VKMultipleWaitQueues:
+      multipleWaitQueues = attr;
+      continue;
+    case attr::HLSLLoop:
+    case attr::HLSLFastOpt:
+    case attr::HLSLUnroll:
+    case attr::HLSLAllowUAVCondition:
+      break;
+    default:
+      // Any other attribute on the statement (declaration attributes that HLSL
+      // allows on statements, [[vk::ext_*]] and so on) says nothing about loop
+      // control.
+      continue;
+    }
+    // The loop control attributes are mutually exclusive - Sema rejects
+    // [loop]/[unroll] and [fastopt]/[unroll] - so at most one of them reaches
+    // here. Should more than one be attached anyway, the first one wins, which
+    // is what this code did when it only looked at attrs.front().
+    if (!hasLoopControlAttr) {
+      mask = translateLoopAttribute(stmt, *attr);
+      hasLoopControlAttr = true;
+    }
+  }
+
+  if (!multipleWaitQueues)
+    return mask;
+
+  // VK_QCOM_shader_multiple_wait_queues. The annotation becomes the
+  // MultipleWaitQueuesQCOM bit of this loop's OpLoopMerge control mask, or-ed
+  // with the control the loop already needs: [[vk::multiple_wait_queues]]
+  // [unroll] is encoded as Unroll|MultipleWaitQueuesQCOM. The SPIR-V backend
+  // never removes a loop body itself (loop control is a hint that spirv-opt or
+  // the driver acts on), so the annotation is never silently lost here; if the
+  // post-processing optimizer unrolls the loop, the mask disappears with the
+  // OpLoopMerge it belongs to.
+  //
+  // The extension is opt-in, so without -fspv-extension the annotation cannot
+  // be honoured. Dropping it silently would tell the driver nothing while the
+  // shader claims to hint at multiple wait queues, hence the error.
+  if (!featureManager.isExtensionEnabled(
+          Extension::QCOM_multiple_wait_queues)) {
+    emitError("'[[vk::multiple_wait_queues]]' requires the "
+              "SPV_QCOM_multiple_wait_queues extension; pass "
+              "-fspv-extension=SPV_QCOM_multiple_wait_queues to enable it",
+              multipleWaitQueues->getLocation());
+    return mask;
+  }
+  // The loop control carries one literal operand: "up to how many wait queues
+  // the compiler may use", 0 meaning all of them. It is emitted right after the
+  // mask word (see EmitVisitor::visit(SpirvLoopMerge *)).
+  multipleWaitQueuesLimit = static_cast<uint32_t>(
+      cast<VKMultipleWaitQueuesAttr>(multipleWaitQueues)->getMaxWaitQueues());
+  return static_cast<spv::LoopControlMask>(
+      static_cast<uint32_t>(mask) |
+      static_cast<uint32_t>(spv::LoopControlMask::MultipleWaitQueuesQCOM));
+}
+// HLSL Change End - VK_QCOM_shader_multiple_wait_queues.
+
 void SpirvEmitter::doDiscardStmt(const DiscardStmt *discardStmt) {
   assert(!spvBuilder.isCurrentBasicBlockTerminated());
 
@@ -2512,9 +2586,11 @@ void SpirvEmitter::doDoStmt(const DoStmt *theDoStmt,
   //
   // For more details, see "2.11. Structured Control Flow" in the SPIR-V spec.
 
-  const spv::LoopControlMask loopControl =
-      attrs.empty() ? spv::LoopControlMask::MaskNone
-                    : translateLoopAttribute(theDoStmt, *attrs.front());
+  // HLSL Change - VK_QCOM_shader_multiple_wait_queues: collect every loop
+  // attribute, not only the first one, plus the loop control's literal operand.
+  uint32_t multipleWaitQueuesLimit = 0;
+  const spv::LoopControlMask loopControl = translateLoopAttributes(
+      theDoStmt, attrs, multipleWaitQueuesLimit);
 
   // Create basic blocks
   auto *headerBB = spvBuilder.createBasicBlock("do_while.header");
@@ -2537,7 +2613,8 @@ void SpirvEmitter::doDoStmt(const DoStmt *theDoStmt,
   const Stmt *body = theDoStmt->getBody();
   spvBuilder.createBranch(bodyBB,
                           body ? body->getLocStart() : theDoStmt->getLocStart(),
-                          mergeBB, continueBB, loopControl);
+                          mergeBB, continueBB, loopControl, SourceRange(),
+                          multipleWaitQueuesLimit);
   spvBuilder.addSuccessor(bodyBB);
   // The current basic block has OpLoopMerge instruction. We need to set its
   // continue and merge target.
@@ -2667,9 +2744,11 @@ void SpirvEmitter::doWhileStmt(const WhileStmt *whileStmt,
   // Tools, which does not support unrolling loops with early breaks.
   // For more details, see "2.11. Structured Control Flow" in the SPIR-V spec.
 
+  // HLSL Change - VK_QCOM_shader_multiple_wait_queues: collect every loop
+  // attribute, not only the first one, plus the loop control's literal operand.
+  uint32_t multipleWaitQueuesLimit = 0;
   const spv::LoopControlMask loopControl =
-      attrs.empty() ? spv::LoopControlMask::MaskNone
-                    : translateLoopAttribute(whileStmt, *attrs.front());
+      translateLoopAttributes(whileStmt, attrs, multipleWaitQueuesLimit);
 
   const Expr *check = whileStmt->getCond();
   const Stmt *body = whileStmt->getBody();
@@ -2702,7 +2781,8 @@ void SpirvEmitter::doWhileStmt(const WhileStmt *whileStmt,
         mergeBB, continueBB, loopControl,
         check
             ? check->getSourceRange()
-            : SourceRange(whileStmt->getLocStart(), whileStmt->getLocStart()));
+            : SourceRange(whileStmt->getLocStart(), whileStmt->getLocStart()),
+        multipleWaitQueuesLimit);
     spvBuilder.addSuccessor(checkBB);
     // The current basic block has a OpLoopMerge instruction. We need to set
     // its continue and merge target.
@@ -2752,7 +2832,8 @@ void SpirvEmitter::doWhileStmt(const WhileStmt *whileStmt,
         condition, bodyBB, mergeBB, whileStmt->getLocStart(), mergeBB,
         continueBB, spv::SelectionControlMask::MaskNone, loopControl,
         check ? check->getSourceRange()
-              : SourceRange(whileStmt->getWhileLoc(), whileStmt->getLocEnd()));
+              : SourceRange(whileStmt->getWhileLoc(), whileStmt->getLocEnd()),
+        multipleWaitQueuesLimit);
     spvBuilder.addSuccessor(bodyBB);
     spvBuilder.addSuccessor(mergeBB);
     // The current basic block has OpLoopMerge instruction. We need to set its
@@ -2853,9 +2934,11 @@ void SpirvEmitter::doForStmt(const ForStmt *forStmt,
   // technically always legal, is because it prevents loop unrolling in SPIR-V
   // Tools, which does not support unrolling loops with early breaks.
   // For more details, see "2.11. Structured Control Flow" in the SPIR-V spec.
+  // HLSL Change - VK_QCOM_shader_multiple_wait_queues: collect every loop
+  // attribute, not only the first one, plus the loop control's literal operand.
+  uint32_t multipleWaitQueuesLimit = 0;
   const spv::LoopControlMask loopControl =
-      attrs.empty() ? spv::LoopControlMask::MaskNone
-                    : translateLoopAttribute(forStmt, *attrs.front());
+      translateLoopAttributes(forStmt, attrs, multipleWaitQueuesLimit);
 
   const Stmt *initStmt = forStmt->getInit();
   const Stmt *body = forStmt->getBody();
@@ -2899,7 +2982,8 @@ void SpirvEmitter::doForStmt(const ForStmt *forStmt,
         check ? check->getSourceRange()
               : (initStmt ? initStmt->getSourceRange()
                           : SourceRange(forStmt->getLocStart(),
-                                        forStmt->getLocStart())));
+                                        forStmt->getLocStart())),
+        multipleWaitQueuesLimit);
     spvBuilder.addSuccessor(checkBB);
     // The current basic block has a OpLoopMerge instruction. We need to set
     // its continue and merge target.
@@ -2939,7 +3023,8 @@ void SpirvEmitter::doForStmt(const ForStmt *forStmt,
         check ? check->getSourceRange()
               : (initStmt ? initStmt->getSourceRange()
                           : SourceRange(forStmt->getLocStart(),
-                                        forStmt->getLocStart())));
+                                        forStmt->getLocStart())),
+        multipleWaitQueuesLimit);
     spvBuilder.addSuccessor(bodyBB);
     spvBuilder.addSuccessor(mergeBB);
     // The current basic block has a OpLoopMerge instruction. We need to set

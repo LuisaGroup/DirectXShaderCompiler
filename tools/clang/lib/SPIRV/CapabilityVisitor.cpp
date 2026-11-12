@@ -732,7 +732,29 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
   case spv::Op::OpControlBarrierWaitEXT:
     addExtensionAndCapabilitiesIfEnabled(Extension::EXT_split_barrier,
                                          {spv::Capability::SplitBarrierEXT});
+    // HLSL Change End - SPV_EXT_split_barrier.
+
+    // HLSL Change Begin - SPV_QCOM_multiple_wait_queues. The whole mechanism of
+    // VK_QCOM_shader_multiple_wait_queues is one bit in the OpLoopMerge control
+    // mask, so the capability is only observable by looking at the mask of an
+    // otherwise ordinary OpLoopMerge. Routing it through
+    // addExtensionAndCapabilitiesIfEnabled keeps the capability tied to
+    // -fspv-extension=SPV_QCOM_multiple_wait_queues (the emitter rejects the
+    // annotation when the extension is not enabled, see
+    // SpirvEmitter::translateLoopAttributes).
+    case spv::Op::OpLoopMerge: {
+      const auto *loopMerge = dyn_cast<SpirvLoopMerge>(instr);
+      if (loopMerge &&
+          (static_cast<uint32_t>(loopMerge->getLoopControlMask()) &
+           static_cast<uint32_t>(
+               spv::LoopControlMask::MultipleWaitQueuesQCOM))) {
+        addExtensionAndCapabilitiesIfEnabled(
+            Extension::QCOM_multiple_wait_queues,
+            {spv::Capability::MultipleWaitQueuesQCOM});
+      }
     break;
+    }
+    // HLSL Change End - SPV_QCOM_multiple_wait_queues.
   // HLSL Change End - SPV_EXT_split_barrier.
 
   default:

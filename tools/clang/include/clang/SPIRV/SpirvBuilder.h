@@ -405,11 +405,13 @@ public:
   /// \brief Creates an unconditional branch to the given target label.
   /// If mergeBB and continueBB are non-null, it creates an OpLoopMerge
   /// instruction followed by an unconditional branch to the given target label.
+  /// HLSL Change - SPV_QCOM_multiple_wait_queues: multipleWaitQueuesLimit is
+  /// the literal operand MultipleWaitQueuesQCOM carries.
   void createBranch(
       SpirvBasicBlock *targetLabel, SourceLocation loc,
       SpirvBasicBlock *mergeBB = nullptr, SpirvBasicBlock *continueBB = nullptr,
       spv::LoopControlMask loopControl = spv::LoopControlMask::MaskNone,
-      SourceRange range = {});
+      SourceRange range = {}, uint32_t multipleWaitQueuesLimit = 0);
 
   /// \brief Creates a conditional branch. An OpSelectionMerge instruction
   /// will be created if mergeLabel is not null and continueLabel is null.
@@ -426,7 +428,7 @@ public:
       spv::SelectionControlMask selectionControl =
           spv::SelectionControlMask::MaskNone,
       spv::LoopControlMask loopControl = spv::LoopControlMask::MaskNone,
-      SourceRange range = {});
+      SourceRange range = {}, uint32_t multipleWaitQueuesLimit = 0);
 
   /// \brief Creates a return instruction.
   void createReturn(SourceLocation, SourceRange range = {});

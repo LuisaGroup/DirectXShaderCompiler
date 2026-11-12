@@ -84,6 +84,9 @@ enum class Extension {
     // GroupNonUniformPartitionedNV == 5297), so only one of the two may be
     // emitted for a module; see getShaderSubgroupPartitionedProvider().
     EXT_shader_subgroup_partitioned,
+      // HLSL Change - SPV_QCOM_multiple_wait_queues
+      // ([[vk::multiple_wait_queues]] on a loop).
+      QCOM_multiple_wait_queues,
     Unknown,
 };
 

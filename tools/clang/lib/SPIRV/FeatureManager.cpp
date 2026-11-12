@@ -245,6 +245,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
         .Case("SPV_EXT_shader_subgroup_partitioned",
               Extension::EXT_shader_subgroup_partitioned)
+          // HLSL Change - SPV_QCOM_multiple_wait_queues.
+          .Case("SPV_QCOM_multiple_wait_queues",
+                Extension::QCOM_multiple_wait_queues)
         .Default(Extension::Unknown);
 }
 
@@ -344,6 +347,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
     case Extension::EXT_shader_subgroup_partitioned:
       return "SPV_EXT_shader_subgroup_partitioned";
+      // HLSL Change - SPV_QCOM_multiple_wait_queues.
+      case Extension::QCOM_multiple_wait_queues:
+        return "SPV_QCOM_multiple_wait_queues";
     default:
     break;
   }
@@ -488,6 +494,17 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // This keeps the default output of every existing shader unchanged
     // (docs/SPIR-V.rst, "Shader Model 6.0+ Wave Intrinsics").
     case Extension::EXT_shader_subgroup_partitioned:
+        return false;
+      // HLSL Change - SPV_QCOM_multiple_wait_queues. The annotation
+      // ([[vk::multiple_wait_queues]]) is new syntax, so no existing shader can
+      // start using it by accident, but a module that carries the
+      // MultipleWaitQueuesQCOM capability and the
+      // SPV_QCOM_multiple_wait_queues extension is rejected by a driver without
+      // VK_QCOM_shader_multiple_wait_queues. Registration is therefore opt-in:
+      // without -fspv-extension=SPV_QCOM_multiple_wait_queues the annotation is
+      // rejected with a diagnostic rather than silently dropped, and the
+      // capability is only ever emitted together with the extension.
+      case Extension::QCOM_multiple_wait_queues:
       return false;
     default:
     return true;
