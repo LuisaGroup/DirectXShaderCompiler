@@ -20,6 +20,35 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+- Added support for `SPV_NV_cooperative_matrix_decode_vector`
+  (`VK_NV_cooperative_matrix_decode_vector`): the extension adds the
+  `DecodeVectorFunc` bit (`0x0004`) to the `TensorAddressingOperands`
+  operand of `OpCooperativeMatrixLoadTensorNV` (5367), so a cooperative
+  matrix block load can name a function that decodes a vector of
+  block-adjacent elements per call instead of the single element
+  `DecodeFunc` decodes. The new `<vk/nv/cooperative_matrix_decode_vector.h>`
+  header provides `vk::nv::TensorLayout<dim, clampMode>`
+  (`OpTypeTensorLayoutNV`, 5370), `vk::nv::CreateTensorLayout`
+  (`OpCreateTensorLayoutNV`, 5372) and the block load itself,
+  `vk::nv::__builtin_spv_CooperativeMatrixLoadTensorNV<vectorLength>`.
+  SPIR-V has no operand form that names an HLSL function, so CodeGen
+  synthesizes the `DecodeFunc`/`DecodeVectorFunc` pair with the signature
+  SPIRV-Tools requires - the matrix component type (or a 2/4/8-component
+  vector of it), a `PhysicalStorageBuffer` pointer, and two arrays of 32-bit
+  integers as long as the tensor rank - and passes their ids; only the
+  encoding is defined, because the synthesized bodies return `OpUndef`. A
+  module declares `CooperativeMatrixDecodeVectorNV` (5447) together with its
+  prerequisite `CooperativeMatrixBlockLoadsNV` (5434) and the two tensor
+  addressing capabilities, and its memory model becomes `OpMemoryModel
+  PhysicalStorageBuffer64 Vulkan`, so the target environment is `vulkan1.3`,
+  as for every cooperative matrix feature. The decode-vector extension is
+  opt-in (`-fspv-extension=SPV_NV_cooperative_matrix_decode_vector`), while
+  `SPV_NV_cooperative_matrix2` and `SPV_NV_tensor_addressing` are now
+  registered allow-list entries too; a wrong decode-vector length, a pointer
+  operand that is not an array, a tensor rank outside 1..5, an invalid clamp
+  mode and a `bfloat16_t` component are diagnostics rather than invalid
+  SPIR-V. See `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/nv-cooperative-matrix-decode-vector.hlsl`.
 - Added support for `SPV_NV_cooperative_vector` (`VK_NV_cooperative_vector`): the
   new `<vk/nv/cooperative_vector.h>` header provides
   `vk::nv::CooperativeVector<T, N>` - an opaque SPIR-V vector whose length and

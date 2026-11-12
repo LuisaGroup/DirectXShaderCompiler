@@ -134,6 +134,28 @@ enum class Extension {
     // the entry points in <vk/nv/cooperative_vector.h>). Opt-in; see
     // enabledByDefault() in FeatureManager.cpp.
     NV_cooperative_vector,
+      // HLSL Change - SPV_NV_tensor_addressing (OpTypeTensorLayoutNV /
+      // OpTypeTensorViewNV and OpCapability TensorAddressingNV, the tensor
+      // layout that OpCooperativeMatrixLoadTensorNV reads through). It is the
+      // base the other two entries below build on, so it is enabled by default;
+      // see enabledByDefault() in FeatureManager.cpp.
+      NV_tensor_addressing,
+      // HLSL Change - SPV_NV_cooperative_matrix2's tensor half
+      // (OpCooperativeMatrixLoadTensorNV / OpCooperativeMatrixStoreTensorNV and
+      // OpCapability CooperativeMatrixTensorAddressingNV /
+      // CooperativeMatrixBlockLoadsNV). Enabled by default. The already landed
+      // SPV_NV_cooperative_matrix2 reduce / per-element operations do not route
+      // their OpExtension through this entry (they pass the string straight to
+      // SpirvBuilder::createSpirvIntrInstExt, see
+      // SpirvEmitter::processCooperativeMatrixReduce), so registering it does not
+      // change their code generation.
+      NV_cooperative_matrix2,
+      // HLSL Change - SPV_NV_cooperative_matrix_decode_vector (the
+      // TensorAddressingOperands DecodeVectorFunc bit of
+      // OpCooperativeMatrixLoadTensorNV, the entry point in
+      // <vk/nv/cooperative_matrix_decode_vector.h>). Opt-in; see
+      // enabledByDefault() in FeatureManager.cpp.
+      NV_cooperative_matrix_decode_vector,
     Unknown,
 };
 

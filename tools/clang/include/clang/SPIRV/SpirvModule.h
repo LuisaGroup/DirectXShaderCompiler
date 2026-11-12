@@ -120,6 +120,14 @@ public:
   // Requires setMemoryModel() to be called first to set the base memory model.
   // Returns true if addressing model was changed.
   bool promoteAddressingModel(spv::AddressingModel addrModel);
+  // HLSL Change - SPV_NV_cooperative_matrix_decode_vector. Replaces the memory
+  // model of the module, keeping the addressing model. Requires
+  // setMemoryModel() to have been called first. Returns true if the memory model
+  // was changed.
+  bool promoteMemoryModel(spv::MemoryModel memModel);
+  // HLSL Change - SPV_NV_cooperative_matrix_decode_vector. Returns the
+  // addressing model of the module (Logical before setMemoryModel()).
+  spv::AddressingModel getAddressingModel() const;
 
   // Add an entry point to the module.
   void addEntryPoint(SpirvEntryPoint *);

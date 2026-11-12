@@ -55,6 +55,7 @@ if (ENABLE_SPIRV_CODEGEN)
  vk/khr/cooperative_matrix.h
  vk/khr/cooperative_matrix.impl
  vk/nv/cluster_as.h
+   vk/nv/cooperative_matrix_decode_vector.h
  vk/nv/cooperative_vector.h
  vk/nv/linear_swept_spheres.h
  vk/opcode_selector.h

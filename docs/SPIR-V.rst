@@ -746,6 +746,157 @@ matrix-vector example and ``tools/clang/test/CodeGenSPIRV/nv.cooperative-vector*
 for the tests that pin the capability per family, the six instruction encodings, the
 optimizer-survival path and the diagnostics.
 
+NV cooperative matrix decode vector
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_NV_cooperative_matrix_decode_vector`` extension adds one bit and one
+operand to the tensor memory access of ``SPV_NV_cooperative_matrix2``. That
+extension lets a cooperative matrix be loaded from, and stored to, *tensor* memory
+through ``OpCooperativeMatrixLoadTensorNV`` (5367) and
+``OpCooperativeMatrixStoreTensorNV`` (5368), whose last operand is a
+``TensorAddressingOperands`` bit mask followed by one operand per set bit. The
+mask has three bits:
+
+.. code:: spirv
+
+  TensorAddressingOperands = None | TensorView | DecodeFunc | DecodeVectorFunc
+                             (0)    (0x0001)     (0x0002)     (0x0004)
+
+``DecodeFunc`` names a function that decodes one element of the block per call;
+``DecodeVectorFunc``, the new bit, names a function that decodes a *vector* of
+block-adjacent elements per call, so one callback invocation fills several matrix
+elements at once. The extension is gated by the Vulkan
+``VK_NV_cooperative_matrix_decode_vector`` device extension.
+
+.. code:: spirv
+
+  OpCapability TensorAddressingNV                ; 5439, SPV_NV_tensor_addressing
+  OpCapability CooperativeMatrixTensorAddressingNV ; 5433, SPV_NV_cooperative_matrix2
+  OpCapability CooperativeMatrixBlockLoadsNV     ; 5434
+  OpCapability CooperativeMatrixDecodeVectorNV   ; 5447, needs 5434
+  OpExtension "SPV_NV_tensor_addressing"
+  OpExtension "SPV_NV_cooperative_matrix2"
+  OpExtension "SPV_NV_cooperative_matrix_decode_vector"
+
+  %layout = OpTypeTensorLayoutNV %uint_2 %uint_2    ; rank 2, clamp to edge
+  %tl     = OpCreateTensorLayoutNV %layout
+  %m      = OpCooperativeMatrixLoadTensorNV %mat %data %object %tl None
+            DecodeFunc|DecodeVectorFunc %decode_scalar %decode_vector
+
+The dependency chain is the part a module can get wrong without noticing: 5447
+requires ``CooperativeMatrixBlockLoadsNV`` (5434) as well as the two tensor
+addressing capabilities, and ``DecodeVectorFunc`` requires ``DecodeFunc`` to be
+present as well ("DecodeVectorFunc requires DecodeFunc to also be specified"), so
+a valid module always names *two* functions and four capabilities.
+
+The HLSL surface is in ``<vk/nv/cooperative_matrix_decode_vector.h>``:
+
+.. code:: hlsl
+
+  #include <vk/nv/cooperative_matrix_decode_vector.h>
+
+  using Mat = vk::khr::CooperativeMatrixA<float, vk::ScopeWorkgroup, 16, 16>;
+  using Layout = vk::nv::TensorLayout<2, vk::nv::TensorClampModeClampToEdge>;
+  groupshared float g_tensor[256];
+  groupshared float g_matrix[256];
+
+  Layout layout = vk::nv::CreateTensorLayout<2, vk::nv::TensorClampModeClampToEdge>();
+  Mat source;
+  Mat m = vk::nv::__builtin_spv_CooperativeMatrixLoadTensorNV<4>(
+      g_tensor, source, layout);
+  m.Store<vk::CooperativeMatrixLayoutRowMajorKHR>(
+      vk::GetGroupSharedAddress(g_matrix[0]), 64);
+
+``vk::nv::TensorLayout<dim, clampMode>`` is ``OpTypeTensorLayoutNV`` (5370).
+Both of its operands are ``<id>``\ s of 32-bit integer constants - the grammar
+snapshot in ``external/SPIRV-Headers`` spells ``Dim`` and ``ClampMode`` as
+``IdRef``, and SPIRV-Tools dereferences both ("OpTypeTensorLayoutNV Dim <id> ...
+is not a 32-bit integer") - so both are written as
+``vk::integral_constant<uint, N>`` and not as literals, which is why they are
+template arguments and not function parameters. ``Dim`` has to be between 1 and 5
+and ``ClampMode`` one of the five ``TensorClampMode`` enumerators, both diagnosed
+rather than emitted. ``vk::nv::CreateTensorLayout`` is a plain
+``[[vk::ext_instruction(5372)]]`` wrapper for ``OpCreateTensorLayoutNV``.
+
+The load itself is a compiler builtin rather than a header function, for the same
+reason ``__builtin_spv_CooperativeMatrixReduceEXT`` in
+``<vk/khr/cooperative_matrix.h>`` is one: the ``DecodeFunc`` and
+``DecodeVectorFunc`` operands are the ``<id>``\ s of *functions*, and SPIR-V has
+no operand form that names an HLSL function. CodeGen synthesizes the pair with the
+signature SPIRV-Tools requires of them
+(``external/SPIRV-Tools``, ``ValidateCooperativeMatrixLoadStoreTensorNV``):
+
+* the return type is the matrix component type for ``DecodeFunc`` and a 2-, 4- or
+  8-component vector of it for ``DecodeVectorFunc``,
+* the first parameter is a pointer in the ``PhysicalStorageBuffer`` storage class,
+* the second and third parameters are arrays of 32-bit integers whose length is the
+  ``Dim`` of the tensor layout.
+
+The first template argument of the entry point is the decode-vector length (2 or
+4 here; 8 would need ``LongVectorEXT``). The synthesized bodies return
+``OpUndef``, so what is defined is the *encoding* of the load - a shader cannot
+supply the decode itself yet, exactly as it cannot supply the combine function of
+``OpCooperativeMatrixReduceEXT``.
+
+Because the decode functions' first parameter is a ``PhysicalStorageBuffer``
+pointer, a module built from this header always declares
+``OpCapability PhysicalStorageBufferAddresses`` and promotes its addressing model
+to ``PhysicalStorageBuffer64``; with the Vulkan memory model that
+``OpTypeCooperativeMatrixKHR`` already requires, the module's memory model is
+``OpMemoryModel PhysicalStorageBuffer64 Vulkan``, not ``Logical Vulkan``. A
+cooperative matrix type in turn requires SPIR-V 1.6, so the target environment is
+``-fspv-target-env=vulkan1.3``, as for every cooperative matrix feature.
+
+The extension is **not** enabled by default: without
+``-fspv-extension=SPV_NV_cooperative_matrix_decode_vector`` every use is a
+compile error ("SPIR-V extension 'SPV_NV_cooperative_matrix_decode_vector'
+required for cooperative matrix decode vector block loads but not permitted to
+use"), because a driver without ``VK_NV_cooperative_matrix_decode_vector`` rejects
+a module declaring ``CooperativeMatrixDecodeVectorNV``.
+
+Restrictions, all diagnosed rather than miscompiled:
+
+* The three prerequisite extensions are *not* optional for the instruction -
+  ``SPV_NV_cooperative_matrix2`` defines ``OpCooperativeMatrixLoadTensorNV`` and
+  ``SPV_NV_tensor_addressing`` defines the tensor layout type - so CodeGen always
+  declares them. An explicit ``-fspv-extension`` list replaces the extensions that
+  are on by default, so such a list has to name all four.
+* The pointer the block is read through has to point at the array, in the
+  Workgroup, StorageBuffer or PhysicalStorageBuffer storage class. A ``groupshared``
+  array passed whole is the shape that produces it; an element of the array, or a
+  buffer handle, is rejected. A function-local array has the right shape with the
+  wrong storage class, which the front end cannot see through
+  ``[[vk::ext_reference]]``; buffer-resident data has to be staged through
+  ``groupshared`` memory first.
+* The decode-vector length is 2 or 4. 8 is legal in SPIR-V but needs
+  ``OpCapability LongVectorEXT``, which this header does not request.
+* ``bfloat16_t`` components are not accepted: the decode-vector function would need
+  an ``OpTypeVector`` of ``bfloat16_t``, which requires ``BFloat16TypeKHR``.
+* Only the tensor form of the load is provided. ``OpCooperativeMatrixLoadTensorNV``
+  without tensor addressing operands, and the store, are separate surface;
+  SPIRV-Tools rejects ``DecodeFunc``/``DecodeVectorFunc`` on
+  ``OpCooperativeMatrixStoreTensorNV`` anyway.
+
+What this cannot prove: no driver in CI implements the extension, so SPIRV-Tools
+validation is the only signal and the feature is pinned as an encoding, never
+executed. The host side is out of the compiler's reach: it has to enable
+``VK_NV_cooperative_matrix_decode_vector`` together with
+``VK_NV_cooperative_matrix2``, ``VK_NV_tensor_addressing`` and
+``VK_KHR_cooperative_matrix``, check that
+``vkGetPhysicalDeviceCooperativeMatrix2PropertiesNV`` reports tensor addressing,
+block loads and the decode-vector feature for the stage, that the cooperative
+matrix properties cover the M/N/type/scope combination, that the device accepts the
+tensor rank and clamp mode the shader asks for, and that buffer device address
+support is enabled for the ``PhysicalStorageBuffer`` pointer the decode functions
+take. A shader that exceeds any of those limits still compiles and fails pipeline
+creation.
+
+See ``examples/spirv-extensions/nv-cooperative-matrix-decode-vector.hlsl`` for a
+self-contained block-load example and
+``tools/clang/test/CodeGenSPIRV/nv.decode-vector*.hlsl`` for the tests that pin
+the capability set, the tensor layout, the two function signatures and their
+operand positions, the optimizer-survival path and the diagnostics.
+
 Push constant banks
 ~~~~~~~~~~~~~~~~~~~
 
@@ -2572,6 +2723,9 @@ Supported extensions
 * SPV_VALVE_mixed_float_dot_product
 * SPV_ARM_cooperative_matrix_layouts
 * SPV_NV_cooperative_vector
+* SPV_NV_cooperative_matrix2
+* SPV_NV_tensor_addressing
+* SPV_NV_cooperative_matrix_decode_vector
 
 * ``VK_EXT_shader_uniform_buffer_unsized_array`` has no matching SPIR-V
   ``OpExtension``: it relaxes a rule of the Vulkan SPIR-V environment and reuses

@@ -968,7 +968,8 @@ private:
   // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 
   /// Extract the component type from a cooperative matrix call argument.
-  QualType getComponentTypeFromCallee(const CallExpr *call);
+  QualType getComponentTypeFromCallee(const CallExpr *call,
+                                      unsigned argIndex = 0);
 
   /// Convert basic AST types (float, int, etc.) to SPIR-V types.
   const SpirvType *convertASTTypeToSpirvType(QualType type);
@@ -984,6 +985,39 @@ private:
   /// component_type) and returns component_type.
   SpirvFunction *getOrCreatePerElementFunction(const SpirvType *componentType,
                                                 QualType astComponentType);
+
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  /// Process the __builtin_spv_CooperativeMatrixLoadTensorNV builtin of
+  /// <vk/nv/cooperative_matrix_decode_vector.h>: a cooperative matrix block load
+  /// whose TensorAddressingOperands operand carries the DecodeFunc and
+  /// DecodeVectorFunc bits.
+  SpirvInstruction *processCooperativeMatrixLoadTensorNV(const CallExpr *call);
+  /// Get or create the function one of the two decode-function operands of
+  /// OpCooperativeMatrixLoadTensorNV names. vectorLength is 0 for the scalar
+  /// DecodeFunc function and the vector length of the DecodeVectorFunc function.
+  /// The signature is (pointer, array, array) -> component type, as
+  /// external/SPIRV-Tools requires.
+  SpirvFunction *getOrCreateDecodeFunction(const SpirvType *componentType,
+                                           QualType astComponentType,
+                                           const SpirvType *pointerType,
+                                           const SpirvType *coordinateArrayType,
+                                           uint32_t vectorLength);
+  /// Reads the Dim and ClampMode template arguments of a
+  /// vk::nv::TensorLayout<dim, clampMode> type.
+  bool getTensorLayoutTemplateArgs(QualType layoutType, uint32_t &dim,
+                                   uint32_t &clampMode);
+  /// Reads N out of a vk::integral_constant<uint, N> type.
+  bool getVkIntegralConstantValueOf(QualType type, uint32_t &value);
+  /// Reads the opcode out of a vk::SpirvOpaqueType<opcode, ...> type.
+  bool getSpirvOpaqueTypeOpcode(QualType type, unsigned &opcode);
+  /// Returns the vk::SpirvOpaqueType<4456, ...> type a
+  /// vk::khr::CooperativeMatrix wraps, or a null QualType.
+  QualType getCooperativeMatrixStorageType(QualType matrixType);
+  /// Reads template argument \p index of a call to a function template, which
+  /// has to be an integral argument.
+  bool getVkTemplateArgumentUInt(const CallExpr *call, unsigned index,
+                                 uint32_t &value);
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
 
   /// Process vk::ext_execution_mode intrinsic
   SpirvInstruction *processIntrinsicExecutionMode(const CallExpr *expr);

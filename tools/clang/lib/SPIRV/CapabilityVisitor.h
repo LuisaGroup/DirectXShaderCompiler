@@ -108,6 +108,14 @@ private:
     bool reportedCooperativeVectorComponentType = false;
     bool reportedCooperativeVectorStorageClass = false;
     bool reportedCooperativeVectorConstantOperand = false;
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector. Set once the
+  // corresponding diagnostic has been reported. A tensor layout type is
+  // reachable from several loads, and one wrong clamp mode usually comes from
+  // one declaration with several uses, so each message is a one-per-module
+  // diagnostic.
+  bool reportedTensorLayoutDimension = false;
+  bool reportedTensorLayoutClampMode = false;
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
     /// Checks that every operand of \p inst at \p indices names a constant
     /// instruction, the requirement SPV_NV_cooperative_vector places on the
     /// interpretation, M, K, MemoryLayout and Transpose operands of

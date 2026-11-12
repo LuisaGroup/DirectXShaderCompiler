@@ -2391,6 +2391,38 @@ std::vector<uint32_t> SpirvBuilder::takeModule() {
       }
     }
   }
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  // The two decode functions <vk/nv/cooperative_matrix_decode_vector.h> puts in
+  // the DecodeFunc and DecodeVectorFunc operands of
+  // OpCooperativeMatrixLoadTensorNV need a signature SPIR-V can express and HLSL
+  // cannot: (pointer to PhysicalStorageBuffer, array of 32-bit integers, array of
+  // 32-bit integers) -> component type. LowerTypeVisitor wraps every function
+  // parameter in an OpTypePointer of the parameter's storage class, which is
+  // right for HLSL's by-copy call convention and wrong here, so exactly one level
+  // comes off each parameter: the first parameter's declared type is a pointer
+  // already, and the other two are the OpTypeArrays SPIRV-Tools requires
+  // ("second/third parameter must be array of 32-bit integer with dimension equal
+  // to the tensor dimension"). That differs from the __coopmat_ helpers above,
+  // where every level is spurious.
+  for (auto *fn : mod->getFunctions()) {
+    llvm::StringRef name = fn->getFunctionName();
+    if (!name.startswith("__decode_func") &&
+        !name.startswith("__decode_vector_func"))
+      continue;
+    auto params = fn->getParameters();
+    const SpirvType *retType = fn->getReturnType();
+    llvm::SmallVector<const SpirvType *, 4> paramTypes;
+    for (auto *param : params) {
+      const SpirvType *ty = param->getResultType();
+      if (isa<SpirvPointerType>(ty))
+        ty = cast<SpirvPointerType>(ty)->getPointeeType();
+      paramTypes.push_back(ty);
+      param->setResultType(ty);
+    }
+    if (!paramTypes.empty() && retType)
+      fn->setFunctionType(context.getFunctionType(retType, paramTypes));
+  }
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
 
   // Generate debug types (if needed)
   if (spirvOptions.debugInfoRich) {
@@ -2403,6 +2435,27 @@ std::vector<uint32_t> SpirvBuilder::takeModule() {
 
   // Add necessary capabilities and extensions
   mod->invokeVisitor(&capabilityVisitor);
+
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  // A module that declares VulkanMemoryModel has to use the Vulkan memory model:
+  // SPIRV-Tools rejects the capability with any other one
+  // ("VulkanMemoryModelKHR capability must only be specified if the VulkanKHR
+  // memory model is used"). The SPIRV-Tools UpgradeMemoryModel pass that DXC runs
+  // for the Logical addressing model
+  // (SpirvEmitter::UpgradeToVulkanMemoryModelIfNeeded) rewrites only
+  // "Logical GLSL450", so a module that requireCapability() promoted to the
+  // PhysicalStorageBuffer64 addressing model - the only addressing model a
+  // PhysicalStorageBuffer pointer in a Vulkan module may use, and a valid pairing
+  // with the Vulkan memory model - would otherwise be emitted as
+  // "PhysicalStorageBuffer64 GLSL450" and fail validation. Only that pairing is
+  // touched: a Logical module is left to the pass, which also upgrades the
+  // memory semantics, decorations and barriers of the module.
+  if (hasCapability(spv::Capability::VulkanMemoryModel) &&
+      mod->getAddressingModel() ==
+          spv::AddressingModel::PhysicalStorageBuffer64) {
+    mod->promoteMemoryModel(spv::MemoryModel::VulkanKHR);
+  }
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
 
   // Propagate RelaxedPrecision decorations
   mod->invokeVisitor(&relaxedPrecisionVisitor);

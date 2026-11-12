@@ -307,6 +307,23 @@ bool SpirvModule::promoteAddressingModel(spv::AddressingModel addrModel) {
   }
 }
 
+// HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+bool SpirvModule::promoteMemoryModel(spv::MemoryModel memModel) {
+  assert(memoryModel && "base memory model must be set first");
+  if (memoryModel->getMemoryModel() == memModel)
+    return false;
+  memoryModel->setMemoryModel(memModel);
+  return true;
+}
+// HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
+
+// HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+spv::AddressingModel SpirvModule::getAddressingModel() const {
+  return memoryModel ? memoryModel->getAddressingModel()
+                     : spv::AddressingModel::Logical;
+}
+// HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
+
 void SpirvModule::addEntryPoint(SpirvEntryPoint *ep) {
   assert(ep && "cannot add null as an entry point");
   entryPoints.push_back(ep);

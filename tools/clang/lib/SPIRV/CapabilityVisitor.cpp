@@ -459,6 +459,63 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
       if (componentType)
         addCapabilityForType(componentType, loc, sc);
     }
+    // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  // vk::nv::TensorLayout<dim, clampMode> in
+  // <vk/nv/cooperative_matrix_decode_vector.h> is lowered to a
+  // vk::SpirvOpaqueType with the OpTypeTensorLayoutNV opcode (5370), whose Dim and
+  // ClampMode are <id>s of 32-bit integer constants, so this visitor sees a
+  // SpirvIntrinsicType rather than a scalar type. OpTypeTensorLayoutNV (and the
+  // OpCreateTensorLayoutNV that produces a value of it) are defined by
+  // SPV_NV_tensor_addressing, so the type is what makes a module require
+  // TensorAddressingNV (5439) and that extension string. Neither the dimension nor
+  // the clamp mode is an operand this visitor would otherwise see, and SPIRV-Tools
+  // rejects both a dimension outside 1..5
+  // ("OpTypeTensorLayoutNV Dim <id> ... must be between 1 and 5.") and a clamp
+  // mode above RepeatMirrored
+  // ("OpTypeTensorLayoutNV ClampMode <id> ... must be a valid TensorClampMode."),
+  // so they are diagnosed here - a type that only appears in a declaration is
+  // still rejected, and a wrong value never reaches the module.
+  if (intrinsicType->getOpCode() == uint32_t(spv::Op::OpTypeTensorLayoutNV)) {
+    const auto operands = intrinsicType->getOperands();
+    const auto *dimConstant =
+        (operands.size() > 0 && !operands[0].isTypeOperand)
+            ? dyn_cast<SpirvConstantInteger>(operands[0].operand_as_inst)
+            : nullptr;
+    const auto *clampConstant =
+        (operands.size() > 1 && !operands[1].isTypeOperand)
+            ? dyn_cast<SpirvConstantInteger>(operands[1].operand_as_inst)
+            : nullptr;
+    if (dimConstant &&
+        (dimConstant->getValue().getLimitedValue() == 0 ||
+         dimConstant->getValue().getLimitedValue() > 5)) {
+      if (!reportedTensorLayoutDimension) {
+        reportedTensorLayoutDimension = true;
+        featureManager.reportError(
+            "the dimension of a tensor layout (vk::nv::TensorLayout) must be "
+            "between 1 and 5: SPV_NV_tensor_addressing defines Dim as the rank "
+            "of the tensor, and SPIRV-Tools rejects every other value",
+            loc);
+      }
+      return;
+    }
+    if (clampConstant &&
+        clampConstant->getValue().getLimitedValue() >
+            uint32_t(spv::TensorClampMode::RepeatMirrored)) {
+      if (!reportedTensorLayoutClampMode) {
+        reportedTensorLayoutClampMode = true;
+        featureManager.reportError(
+            "the clamp mode of a tensor layout (vk::nv::TensorLayout) must be "
+            "one of the five TensorClampMode enumerators of "
+            "<vk/nv/cooperative_matrix_decode_vector.h>: SPIRV-Tools rejects "
+            "every other value of OpTypeTensorLayoutNV",
+            loc);
+      }
+      return;
+    }
+    addExtension(Extension::NV_tensor_addressing, "tensor layout types", loc);
+    addCapability(spv::Capability::TensorAddressingNV);
+  }
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
     // HLSL Change End - SPV_NV_cooperative_vector.
   }
   // HLSL Change End
@@ -1110,6 +1167,41 @@ case spv::Op::OpDPdxCoarse:
   addCapability(spv::Capability::CooperativeVectorTrainingNV, loc);
   break;
   // HLSL Change End - SPV_NV_cooperative_vector.
+
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  // OpCooperativeMatrixLoadTensorNV (5367) with the DecodeFunc / DecodeVectorFunc
+  // bits of its TensorAddressingOperands operand, emitted by
+  // SpirvEmitter::processCooperativeMatrixLoadTensorNV for
+  // <vk/nv/cooperative_matrix_decode_vector.h>. The two extensions this extension
+  // is built on (SPV_NV_cooperative_matrix2, which defines the instruction, and
+  // SPV_NV_tensor_addressing, which defines the OpTypeTensorLayoutNV it reads
+  // through) are attached to the instruction itself by the emitter, because
+  // neither is optional. What is left for this visitor is the extension that can
+  // be refused:
+  //   * CooperativeMatrixDecodeVectorNV (5447) is the capability the
+  //     DecodeVectorFunc enumerant requires, and CooperativeMatrixBlockLoadsNV
+  //     (5434) is the capability 5447 itself requires (spirv.core.grammar.json:
+  //     "CooperativeMatrixDecodeVectorNV" -> capabilities
+  //     ["CooperativeMatrixBlockLoadsNV"]). SPIRV-Tools checks both, so both are
+  //     added here - never one without the other.
+  //   * addExtension reports "SPIR-V extension
+  //     'SPV_NV_cooperative_matrix_decode_vector' required for cooperative matrix
+  //     decode vector block loads but not permitted to use" when -fspv-extension
+  //     has an explicit list that leaves it out, so a module can never carry the
+  //     decode-vector bit without the extension Vulkan requires of it.
+  case spv::Op::OpCooperativeMatrixLoadTensorNV: {
+    addExtension(Extension::NV_cooperative_matrix_decode_vector,
+                 "cooperative matrix decode vector block loads", loc);
+    addCapability(spv::Capability::CooperativeMatrixDecodeVectorNV, loc);
+    addCapability(spv::Capability::CooperativeMatrixBlockLoadsNV, loc);
+    // The component type of the result matrix is also the return type of both
+    // decode functions, so it has to be visited for its own capabilities such as
+    // Float16.
+    addCapabilityForType(instr->getResultType(), loc,
+                         instr->getStorageClass());
+    break;
+  }
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
 
   // HLSL Change Begin - SPV_QCOM_image_processing3.
   // OpImageGatherQCOM gathers one component of the four texels whose footprint

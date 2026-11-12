@@ -627,6 +627,19 @@ bool isCooperativeMatrixPerElementOpEXTIntrinsic(const FunctionDecl *f) {
 }
 // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
 
+  // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+  // The block load of <vk/nv/cooperative_matrix_decode_vector.h>. It is a
+  // declaration-only builtin dispatched here by name for the same reason as the
+  // two above: two of its operands are the <id>s of *functions*, which
+  // [[vk::ext_instruction]] cannot provide, so CodeGen synthesizes them. The name
+  // matches the instruction it emits, so a header entry point that carries an
+  // [[vk::ext_instruction]] attribute cannot be confused with it.
+  bool isCooperativeMatrixLoadTensorNVIntrinsic(const FunctionDecl *f) {
+    return f->getName().equals("__builtin_spv_CooperativeMatrixLoadTensorNV");
+  }
+  // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
+
+
 // Takes an AST member type, and determines its index in the equivalent SPIR-V
 // struct type. This is required as the struct layout might change between the
 // AST representation and SPIR-V representation.
@@ -3682,6 +3695,10 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
  if (isCooperativeMatrixPerElementOpEXTIntrinsic(funcDecl))
  return processCooperativeMatrixPerElementOpEXT(callExpr);
  // HLSL Change End - SPV_EXT_cooperative_matrix_maintenance1.
+      // HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+      if (isCooperativeMatrixLoadTensorNVIntrinsic(funcDecl))
+        return processCooperativeMatrixLoadTensorNV(callExpr);
+      // HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
   }
   // Intrinsic functions such as 'dot' or 'mul'
   if (hlsl::IsIntrinsicOp(funcDecl)) {
@@ -18689,14 +18706,361 @@ SpirvInstruction *SpirvEmitter::processCooperativeMatrixPerElementOp(
   return intrInst;
 }
 
+// HLSL Change Begin - SPV_NV_cooperative_matrix_decode_vector.
+SpirvFunction *SpirvEmitter::getOrCreateDecodeFunction(
+    const SpirvType *componentType, QualType astComponentType,
+    const SpirvType *pointerType, const SpirvType *coordinateArrayType,
+    uint32_t vectorLength) {
+  // The two decode functions SPV_NV_cooperative_matrix_decode_vector puts in the
+  // DecodeFunc and DecodeVectorFunc operands of OpCooperativeMatrixLoadTensorNV.
+  // external/SPIRV-Tools, ValidateCooperativeMatrixLoadStoreTensorNV, requires
+  // both to be OpFunctions whose
+  //   * return type is the matrix component type (DecodeFunc) or a vector of it
+  //     with 2, 4 or 8 components (DecodeVectorFunc),
+  //   * first parameter is a pointer in the PhysicalStorageBuffer storage class,
+  //   * second and third parameters are arrays of 32-bit integers whose length is
+  //     the Dim of the tensor layout.
+  // The body is OpReturnValue OpUndef, like the __coopmat_combine helper: the
+  // encoding is defined, the decoded value is not.
+  //
+  // The names must not start with "__coopmat_": that prefix makes
+  // SpirvBuilder::takeModule strip the pointer that LowerTypeVisitor wrapped
+  // every parameter in, and the first parameter here has to stay a pointer. The
+  // matching fix-up for these two names is in SpirvBuilder::takeModule.
+  QualType astReturnType = astComponentType;
+  if (vectorLength)
+    astReturnType = astContext.getExtVectorType(astComponentType, vectorLength);
+  auto *func = new (spvContext) SpirvFunction(
+      astReturnType, SourceLocation(),
+      vectorLength ? "__decode_vector_func" : "__decode_func",
+      /*isPrecise*/ false, /*isNoInterp*/ false);
+  func->addParameter(new (spvContext) SpirvFunctionParameter(
+      pointerType, false, false, SourceLocation()));
+  func->addParameter(new (spvContext) SpirvFunctionParameter(
+      coordinateArrayType, false, false, SourceLocation()));
+  func->addParameter(new (spvContext) SpirvFunctionParameter(
+      coordinateArrayType, false, false, SourceLocation()));
+  auto *bb = new (spvContext) SpirvBasicBlock("entry");
+  func->addBasicBlock(bb);
+  auto *undef = new (spvContext) SpirvUndef(astReturnType);
+  auto *ret = new (spvContext) SpirvReturn(SourceLocation(), undef);
+  bb->addInstruction(undef);
+  bb->addInstruction(ret);
+  spvBuilder.getModule()->addFunctionDeclaration(func);
+  return func;
+}
+
+SpirvInstruction *
+SpirvEmitter::processCooperativeMatrixLoadTensorNV(const CallExpr *call) {
+  const auto args = call->getArgs();
+  assert(call->getNumArgs() == 3);
+  const SourceLocation loc = call->getExprLoc();
+
+  // Template argument 0 is the decode vector length. It has no operand of its
+  // own - the operand is the DecodeVectorFunc function, and the length is part of
+  // that function's return type - so it is consumed here and never emitted.
+  uint32_t vectorLength = 0;
+  if (!getVkTemplateArgumentUInt(call, /*index*/ 0, vectorLength)) {
+    emitError("the decode vector length of "
+              "__builtin_spv_CooperativeMatrixLoadTensorNV must be a "
+              "compile-time constant",
+              loc);
+    return nullptr;
+  }
+  // SPV_NV_cooperative_matrix_decode_vector lets the DecodeVectorFunc function
+  // return a 2-, 4- or 8-component vector, and the validator rejects any other
+  // length ("return vector length must be 2, 4, or 8."). Eight components is an
+  // OpTypeVector with more than four components, which needs
+  // OpCapability LongVectorEXT (SPV_EXT_long_vector); this header deliberately
+  // does not request it, so 8 is refused here instead of emitting a module that
+  // does not validate.
+  if (vectorLength != 2 && vectorLength != 4) {
+    emitError("the decode vector length must be 2 or 4: "
+              "SPV_NV_cooperative_matrix_decode_vector allows a 2-, 4- or "
+              "8-component decode vector function, and 8 components would "
+              "require OpCapability LongVectorEXT (SPV_EXT_long_vector), which "
+              "<vk/nv/cooperative_matrix_decode_vector.h> does not request",
+              loc);
+    return nullptr;
+  }
+
+  // Argument 0 is the pointer the block is read from. It is an
+  // [[vk::ext_reference]] parameter, so a groupshared array argument arrives as
+  // its OpVariable and keeps the Workgroup storage class the validator requires
+  // ("storage class for pointer type <id> ... is not Workgroup, StorageBuffer, or
+  // PhysicalStorageBuffer."). An element of an array, or a buffer handle, would
+  // point at a scalar or at a buffer block struct instead, so require an array.
+  if (!args[0]->getType()->isArrayType()) {
+    emitError("the first argument of "
+              "__builtin_spv_CooperativeMatrixLoadTensorNV must be an array: "
+              "OpCooperativeMatrixLoadTensorNV reads the block through a pointer "
+              "to the tensor memory, and an element of an array (or a buffer "
+              "handle) would pass a pointer to a scalar or to a buffer block "
+              "instead",
+              loc);
+    return nullptr;
+  }
+  SpirvInstruction *pointer = doExpr(args[0]->IgnoreParenLValueCasts());
+  if (!pointer)
+    return nullptr;
+  SpirvInstruction *source = doExpr(args[1]->IgnoreParenLValueCasts());
+  if (!source)
+    return nullptr;
+  SpirvInstruction *layout = doExpr(args[2]->IgnoreParenLValueCasts());
+  if (!layout)
+    return nullptr;
+
+  // The TensorLayout operand has to be the *value* OpCreateTensorLayoutNV
+  // produces: SPIRV-Tools checks the type of the operand
+  // ("OpCooperativeMatrixLoadTensorNV TensorLayout <id> ... does not have a
+  // tensor layout type."), so a layout held in a variable is loaded.
+  layout = loadIfGLValue(args[2], layout);
+  if (!layout)
+    return nullptr;
+
+  // The Dim and ClampMode of the tensor layout. Both are template arguments of
+  // vk::nv::TensorLayout, i.e. of the vk::SpirvOpaqueType in the argument's type,
+  // and both are <id>s of 32-bit integer constants in the instruction, so they
+  // are read from the AST instead of from a lowered SPIR-V type (which does not
+  // exist yet at this point).
+  uint32_t dim = 0;
+  uint32_t clampMode = 0;
+  if (!getTensorLayoutTemplateArgs(args[2]->getType(), dim, clampMode)) {
+    emitError("the third argument of "
+              "__builtin_spv_CooperativeMatrixLoadTensorNV must be a "
+              "vk::nv::TensorLayout<dim, clampMode>",
+              loc);
+    return nullptr;
+  }
+
+  // The component type of the matrix the block is loaded into. The validator
+  // compares both decode functions' return types against it
+  // ("DecodeFunc <id> ... return type must match matrix component type.").
+  // The instruction returns - and the source operand takes - the
+  // OpTypeCooperativeMatrixKHR value, not the vk::khr::CooperativeMatrix class
+  // that holds it.
+  QualType storageTypeAST = getCooperativeMatrixStorageType(args[1]->getType());
+  if (storageTypeAST.isNull()) {
+    emitError("the second argument of "
+              "__builtin_spv_CooperativeMatrixLoadTensorNV must be a "
+              "vk::khr::CooperativeMatrix: SPV_NV_cooperative_matrix2 loads a "
+              "cooperative matrix through a tensor layout, and its Object "
+              "operand is the matrix type of the result",
+              loc);
+    return nullptr;
+  }
+  // The Object operand is the OpTypeCooperativeMatrixKHR value, so a
+  // class-typed source matrix is taken apart: the class lowers to a one-member
+  // struct.
+  if (!astContext.hasSameType(storageTypeAST, args[1]->getType())) {
+    source = loadIfGLValue(args[1], source);
+    source = spvBuilder.createCompositeExtract(storageTypeAST, source, {0}, loc,
+                                               SourceRange());
+    if (!source)
+      return nullptr;
+  }
+
+  QualType compTypeAST = getComponentTypeFromCallee(call, /*argIndex*/ 1);
+  if (compTypeAST.isNull()) {
+    emitError("unable to determine the component type of "
+              "OpCooperativeMatrixLoadTensorNV",
+              loc);
+    return nullptr;
+  }
+  LowerTypeVisitor lowerTypeVisitor(astContext, spvContext, spirvOptions,
+                                    spvBuilder);
+  const SpirvType *componentType = lowerTypeVisitor.lowerType(
+      compTypeAST, SpirvLayoutRule::Void, llvm::None, loc);
+  if (!componentType) {
+    emitError("the component type of a cooperative matrix block load "
+              "(OpCooperativeMatrixLoadTensorNV) has no SPIR-V encoding",
+              loc);
+    return nullptr;
+  }
+  // A bfloat16_t component is a FloatType like any other, but the OpTypeVector
+  // of the decode vector function would additionally need BFloat16TypeKHR, and
+  // the matrix type would need BFloat16CooperativeMatrixKHR. Refused rather than
+  // emitted without them.
+  if (const auto *floatComponent = dyn_cast<FloatType>(componentType)) {
+    if (floatComponent->isBFloat16()) {
+      emitError("a bfloat16_t cooperative matrix cannot be loaded through a "
+                "decode function: the decode vector function needs an "
+                "OpTypeVector of bfloat16_t, which requires "
+                "OpCapability BFloat16TypeKHR and SPV_KHR_bfloat16",
+                loc);
+      return nullptr;
+    }
+  }
+
+  const SpirvType *uint32Type = spvContext.getUIntType(32);
+  const SpirvType *coordinateArrayType =
+      spvContext.getArrayType(uint32Type, dim, llvm::None);
+  const SpirvType *pointerType = spvContext.getPointerType(
+      componentType, spv::StorageClass::PhysicalStorageBuffer);
+  SpirvFunction *decodeFunc =
+      getOrCreateDecodeFunction(componentType, compTypeAST, pointerType,
+                                coordinateArrayType, /*vectorLength*/ 0);
+  SpirvFunction *decodeVectorFunc = getOrCreateDecodeFunction(
+      componentType, compTypeAST, pointerType, coordinateArrayType,
+      vectorLength);
+
+  // The MemoryAccess and TensorAddressingOperands operands are bit masks written
+  // as literals, not as <id>s, so they are marked literal constants. The
+  // TensorAddressingOperands mask carries DecodeFunc (0x0002) as well as
+  // DecodeVectorFunc (0x0004) because the validator requires it
+  // ("DecodeVectorFunc requires DecodeFunc to also be specified.").
+  auto *memoryAccess =
+      spvBuilder.getConstantInt(astContext.UnsignedIntTy, llvm::APInt(32, 0));
+  memoryAccess->setLiteral();
+  auto *tensorAddressing = spvBuilder.getConstantInt(
+      astContext.UnsignedIntTy, llvm::APInt(32, 0x0002u | 0x0004u));
+  tensorAddressing->setLiteral();
+
+  // OpCooperativeMatrixLoadTensorNV (5367) is defined by
+  // SPV_NV_cooperative_matrix2 and reads through an OpTypeTensorLayoutNV, which
+  // SPV_NV_tensor_addressing defines. Neither is optional for this instruction,
+  // so both extension strings and all three of their capabilities are attached
+  // to the instruction instead of to the opt-in
+  // SPV_NV_cooperative_matrix_decode_vector, which CapabilityVisitor adds (and
+  // which -fspv-extension= can therefore refuse).
+  llvm::StringRef extensions[] = {"SPV_NV_tensor_addressing",
+                                  "SPV_NV_cooperative_matrix2"};
+  uint32_t capabilities[] = {
+      uint32_t(spv::Capability::TensorAddressingNV),
+      uint32_t(spv::Capability::CooperativeMatrixTensorAddressingNV),
+      uint32_t(spv::Capability::CooperativeMatrixBlockLoadsNV)};
+  SpirvInstruction *intrInst = spvBuilder.createSpirvIntrInstExt(
+      uint32_t(spv::Op::OpCooperativeMatrixLoadTensorNV), storageTypeAST,
+      {pointer, source, layout, memoryAccess, tensorAddressing,
+       new (spvContext) SpirvFunctionRef(decodeFunc),
+       new (spvContext) SpirvFunctionRef(decodeVectorFunc)},
+      extensions, /*instSet=*/"", capabilities, loc);
+  if (!intrInst)
+    return nullptr;
+  intrInst->setRValue();
+  if (astContext.hasSameType(storageTypeAST, call->getType()))
+    return intrInst;
+  // The builtin returns a vk::khr::CooperativeMatrix, but the instruction
+  // returns the OpTypeCooperativeMatrixKHR value that class wraps, so the value
+  // is wrapped in the one-member struct the class lowers to.
+  SpirvInstruction *matrix = spvBuilder.createCompositeConstruct(
+      call->getType(), {intrInst}, loc);
+  if (!matrix)
+    return nullptr;
+  matrix->setRValue();
+  return matrix;
+}
+
+bool SpirvEmitter::getSpirvOpaqueTypeOpcode(QualType type, unsigned &opcode) {
+  // vk::SpirvOpaqueType is declared as <unsigned opcode, typename... Operands>,
+  // so template argument 0 is the opcode and argument 1 the operand pack.
+  auto *recordType = type->getAs<RecordType>();
+  if (!recordType)
+    return false;
+  const auto *specDecl =
+      dyn_cast<ClassTemplateSpecializationDecl>(recordType->getDecl());
+  if (!specDecl || specDecl->getName() != "SpirvOpaqueType")
+    return false;
+  const TemplateArgumentList &opaqueArgs = specDecl->getTemplateArgs();
+  if (opaqueArgs.size() != 2 ||
+      opaqueArgs[0].getKind() != TemplateArgument::Integral)
+    return false;
+  opcode = static_cast<unsigned>(opaqueArgs[0].getAsIntegral().getZExtValue());
+  return true;
+}
+
+bool SpirvEmitter::getTensorLayoutTemplateArgs(QualType layoutType,
+                                               uint32_t &dim,
+                                               uint32_t &clampMode) {
+  // vk::nv::TensorLayout<dim, clampMode> is
+  //   vk::SpirvOpaqueType<5370, vk::integral_constant<uint, dim>,
+  //                             vk::integral_constant<uint, clampMode> >
+  // so the two values live in the template arguments of the opaque type.
+  unsigned opcode = 0;
+  if (!getSpirvOpaqueTypeOpcode(layoutType, opcode) || opcode != 5370)
+    return false;
+  const auto *specDecl = dyn_cast<ClassTemplateSpecializationDecl>(
+      layoutType->getAs<RecordType>()->getDecl());
+  const llvm::ArrayRef<TemplateArgument> operands =
+      specDecl->getTemplateArgs()[1].getPackAsArray();
+  if (operands.size() != 2 || operands[0].getKind() != TemplateArgument::Type ||
+      operands[1].getKind() != TemplateArgument::Type)
+    return false;
+  return getVkIntegralConstantValueOf(operands[0].getAsType(), dim) &&
+         getVkIntegralConstantValueOf(operands[1].getAsType(), clampMode);
+}
+
+QualType SpirvEmitter::getCooperativeMatrixStorageType(QualType matrixType) {
+  // A vk::khr::CooperativeMatrix<...> is a one-member class whose member holds
+  // the OpTypeCooperativeMatrixKHR value
+  // (vk::SpirvOpaqueType<4456, ComponentType, scope, rows, columns, use>), so a
+  // class-typed value is a struct containing the matrix value. Instructions that
+  // *produce* a matrix - OpCooperativeMatrixLoadKHR, ...StoreTensorNV and
+  // friends - take and return the inner type, which is why
+  // <vk/khr/cooperative_matrix.impl> assigns them to the member. This returns
+  // that inner type, or a null QualType when \p matrixType is not a cooperative
+  // matrix.
+  unsigned opcode = 0;
+  if (getSpirvOpaqueTypeOpcode(matrixType, opcode))
+    return opcode == 4456 ? matrixType : QualType();
+  auto *recordType = matrixType->getAs<RecordType>();
+  if (!recordType)
+    return QualType();
+  const auto *specDecl =
+      dyn_cast<ClassTemplateSpecializationDecl>(recordType->getDecl());
+  if (!specDecl)
+    return QualType();
+  for (const auto *field : specDecl->fields()) {
+    if (getSpirvOpaqueTypeOpcode(field->getType(), opcode) && opcode == 4456)
+      return field->getType();
+  }
+  return QualType();
+}
+
+bool SpirvEmitter::getVkIntegralConstantValueOf(QualType type, uint32_t &value) {
+  // vk::integral_constant<uint, N>, the builtin the front end materializes for a
+  // SPIR-V operand that has to be an <id> of a constant instruction.
+  auto *recordType = type->getAs<RecordType>();
+  if (!recordType || recordType->getDecl()->getName() != "integral_constant")
+    return false;
+  const auto *specDecl =
+      dyn_cast<ClassTemplateSpecializationDecl>(recordType->getDecl());
+  if (!specDecl)
+    return false;
+  const TemplateArgumentList &constantArgs = specDecl->getTemplateArgs();
+  if (constantArgs.size() < 2 ||
+      constantArgs[1].getKind() != TemplateArgument::Integral)
+    return false;
+  value = static_cast<uint32_t>(constantArgs[1].getAsIntegral().getZExtValue());
+  return true;
+}
+
+bool SpirvEmitter::getVkTemplateArgumentUInt(const CallExpr *call, unsigned index,
+                                            uint32_t &value) {
+  const auto *funcDecl = call->getDirectCallee();
+  if (!funcDecl)
+    return false;
+  const TemplateArgumentList *templateArgs =
+      funcDecl->getTemplateSpecializationArgs();
+  if (!templateArgs || templateArgs->size() <= index)
+    return false;
+  const TemplateArgument &arg = (*templateArgs)[index];
+  if (arg.getKind() != TemplateArgument::Integral)
+    return false;
+  value = static_cast<uint32_t>(arg.getAsIntegral().getZExtValue());
+  return true;
+}
+// HLSL Change End - SPV_NV_cooperative_matrix_decode_vector.
+
 QualType
-SpirvEmitter::getComponentTypeFromCallee(const CallExpr *call) {
+SpirvEmitter::getComponentTypeFromCallee(const CallExpr *call,
+                                         unsigned argIndex) {
   // Get the component type from the matrix argument's AST type.
   // The argument type is SpirvMatrixType = SpirvOpaqueType<4456, C, ...>
   // We extract template argument 1 (the component type C).
-  if (call->getNumArgs() < 1)
+  if (call->getNumArgs() <= argIndex)
     return QualType();
-  QualType matTypeAST = call->getArg(0)->getType();
+  QualType matTypeAST = call->getArg(argIndex)->getType();
   // Try TemplateSpecializationType (for SpirvOpaqueType)
   if (const auto *tst = matTypeAST->getAs<TemplateSpecializationType>()) {
     if (tst->getNumArgs() >= 2) {

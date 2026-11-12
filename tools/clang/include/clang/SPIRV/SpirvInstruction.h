@@ -393,6 +393,8 @@ public:
 
   spv::AddressingModel getAddressingModel() const { return addressModel; }
   spv::MemoryModel getMemoryModel() const { return memoryModel; }
+  // HLSL Change - SPV_NV_cooperative_matrix_decode_vector.
+  void setMemoryModel(spv::MemoryModel memModel) { memoryModel = memModel; }
   void setAddressingModel(spv::AddressingModel addrModel) {
     addressModel = addrModel;
   }

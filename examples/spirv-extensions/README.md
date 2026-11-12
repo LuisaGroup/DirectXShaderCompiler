@@ -45,6 +45,7 @@ features.
 | `nv-linear-swept-spheres.hlsl` | `VK_NV_ray_tracing_linear_swept_spheres` → sphere/LSS ray-query accessors | `-fspv-extension=SPV_NV_linear_swept_spheres` |
 | `qcom-image-processing3.hlsl` | `VK_QCOM_image_processing3` → `OpImageGatherQCOM` | `-fspv-extension=SPV_QCOM_image_processing3` |
 | `nv-cooperative-vector.hlsl` | `VK_NV_cooperative_vector` → `OpTypeVectorIdEXT`, `OpCooperativeVector{Load,Store,MatrixMul}NV` | `-fspv-extension=SPV_NV_cooperative_vector` |
+| `nv-cooperative-matrix-decode-vector.hlsl` | `VK_NV_cooperative_matrix_decode_vector` → the `DecodeVectorFunc` bit of `TensorAddressingOperands` on `OpCooperativeMatrixLoadTensorNV`, plus `OpTypeTensorLayoutNV`/`OpCreateTensorLayoutNV` | `-fspv-target-env=vulkan1.3 -fspv-extension=SPV_NV_cooperative_matrix_decode_vector -fspv-extension=SPV_NV_cooperative_matrix2 -fspv-extension=SPV_NV_tensor_addressing -fspv-extension=SPV_KHR_physical_storage_buffer` |
 | `khr-maintenance8.hlsl` | `VK_KHR_maintenance8` (dynamic image offsets; no module surface) | — |
 | `khr-maintenance9.hlsl` | `VK_KHR_maintenance9` (narrow-integer bitwise ops) | `-fspv-enable-maintenance9` |
 | `khr-maintenance12.hlsl` | `VK_KHR_maintenance12` (non-uniform push-constant indexing) | — |

@@ -281,6 +281,14 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
             // HLSL Change - SPV_NV_cooperative_vector.
             .Case("SPV_NV_cooperative_vector",
                   Extension::NV_cooperative_vector)
+      // HLSL Change - SPV_NV_tensor_addressing.
+      .Case("SPV_NV_tensor_addressing", Extension::NV_tensor_addressing)
+      // HLSL Change - SPV_NV_cooperative_matrix2's tensor half.
+      .Case("SPV_NV_cooperative_matrix2",
+            Extension::NV_cooperative_matrix2)
+      // HLSL Change - SPV_NV_cooperative_matrix_decode_vector.
+      .Case("SPV_NV_cooperative_matrix_decode_vector",
+            Extension::NV_cooperative_matrix_decode_vector)
 .Default(Extension::Unknown);
 }
 
@@ -422,6 +430,15 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
         // HLSL Change - SPV_NV_cooperative_vector.
         case Extension::NV_cooperative_vector:
           return "SPV_NV_cooperative_vector";
+        // HLSL Change - SPV_NV_tensor_addressing.
+        case Extension::NV_tensor_addressing:
+          return "SPV_NV_tensor_addressing";
+        // HLSL Change - SPV_NV_cooperative_matrix2's tensor half.
+        case Extension::NV_cooperative_matrix2:
+          return "SPV_NV_cooperative_matrix2";
+        // HLSL Change - SPV_NV_cooperative_matrix_decode_vector.
+        case Extension::NV_cooperative_matrix_decode_vector:
+          return "SPV_NV_cooperative_matrix_decode_vector";
       default:
     break;
   }
@@ -741,6 +758,37 @@ bool FeatureManager::enabledByDefault(Extension ext) {
         // CapabilityVisitor::addCapabilityForType and
         // CapabilityVisitor::visitInstruction.
         case Extension::NV_cooperative_vector:
+          return false;
+        // HLSL Change - SPV_NV_tensor_addressing. Enabled by default: nothing in
+        // this tree could name OpTypeTensorLayoutNV / OpTypeTensorViewNV before
+        // <vk/nv/cooperative_matrix_decode_vector.h>, so enabling it does not
+        // change the code generation of any existing shader, and the extension is
+        // the base of the two below rather than a feature of its own that a host
+        // could refuse separately.
+        case Extension::NV_tensor_addressing:
+          return true;
+        // HLSL Change - SPV_NV_cooperative_matrix2's tensor half. Enabled by
+        // default for the same reason: OpCooperativeMatrixLoadTensorNV (5367) is
+        // defined by this extension and cannot be emitted without it, so the only
+        // effect of making it opt-in would be a second -fspv-extension= that a
+        // shader always needs. The reduce / per-element operations that already
+        // ship under this name do not consult this entry at all (they pass the
+        // OpExtension string straight to SpirvBuilder::createSpirvIntrInstExt).
+        case Extension::NV_cooperative_matrix2:
+          return true;
+        // HLSL Change - SPV_NV_cooperative_matrix_decode_vector. Opt-in, like
+        // SPV_EXT_long_vector. A module that uses the decode-vector load declares
+        // CooperativeMatrixDecodeVectorNV (5447) on top of
+        // CooperativeMatrixBlockLoadsNV (5434), and a driver that does not expose
+        // VK_NV_cooperative_matrix_decode_vector rejects it. Everything the header
+        // provides is new surface - no existing HLSL spelling reaches the
+        // DecodeVectorFunc bit - so making the extension opt-in does not change
+        // the code generation of any existing shader. It only means the extension
+        // has to be named on the command line, and that an explicit
+        // -fspv-extension list can leave it out, in which case every use is a
+        // diagnostic instead of a module that declares an extension the host
+        // never asked for. See CapabilityVisitor::visitInstruction.
+        case Extension::NV_cooperative_matrix_decode_vector:
           return false;
       default:
     return true;
