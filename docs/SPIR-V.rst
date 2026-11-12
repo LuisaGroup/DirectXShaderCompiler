@@ -326,6 +326,63 @@ instruction with ``OpFmaKHR`` is a visible change of the module: a driver withou
 must also enable the matching ``shaderFmaFloat32`` feature; the compiler cannot
 check that.
 
+Split barriers
+~~~~~~~~~~~~~~
+
+The ``SPV_EXT_split_barrier`` extension splits a control barrier into an arrive
+and a wait. ``GroupMemoryBarrierWithGroupSync()`` synchronizes every invocation
+at one point: no invocation continues until all of them have arrived. A split
+barrier lets an invocation announce that it has arrived, execute work that does
+not depend on the rest of the group, and only then wait for it. It is gated by
+the Vulkan ``VK_EXT_shader_split_barrier`` device extension, whose
+``VkPhysicalDeviceShaderSplitBarrierFeaturesEXT`` structure carries the
+``shaderSplitBarrier`` feature bit.
+
+The entry points live in ``<vk/ext/split_barrier.h>``:
+
+.. code:: hlsl
+
+  #include <vk/ext/split_barrier.h>
+
+  vk::SplitBarrierArrive();   // OpControlBarrierArriveEXT
+  ...independent work...
+  vk::SplitBarrierWait();     // OpControlBarrierWaitEXT
+
+``OpControlBarrierArriveEXT`` and ``OpControlBarrierWaitEXT`` take the same
+three operands as ``OpControlBarrier``: execution scope, memory scope and memory
+semantics. DXC emits the scopes ``GroupMemoryBarrierWithGroupSync()`` uses
+(execution scope ``Workgroup``, memory scope ``Workgroup``, ``WorkgroupMemory``
+memory class), so a split barrier covers exactly the memory the classic
+workgroup barrier covers. Only the memory order differs, because the extension
+makes the arrive a ``Release`` and the wait an ``Acquire``: an arrive orders
+nothing on its own, and workgroup memory written by another invocation is only
+guaranteed to be visible after the wait. In particular the arrive is not a
+memory barrier, and DXC never pairs it with a hidden ``OpMemoryBarrier``.
+
+The extension is **not** enabled by default. A module using it declares the
+``SplitBarrierEXT`` capability and the ``SPV_EXT_split_barrier`` extension, which
+a driver without ``VK_EXT_shader_split_barrier`` rejects, so the entry points are
+only accepted with ``-fspv-extension=SPV_EXT_split_barrier``. Without that flag
+both of them are compile errors instead of a silent lowering to
+``OpControlBarrier``, and a module that does not use them is unchanged. The pair
+is also restricted to compute stages, which is where the ``SplitBarrierEXT``
+capability is legal.
+
+Limitations:
+
+* **Pairing is not enforced.** The instructions carry no token operand, so the
+  module cannot show which arrive a wait belongs to and DXC does not attempt a
+  structural analysis. The shader author must ensure that every invocation of
+  the group executes one arrive and one wait, that the wait is dominated by the
+  arrive, and that both use the same scopes. An unmatched arrive, a wait without
+  an arrive, or a wait executed twice compiles and is undefined behavior; no
+  diagnostic is produced for any of them.
+* The host must enable the ``shaderSplitBarrier`` feature bit. The extension also
+  reserves shared memory for the barriers: subtract
+  ``VkPhysicalDeviceShaderSplitBarrierPropertiesEXT::splitBarrierReservedSharedMemory``
+  from ``maxComputeSharedMemorySize`` when sizing groupshared arrays. The
+  compiler cannot check either of these.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -346,6 +403,7 @@ Supported extensions
 * SPV_EXT_mesh_shader
 * SPV_EXT_shader_stencil_support
 * SPV_EXT_shader_viewport_index_layer
+* SPV_EXT_split_barrier
 * SPV_AMD_shader_early_and_late_fragment_tests
 * SPV_GOOGLE_hlsl_functionality1
 * SPV_GOOGLE_user_type

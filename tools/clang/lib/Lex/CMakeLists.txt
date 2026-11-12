@@ -48,11 +48,12 @@ set(hlsl_embedded_inputs
 
 if (ENABLE_SPIRV_CODEGEN)
   list(APPEND hlsl_embedded_inputs
-       vk/khr/cooperative_matrix.h
-       vk/khr/cooperative_matrix.impl
-       vk/opcode_selector.h
-       vk/spirv.h
-       )
+ vk/ext/split_barrier.h
+ vk/khr/cooperative_matrix.h
+ vk/khr/cooperative_matrix.impl
+ vk/opcode_selector.h
+ vk/spirv.h
+ )
 endif()
 
 set(hlsl_embedded_inc_files)

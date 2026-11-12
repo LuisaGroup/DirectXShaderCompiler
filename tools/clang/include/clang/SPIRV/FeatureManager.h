@@ -74,9 +74,11 @@ enum class Extension {
   EXT_shader_atomic_float_min_max,
   // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
   KHR_bfloat16,
-  // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
-  KHR_fma,
-  Unknown,
+    // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+    KHR_fma,
+    // HLSL Change - SPV_EXT_split_barrier (vk::SplitBarrierArrive/Wait).
+    EXT_split_barrier,
+    Unknown,
 };
 
 /// The class for handling SPIR-V version and extension requests.

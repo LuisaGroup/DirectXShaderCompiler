@@ -1106,7 +1106,13 @@ public:
   SpirvBarrier(SourceLocation loc, spv::Scope memoryScope,
                spv::MemorySemanticsMask memorySemantics,
                llvm::Optional<spv::Scope> executionScope = llvm::None,
-               SourceRange range = {});
+               SourceRange range = {},
+               // HLSL Change - SPV_EXT_split_barrier. When set, the barrier is
+               // emitted as OpControlBarrierArriveEXT or
+               // OpControlBarrierWaitEXT instead of OpControlBarrier; both take
+               // the same (execution scope, memory scope, memory semantics)
+               // operand list as OpControlBarrier.
+               spv::Op splitBarrierOp = spv::Op::Max);
 
   DEFINE_RELEASE_MEMORY_FOR_CLASS(SpirvBarrier)
 
@@ -1124,6 +1130,12 @@ public:
   bool isControlBarrier() const { return hasExecutionScope(); }
   bool hasExecutionScope() const { return executionScope.hasValue(); }
   spv::Scope getExecutionScope() const { return executionScope.getValue(); }
+  // HLSL Change Begin - SPV_EXT_split_barrier.
+  bool isSplitBarrier() const {
+    return getopcode() == spv::Op::OpControlBarrierArriveEXT ||
+           getopcode() == spv::Op::OpControlBarrierWaitEXT;
+  }
+  // HLSL Change End - SPV_EXT_split_barrier.
 
 private:
   spv::Scope memoryScope;

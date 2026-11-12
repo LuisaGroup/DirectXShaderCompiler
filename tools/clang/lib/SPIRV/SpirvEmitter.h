@@ -575,9 +575,13 @@ private:
   /// 'DeviceMemoryBarrier', 'DeviceMemoryBarrierWithGroupSync',
   /// 'AllMemoryBarrier', and 'AllMemoryBarrierWithGroupSync' intrinsic
   /// functions.
-  SpirvInstruction *processIntrinsicMemoryBarrier(const CallExpr *,
-                                                  bool isDevice, bool groupSync,
-                                                  bool isAllBarrier);
+    SpirvInstruction *processIntrinsicMemoryBarrier(const CallExpr *,
+                                                    bool isDevice, bool groupSync,
+                                                    bool isAllBarrier);
+    /// Processes the 'vk::SplitBarrierArrive' and 'vk::SplitBarrierWait'
+    /// functions from <vk/ext/split_barrier.h> (HLSL Change -
+    /// SPV_EXT_split_barrier).
+    SpirvInstruction *processSplitBarrierEXT(const CallExpr *, bool isArrive);
 
   /// Processes the 'GetRemainingRecursionLevels' intrinsic function.
   SpirvInstruction *

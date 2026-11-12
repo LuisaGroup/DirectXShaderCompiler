@@ -475,13 +475,26 @@ public:
   SpirvInstruction *createFinishWritingNodePayload(SpirvInstruction *payload,
                                                    SourceLocation);
 
-  /// \brief Creates an OpMemoryBarrier or OpControlBarrier instruction with the
-  /// given flags. If execution scope (exec) is provided, an OpControlBarrier
-  /// is created; otherwise an OpMemoryBarrier is created.
-  void createBarrier(spv::Scope memoryScope,
-                     spv::MemorySemanticsMask memorySemantics,
-                     llvm::Optional<spv::Scope> exec, SourceLocation,
-                     SourceRange range = {});
+    /// \brief Creates an OpMemoryBarrier or OpControlBarrier instruction with the
+    /// given flags. If execution scope (exec) is provided, an OpControlBarrier
+    /// is created; otherwise an OpMemoryBarrier is created.
+    void createBarrier(spv::Scope memoryScope,
+                       spv::MemorySemanticsMask memorySemantics,
+                       llvm::Optional<spv::Scope> exec, SourceLocation,
+                       SourceRange range = {});
+    /// \brief Creates an OpControlBarrierArriveEXT or
+    /// OpControlBarrierWaitEXT instruction (HLSL Change - SPV_EXT_split_barrier).
+    /// Both instructions take the same (execution scope, memory scope, memory
+    /// semantics) operands as OpControlBarrier and carry no token operand, so
+    /// the two halves of a split barrier are emitted with exactly the constants
+    /// OpControlBarrier would use for the same scope/semantics values.
+    /// The memory semantics order bits must be Release for the arrive and
+    /// Acquire for the wait; SPIRV-Tools rejects any other non-relaxed order on
+    /// either half.
+    void createSplitBarrier(bool isArrive, spv::Scope memoryScope,
+                            spv::MemorySemanticsMask memorySemantics,
+                            spv::Scope execScope, SourceLocation,
+                            SourceRange range = {});
 
   /// \brief Creates an OpBitFieldInsert SPIR-V instruction for the given
   /// arguments.

@@ -509,10 +509,14 @@ SpirvAtomic::SpirvAtomic(spv::Op op, QualType resultType, SourceLocation loc,
 SpirvBarrier::SpirvBarrier(SourceLocation loc, spv::Scope memScope,
                            spv::MemorySemanticsMask memSemantics,
                            llvm::Optional<spv::Scope> execScope,
-                           SourceRange range)
+                           SourceRange range,
+                           // HLSL Change - SPV_EXT_split_barrier.
+                           spv::Op splitBarrierOp)
     : SpirvInstruction(IK_Barrier,
-                       execScope.hasValue() ? spv::Op::OpControlBarrier
-                                            : spv::Op::OpMemoryBarrier,
+                       splitBarrierOp != spv::Op::Max
+                           ? splitBarrierOp
+                           : (execScope.hasValue() ? spv::Op::OpControlBarrier
+                                                   : spv::Op::OpMemoryBarrier),
                        QualType(), loc, range),
       memoryScope(memScope), memorySemantics(memSemantics),
       executionScope(execScope) {}

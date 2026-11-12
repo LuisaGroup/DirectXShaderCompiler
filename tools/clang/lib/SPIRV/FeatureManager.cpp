@@ -238,9 +238,11 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
       .Case("SPV_EXT_shader_atomic_float_min_max", Extension::EXT_shader_atomic_float_min_max)
         // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
         .Case("SPV_KHR_bfloat16", Extension::KHR_bfloat16)
-      // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
-      .Case("SPV_KHR_fma", Extension::KHR_fma)
-      .Default(Extension::Unknown);
+        // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+        .Case("SPV_KHR_fma", Extension::KHR_fma)
+        // HLSL Change - SPV_EXT_split_barrier.
+        .Case("SPV_EXT_split_barrier", Extension::EXT_split_barrier)
+        .Default(Extension::Unknown);
 }
 
 const char *FeatureManager::getExtensionName(Extension symbol) {
@@ -330,10 +332,13 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
   // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
   case Extension::KHR_bfloat16:
  return "SPV_KHR_bfloat16";
-  // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
-  case Extension::KHR_fma:
-    return "SPV_KHR_fma";
-  default:
+    // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+    case Extension::KHR_fma:
+      return "SPV_KHR_fma";
+    // HLSL Change - SPV_EXT_split_barrier.
+    case Extension::EXT_split_barrier:
+      return "SPV_EXT_split_barrier";
+    default:
     break;
   }
   return "<unknown extension>";
@@ -442,9 +447,19 @@ bool FeatureManager::enabledByDefault(Extension ext) {
   // instruction becomes the OpFmaKHR core instruction), and modules using
   // OpFmaKHR are rejected by drivers without VK_KHR_shader_fma. Therefore it
   // is only enabled when the user explicitly asks for it.
-  case Extension::KHR_fma:
-    return false;
-  default:
+    case Extension::KHR_fma:
+      return false;
+    // HLSL Change - SPV_EXT_split_barrier. Split barriers are a new construct
+    // (vk::SplitBarrierArrive/vk::SplitBarrierWait) rather than a replacement
+    // for existing codegen, but modules using them declare the SplitBarrierEXT
+    // capability and the SPV_EXT_split_barrier extension, which a driver
+    // without VK_EXT_shader_split_barrier rejects. Enabling them is therefore
+    // opt-in: without -fspv-extension=SPV_EXT_split_barrier the header's
+    // entry points are rejected with a diagnostic instead of silently
+    // lowering to OpControlBarrier.
+    case Extension::EXT_split_barrier:
+      return false;
+    default:
     return true;
   }
 }

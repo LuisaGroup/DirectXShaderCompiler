@@ -27,6 +27,17 @@ The included licenses apply to the following files:
   extended instruction. The extension is opt-in (modules using `OpFmaKHR` need
   `VK_KHR_shader_fma` and the `shaderFmaFloat32` feature), and without
   `-fspv-extension=SPV_KHR_fma` code generation is unchanged.
+- Added support for `SPV_EXT_split_barrier`: with
+  `-fspv-extension=SPV_EXT_split_barrier`, `vk::SplitBarrierArrive()` and
+  `vk::SplitBarrierWait()` from `<vk/ext/split_barrier.h>` are emitted as
+  `OpControlBarrierArriveEXT` and `OpControlBarrierWaitEXT` with the
+  `SplitBarrierEXT` capability and the `SPV_EXT_split_barrier` extension, so a
+  compute shader can overlap independent work with a workgroup barrier instead
+  of waiting at `GroupMemoryBarrierWithGroupSync()`. The entry points are
+  compute-only and opt-in (without the flag they are compile errors). The
+  arrive/wait pairing is not enforced by the compiler: the instructions carry
+  no token, so an unmatched arrive or an un-arrived wait is undefined
+  behavior.
 - Added `-fvk-resource-heap-stride` and `-fvk-sampler-heap-stride`, which
   override the computed `ArrayStrideIdEXT` of the resource and sampler
   descriptor heaps with a literal `ArrayStride`. The value must be a power of

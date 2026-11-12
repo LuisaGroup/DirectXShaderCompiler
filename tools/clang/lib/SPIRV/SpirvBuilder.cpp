@@ -995,15 +995,32 @@ SpirvBuilder::createFinishWritingNodePayload(SpirvInstruction *payload,
   return inst;
 }
 
-void SpirvBuilder::createBarrier(spv::Scope memoryScope,
-                                 spv::MemorySemanticsMask memorySemantics,
-                                 llvm::Optional<spv::Scope> exec,
-                                 SourceLocation loc, SourceRange range) {
-  assert(insertPoint && "null insert point");
-  SpirvBarrier *barrier = new (context)
-      SpirvBarrier(loc, memoryScope, memorySemantics, exec, range);
-  insertPoint->addInstruction(barrier);
-}
+  void SpirvBuilder::createBarrier(spv::Scope memoryScope,
+                                   spv::MemorySemanticsMask memorySemantics,
+                                   llvm::Optional<spv::Scope> exec,
+                                   SourceLocation loc, SourceRange range) {
+    assert(insertPoint && "null insert point");
+    SpirvBarrier *barrier = new (context)
+        SpirvBarrier(loc, memoryScope, memorySemantics, exec, range);
+    insertPoint->addInstruction(barrier);
+  }
+
+  // HLSL Change Begin - SPV_EXT_split_barrier.
+  void SpirvBuilder::createSplitBarrier(
+      bool isArrive, spv::Scope memoryScope,
+      spv::MemorySemanticsMask memorySemantics, spv::Scope execScope,
+      SourceLocation loc, SourceRange range) {
+    assert(insertPoint && "null insert point");
+    const spv::Op op = isArrive ? spv::Op::OpControlBarrierArriveEXT
+                                : spv::Op::OpControlBarrierWaitEXT;
+    SpirvBarrier *barrier =
+        new (context) SpirvBarrier(loc, memoryScope, memorySemantics,
+                                   llvm::Optional<spv::Scope>(execScope), range,
+                                   op);
+    insertPoint->addInstruction(barrier);
+  }
+  // HLSL Change End - SPV_EXT_split_barrier.
+
 
 SpirvInstruction *SpirvBuilder::createEmulatedBitFieldInsert(
     QualType resultType, uint32_t baseTypeBitwidth, SpirvInstruction *base,

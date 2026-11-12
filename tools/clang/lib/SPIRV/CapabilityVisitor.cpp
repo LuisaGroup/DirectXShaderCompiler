@@ -722,6 +722,18 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     }
     break;
   }
+  // HLSL Change Begin - SPV_EXT_split_barrier. OpControlBarrierArriveEXT and
+  // OpControlBarrierWaitEXT require the SplitBarrierEXT capability and the
+  // SPV_EXT_split_barrier extension. The emitter requests them too (see
+  // SpirvEmitter::processSplitBarrierEXT); routing them through
+  // addExtensionAndCapabilitiesIfEnabled keeps the extension tied to
+  // -fspv-extension=SPV_EXT_split_barrier.
+  case spv::Op::OpControlBarrierArriveEXT:
+  case spv::Op::OpControlBarrierWaitEXT:
+    addExtensionAndCapabilitiesIfEnabled(Extension::EXT_split_barrier,
+                                         {spv::Capability::SplitBarrierEXT});
+    break;
+  // HLSL Change End - SPV_EXT_split_barrier.
 
   default:
     break;

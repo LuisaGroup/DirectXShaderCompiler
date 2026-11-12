@@ -563,6 +563,27 @@ bool isCooperativeMatrixGetLengthIntrinsic(
   return functionDeclaration->getName().equals(
       "__builtin_spv_CooperativeMatrixLengthKHR");
 }
+// HLSL Change Begin - SPV_EXT_split_barrier.
+// Returns true if the given function is 'vk::SplitBarrierArrive' or
+// 'vk::SplitBarrierWait' from <vk/ext/split_barrier.h>, and sets *isArrive
+// accordingly. Both are declaration-only entry points dispatched here by name;
+// they carry no parameters, so the whole encoding comes from
+// SpirvBuilder::createSplitBarrier.
+bool isVkSplitBarrierIntrinsic(const FunctionDecl *fd, bool *isArrive) {
+  const auto *nsDecl = dyn_cast<NamespaceDecl>(fd->getDeclContext());
+  if (!nsDecl || !nsDecl->getName().equals("vk"))
+    return false;
+  if (fd->getName().equals("SplitBarrierArrive")) {
+    *isArrive = true;
+    return true;
+  }
+  if (fd->getName().equals("SplitBarrierWait")) {
+    *isArrive = false;
+    return true;
+  }
+  return false;
+}
+// HLSL Change End - SPV_EXT_split_barrier.
 bool isCooperativeMatrixBitCastQCOMIntrinsic(const FunctionDecl *f) {
   return f->getName().equals("__builtin_spv_BitCastArrayQCOM");
 }
@@ -3450,6 +3471,14 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
   if (isCooperativeMatrixGetLengthIntrinsic(funcDecl)) {
     return processCooperativeMatrixGetLength(callExpr);
   }
+
+  // HLSL Change Begin - SPV_EXT_split_barrier.
+  // Handle 'vk::SplitBarrierArrive()' and 'vk::SplitBarrierWait()'.
+  bool isSplitBarrierArrive = false;
+  if (isVkSplitBarrierIntrinsic(funcDecl, &isSplitBarrierArrive)) {
+    return processSplitBarrierEXT(callExpr, isSplitBarrierArrive);
+  }
+  // HLSL Change End - SPV_EXT_split_barrier.
 
   // Normal standalone functions
   return processCall(callExpr);
@@ -13335,6 +13364,52 @@ SpirvEmitter::processIntrinsicMemoryBarrier(const CallExpr *callExpr,
                            callExpr->getExprLoc(), callExpr->getSourceRange());
   return nullptr;
 }
+
+// HLSL Change Begin - SPV_EXT_split_barrier.
+SpirvInstruction *
+SpirvEmitter::processSplitBarrierEXT(const CallExpr *callExpr, bool isArrive) {
+  const auto loc = callExpr->getExprLoc();
+  const char *name =
+      isArrive ? "vk::SplitBarrierArrive" : "vk::SplitBarrierWait";
+
+  if (!featureManager.isExtensionEnabled(Extension::EXT_split_barrier)) {
+    emitError("'%0' requires the SPV_EXT_split_barrier extension; pass "
+              "-fspv-extension=SPV_EXT_split_barrier to enable it",
+              loc)
+        << name;
+    return nullptr;
+  }
+
+  // The SplitBarrierEXT capability may only be enabled in a compute stage.
+  // Library targets are accepted here because the stage of a plain helper
+  // function is not known while it is emitted; the validator still rejects a
+  // module that enables the capability in a stage that cannot use it.
+  if (!spvContext.isCS() && !spvContext.isLib()) {
+    emitError("'%0' is only available in compute shaders", loc) << name;
+    return nullptr;
+  }
+
+  // Scopes: the same execution and memory scopes
+  // GroupMemoryBarrierWithGroupSync() uses, so a split barrier covers exactly
+  // the workgroup memory a classic workgroup barrier covers and the emitted
+  // scope operands are the same constant ids.
+  //
+  // Memory ordering: VK_EXT_shader_split_barrier requires the arrive to be a
+  // Release and the wait to be an Acquire (a barrier that is both at once is
+  // OpControlBarrier, not a split barrier; SPIRV-Tools rejects
+  // AcquireRelease/SequentiallyConsistent on either half). The arrive
+  // therefore provides no ordering on its own - the ordering becomes visible
+  // only at the matching wait.
+  const spv::MemorySemanticsMask memorySemantics =
+      spv::MemorySemanticsMask::WorkgroupMemory |
+      (isArrive ? spv::MemorySemanticsMask::Release
+                : spv::MemorySemanticsMask::Acquire);
+  spvBuilder.createSplitBarrier(isArrive, spv::Scope::Workgroup, memorySemantics,
+                                spv::Scope::Workgroup, loc,
+                                callExpr->getSourceRange());
+  return nullptr;
+}
+// HLSL Change End - SPV_EXT_split_barrier.
 
 SpirvInstruction *SpirvEmitter::processNonFpMatrixTranspose(
     QualType matType, SpirvInstruction *matrix, SourceLocation loc,

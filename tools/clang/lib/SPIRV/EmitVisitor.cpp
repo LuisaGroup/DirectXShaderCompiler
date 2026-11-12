@@ -978,8 +978,16 @@ bool EmitVisitor::visit(SpirvAtomic *inst) {
 }
 
 bool EmitVisitor::visit(SpirvBarrier *inst) {
+  // HLSL Change - SPV_EXT_split_barrier: OpControlBarrierArriveEXT and
+  // OpControlBarrierWaitEXT take the same (execution scope, memory scope,
+  // memory semantics) operand list as OpControlBarrier, so the split forms are
+  // emitted by the same code. The constants are the ones the classic barrier
+  // uses for the same values, which is what makes the arrive/wait pair name the
+  // same scope ids as GroupMemoryBarrierWithGroupSync().
+  const bool hasExecutionScope =
+      inst->isControlBarrier() || inst->isSplitBarrier();
   const uint32_t executionScopeId =
-      inst->isControlBarrier()
+      hasExecutionScope
           ? typeHandler.getOrCreateConstantInt(
                 llvm::APInt(32,
                             static_cast<uint32_t>(inst->getExecutionScope())),
@@ -995,7 +1003,7 @@ bool EmitVisitor::visit(SpirvBarrier *inst) {
       context.getUIntType(32), /* isSpecConst */ false);
 
   initInstruction(inst);
-  if (inst->isControlBarrier())
+  if (hasExecutionScope)
     curInst.push_back(executionScopeId);
   curInst.push_back(memoryScopeId);
   curInst.push_back(memorySemanticsId);
