@@ -103,6 +103,7 @@ public:
     IK_Unreachable,         // OpUnreachable
     IK_RayTracingTerminate, // OpIgnoreIntersectionKHR/OpTerminateRayKHR
     IK_EmitMeshTasksEXT,    // OpEmitMeshTasksEXT
+    IK_AbortKHR,            // OpAbortKHR (HLSL Change - SPV_KHR_abort)
 
     // Normal instruction kinds
     // In alphabetical order
@@ -827,8 +828,7 @@ class SpirvTerminator : public SpirvInstruction {
 public:
   // For LLVM-style RTTI
   static bool classof(const SpirvInstruction *inst) {
-    return inst->getKind() >= IK_Branch &&
-           inst->getKind() <= IK_EmitMeshTasksEXT;
+    return inst->getKind() >= IK_Branch && inst->getKind() <= IK_AbortKHR;
   }
 
 protected:
@@ -913,6 +913,56 @@ private:
   SpirvBasicBlock *trueLabel;
   SpirvBasicBlock *falseLabel;
 };
+
+// HLSL Change Begin - SPV_KHR_abort.
+/// \brief OpAbortKHR instruction
+///
+/// "Ceases all further processing in the invocation that executes it. Only
+/// instructions executed before OpAbortKHR will have side effects." and "This
+/// instruction must be the last instruction in a block." (SPV_KHR_abort), so the
+/// instruction is modelled as a SpirvTerminator: SpirvBasicBlock::hasTerminator()
+/// becomes true for the enclosing block, nothing else is appended to it, and
+/// untraversed blocks that follow it are dropped like the ones after OpKill.
+///
+/// The instruction has no Result Type and no Result <id> (spirv.h:
+/// "case SpvOpAbortKHR: *hasResult = false; *hasResultType = false"). Its two
+/// IdRef operands are the message *type* and the message *value*:
+///
+///   OpAbortKHR <message type id> <message value id>
+///
+/// "Message Type is the type of the data to be written. Message Type must be a
+/// concrete type. [...] Message is data that is passed to the client API after
+/// termination. Message Type must logically match the type of Message."
+/// (SPV_KHR_abort). Only the value is carried here: the type operand is the type
+/// id of the value, which trivially satisfies the "logically match" rule and is
+/// found by EmitVisitor with TypeHandler::emitType.
+class SpirvAbortKHR : public SpirvTerminator {
+public:
+  SpirvAbortKHR(SpirvInstruction *message, SourceLocation loc,
+                SourceRange range = {});
+
+  DEFINE_RELEASE_MEMORY_FOR_CLASS(SpirvAbortKHR)
+
+  // For LLVM-style RTTI
+  static bool classof(const SpirvInstruction *inst) {
+    return inst->getKind() == IK_AbortKHR;
+  }
+
+  bool invokeVisitor(Visitor *v) override;
+
+  /// Returns the message value that is handed to the client API.
+  SpirvInstruction *getMessage() const { return message; }
+
+  void replaceOperand(
+      llvm::function_ref<SpirvInstruction *(SpirvInstruction *)> remapOp,
+      bool inEntryFunctionWrapper) override {
+    message = remapOp(message);
+  }
+
+private:
+  SpirvInstruction *message;
+};
+// HLSL Change End - SPV_KHR_abort.
 
 /// \brief OpKill instruction
 class SpirvKill : public SpirvTerminator {

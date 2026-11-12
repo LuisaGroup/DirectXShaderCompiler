@@ -584,6 +584,18 @@ bool isVkSplitBarrierIntrinsic(const FunctionDecl *fd, bool *isArrive) {
   return false;
 }
 // HLSL Change End - SPV_EXT_split_barrier.
+// HLSL Change Begin - SPV_KHR_abort.
+// Returns true if the given function is 'vk::Abort' from <vk/ext/abort.h>.
+// It is a declaration-only entry point dispatched here by name; it carries the
+// message value, and the rest of the encoding comes from
+// SpirvBuilder::createAbortKHR.
+bool isVkAbortIntrinsic(const FunctionDecl *fd) {
+  const auto *nsDecl = dyn_cast<NamespaceDecl>(fd->getDeclContext());
+  if (!nsDecl || !nsDecl->getName().equals("vk"))
+    return false;
+  return fd->getName().equals("Abort");
+}
+// HLSL Change End - SPV_KHR_abort.
 bool isCooperativeMatrixBitCastQCOMIntrinsic(const FunctionDecl *f) {
   return f->getName().equals("__builtin_spv_BitCastArrayQCOM");
 }
@@ -3672,6 +3684,12 @@ SpirvInstruction *SpirvEmitter::doCallExpr(const CallExpr *callExpr,
     return processSplitBarrierEXT(callExpr, isSplitBarrierArrive);
   }
   // HLSL Change End - SPV_EXT_split_barrier.
+    // HLSL Change Begin - SPV_KHR_abort.
+    // Handle 'vk::Abort()'.
+    if (isVkAbortIntrinsic(funcDecl)) {
+      return processAbortKHR(callExpr);
+    }
+    // HLSL Change End - SPV_KHR_abort.
 
   // Normal standalone functions
   return processCall(callExpr);
@@ -13659,6 +13677,47 @@ SpirvEmitter::processSplitBarrierEXT(const CallExpr *callExpr, bool isArrive) {
   return nullptr;
 }
 // HLSL Change End - SPV_EXT_split_barrier.
+// HLSL Change Begin - SPV_KHR_abort.
+SpirvInstruction *SpirvEmitter::processAbortKHR(const CallExpr *callExpr) {
+  const auto loc = callExpr->getExprLoc();
+  if (!featureManager.isExtensionEnabled(Extension::KHR_abort)) {
+    emitError("'vk::Abort' requires the SPV_KHR_abort extension; pass "
+              "-fspv-extension=SPV_KHR_abort to enable it",
+              loc);
+    return nullptr;
+  }
+
+  // HLSL has no equivalent of the GLSL front end's "pack the format string and
+  // the varargs into a struct laid out with scalar packing" convention, so the
+  // surface takes the message as one 32-bit unsigned value and both operands of
+  // OpAbortKHR are derived from it: the Message operand is the value and the
+  // Message Type operand is the value's own type (32-bit unsigned integer). A
+  // scalar has no explicit layout to declare, which is what SPV_KHR_abort
+  // requires of the message type in a module that declares Shader.
+  if (callExpr->getNumArgs() != 1) {
+    emitError("'vk::Abort' takes exactly one message argument", loc);
+    return nullptr;
+  }
+  // The parameter is declared as uint, so Sema has already converted the
+  // argument to 32-bit unsigned and the value is the whole message payload.
+  auto *message = loadIfGLValue(callExpr->getArg(0));
+  if (!message)
+    return nullptr;
+
+  spvBuilder.createAbortKHR(message, loc, callExpr->getSourceRange());
+
+  // OpAbortKHR is a block terminator ("This instruction must be the last
+  // instruction in a block"), so anything that follows the call belongs to a new
+  // basic block - exactly what doDiscardStmt, doReturnStmt and doBreakStmt do
+  // after their own terminator. The new block has no predecessor, so
+  // BlockReadableOrderVisitor never reaches it and the statements after the
+  // abort are dropped: "Only instructions executed before OpAbortKHR will have
+  // side effects", and a dropped block cannot execute.
+  auto *newBlock = spvBuilder.createBasicBlock();
+  spvBuilder.setInsertPoint(newBlock);
+  return nullptr;
+}
+// HLSL Change End - SPV_KHR_abort.
 
 SpirvInstruction *SpirvEmitter::processNonFpMatrixTranspose(
     QualType matType, SpirvInstruction *matrix, SourceLocation loc,

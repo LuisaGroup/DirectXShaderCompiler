@@ -891,6 +891,38 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     break;
   }
   // HLSL Change End - SPV_KHR_constant_data.
+  // HLSL Change Begin - SPV_KHR_abort. OpAbortKHR is guarded by the AbortKHR
+  // capability (spirv.core.grammar.json: "OpAbortKHR opnum=5121
+  // caps=[AbortKHR]") and that capability is only allowed together with
+  // OpExtension "SPV_KHR_abort" (SPIRV-Tools: "operand AbortKHR(5120) requires
+  // one of these extensions: SPV_KHR_abort"). Both are routed through the
+  // ordinary registration path so -fspv-extension= stays an allow-list;
+  // SpirvEmitter::processAbortKHR has already rejected the call when the
+  // extension is not enabled, so this is the declaration half of the same
+  // statement (a hand-written OpAbortKHR through [[vk::ext_instruction]] hits
+  // only this half).
+  case spv::Op::OpAbortKHR: {
+    addExtension(Extension::KHR_abort, "OpAbortKHR", loc);
+    addCapability(spv::Capability::AbortKHR, loc);
+    // Dependent capability: the message is allowed to be an OpConstantDataKHR
+    // (that is how SPV_KHR_abort's own example packs a string message), and
+    // such a module must also declare ConstantDataKHR +
+    // OpExtension "SPV_KHR_constant_data". The OpConstantDataKHR case above
+    // already reaches that conclusion for the instruction itself, so this arm
+    // only makes the dependency explicit and only fires when the message
+    // really is constant data. It is deliberately routed through
+    // addExtensionAndCapabilitiesIfEnabled: if the extension is missing, the
+    // OpConstantDataKHR case reports the error once instead of twice here.
+    const auto *abort = dyn_cast<SpirvAbortKHR>(instr);
+    if (abort && abort->getMessage() &&
+        isa<SpirvConstantDataKHR>(abort->getMessage())) {
+      addExtensionAndCapabilitiesIfEnabled(
+          Extension::KHR_constant_data,
+          {spv::Capability::ConstantDataKHR});
+    }
+    break;
+  }
+  // HLSL Change End - SPV_KHR_abort.
   case spv::Op::OpConstantStringAMDX:
   case spv::Op::OpSpecConstantStringAMDX:
   case spv::Op::OpAllocateNodePayloadsAMDX:

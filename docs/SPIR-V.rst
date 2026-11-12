@@ -1708,6 +1708,115 @@ composite) and ``tools/clang/test/CodeGenSPIRV/constant-data*.hlsl`` for the
 tests that pin the packing of every element width, the threshold, the off path,
 the optimizer-survival path and the diagnostics.
 
+Shader abort
+~~~~~~~~~~~~
+The ``SPV_KHR_abort`` extension adds ``OpAbortKHR`` (5121), an instruction that
+ceases all further processing in the invocation that executes it and reports a
+message to the client API. The extension describes it as follows:
+
+  "Ceases all further processing in the invocation that executes it. Only
+  instructions executed before OpAbortKHR will have side effects. Other
+  invocations in the same Device scope instance will also be terminated in finite
+  time, though may reach completion."
+
+HLSL spells it ``vk::Abort()`` from ``<vk/ext/abort.h>``:
+
+.. code:: hlsl
+
+  #include <vk/ext/abort.h>
+
+  [numthreads(64, 1, 1)]
+  void main(uint3 tid : SV_DispatchThreadID) {
+    if (!IsFinite(input[tid.x])) {
+      vk::Abort(0x1000 + tid.x); // OpAbortKHR %uint %message
+    }
+    // ...
+  }
+
+The instruction has no result type and no result id; its two ``IdRef`` operands
+are the *Message Type* and the *Message*, in that order (word 4 and word 5 in the
+extension's encoding table):
+
+  "Message Type is the type of the data to be written. [...] Message is data that
+  is passed to the client API after termination. Message Type must logically
+  match the type of Message."
+
+Operand 4 is therefore a *type* id and operand 5 the id of a *value* of that type,
+not a pointer to a message block. DXC uses the message value's own type as the
+type operand and takes the message from the single ``uint`` argument, so the
+message is four bytes of data in the host's byte order:
+
+.. code:: text
+
+  %uint = OpTypeInt 32 0
+  %uint_12648430 = OpConstant %uint 12648430
+  ...
+  OpAbortKHR %uint %uint_12648430
+
+``OpAbortKHR`` is a block terminator ("This instruction must be the last
+instruction in a block"), so the emitter treats the call like ``return`` and
+``discard``: the statement ends the current block, and statements written after
+it are placed in a block that has no predecessor and is never emitted. "Only
+instructions executed before OpAbortKHR will have side effects" therefore holds
+structurally - code after the call cannot execute and does not appear in the
+module. The instruction is legal in a helper function for the same reason: a
+block that ends in it simply has no successor, so the function needs no return
+path from it, and SPIRV-Tools models it exactly that way (``validate_cfg.cpp``
+ends the current block on it and registers no execution-model restriction, which
+is why DXC accepts ``vk::Abort`` in every stage, fragment shaders included).
+
+The extension is **not** enabled by default. A module that aborts declares
+``OpCapability AbortKHR`` (5120) together with ``OpExtension "SPV_KHR_abort"``,
+and ``VK_KHR_shader_abort`` makes an abort lose the device, so enabling the
+instruction implicitly would turn a shader that only wants to report something
+into a device loss on a host that never opted in. Without
+``-fspv-extension=SPV_KHR_abort`` every ``vk::Abort`` call is a compile error
+instead, and a shader that does not abort is unchanged.
+
+``OpAbortKHR`` needs the ``ConstantDataKHR`` capability and the
+``SPV_KHR_constant_data`` extension only for a message that is built out of
+``OpConstantDataKHR``. The extension's own example packs a format string and its
+arguments into a struct laid out with scalar rules, where the string is an
+``OpTypeArray`` of bytes decorated ``UTFEncodedKHR`` and its contents an
+``OpConstantDataKHR``. HLSL has no equivalent of that convention - the format
+string and the variadic argument list are GLSL surface, not SPIR-V - and a message
+type that is an array must additionally carry an ``ArrayStride`` decoration in a
+module that declares ``Shader``, which an ``OpConstantDataKHR`` result type may
+not, so such a message needs two structurally identical array types (a value type
+for the instruction and a load type for the abort). DXC does not emit that form,
+so a module that aborts with the scalar message above declares ``AbortKHR`` only.
+If an ``OpAbortKHR`` whose message *is* an ``OpConstantDataKHR`` does reach the
+backend - through a hand-written ``[[vk::ext_instruction(5121)]]`` declaration,
+for example - CapabilityVisitor adds the dependent ``ConstantDataKHR`` capability
+and the ``SPV_KHR_constant_data`` extension as well.
+
+Limitations:
+
+* The abort is not a barrier and does not synchronize. Other invocations of the
+  same device are terminated "in finite time" but "may reach completion", so a
+  shader must not rely on an abort to publish data for other invocations, and the
+  side effects the application may observe are only the ones that happened before
+  the abort.
+* The message is data, not a format string: nothing is formatted and the host
+  receives the raw four bytes. With ``VK_KHR_device_fault`` enabled as well,
+  ``VkDeviceFaultShaderAbortMessageInfoKHR`` reads the messages back as a sequence
+  of 8-byte-aligned length/message pairs, so several invocations may each report
+  one.
+* The host must enable
+  ``VkPhysicalDeviceShaderAbortFeaturesKHR::shaderAbort`` before it creates a
+  pipeline that contains the instruction, and must be prepared for the device to be
+  lost; the largest message it accepts is
+  ``VkPhysicalDeviceShaderAbortPropertiesKHR::maxShaderAbortMessageSize``, at least
+  65536 bytes. The compiler cannot check any of this.
+* This is a SPIR-V only surface: DXIL has no abort instruction, so a ``vk::Abort``
+  call on the DXIL path has no definition and is rejected with "External function
+  used in non-library profile".
+
+See ``examples/spirv-extensions/khr-shader-abort.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/vk.abort*.hlsl`` for the tests that pin
+the encoding, the terminator rule, the helper-function case, the stage coverage,
+the off path, the optimizer-survival path and the diagnostics.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1753,6 +1862,7 @@ Supported extensions
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap
 * SPV_KHR_fma
+* SPV_KHR_abort
 * SPV_KHR_constant_data
 * SPV_QCOM_image_processing3
 * SPV_QCOM_multiple_wait_queues

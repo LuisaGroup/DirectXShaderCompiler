@@ -402,6 +402,13 @@ public:
   /// \brief Creates a fragment-shader discard via by emitting OpKill.
   void createKill(SourceLocation, SourceRange range = {});
 
+  // HLSL Change Begin - SPV_KHR_abort.
+  /// \brief Creates an OpAbortKHR instruction, which terminates the current
+  /// basic block (the message is the value handed to the client API).
+  void createAbortKHR(SpirvInstruction *message, SourceLocation,
+                      SourceRange range = {});
+  // HLSL Change End - SPV_KHR_abort.
+
   /// \brief Creates an unconditional branch to the given target label.
   /// If mergeBB and continueBB are non-null, it creates an OpLoopMerge
   /// instruction followed by an unconditional branch to the given target label.

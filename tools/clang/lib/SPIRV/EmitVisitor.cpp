@@ -938,7 +938,25 @@ bool EmitVisitor::visit(SpirvUnreachable *inst) {
   initInstruction(inst);
   finalizeInstruction(&mainBinary);
   return true;
+  }
+
+// HLSL Change Begin - SPV_KHR_abort.
+bool EmitVisitor::visit(SpirvAbortKHR *inst) {
+  // OpAbortKHR has no Result Type and no Result <id>; its two operands are the
+  // message type and the message value, in that order (SPV_KHR_abort:
+  // "3 | 5121 | Message Type | Message"). The type operand is the type id of
+  // the value, which is what "Message Type must logically match the type of
+  // Message" asks for.
+  SpirvInstruction *message = inst->getMessage();
+  assert(message && message->hasResultType() &&
+         "OpAbortKHR message must be a value with a type");
+  initInstruction(inst);
+  curInst.push_back(typeHandler.emitType(message->getResultType()));
+  curInst.push_back(getOrAssignResultId<SpirvInstruction>(message));
+  finalizeInstruction(&mainBinary);
+  return true;
 }
+// HLSL Change End - SPV_KHR_abort.
 
 bool EmitVisitor::visit(SpirvAccessChain *inst) {
   initInstruction(inst);

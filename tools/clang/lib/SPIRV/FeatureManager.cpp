@@ -267,6 +267,7 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_KHR_constant_data.
         .Case("SPV_KHR_constant_data",
               Extension::KHR_constant_data)
+.Case("SPV_KHR_abort", Extension::KHR_abort)
         .Default(Extension::Unknown);
 }
 
@@ -390,6 +391,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_KHR_constant_data.
     case Extension::KHR_constant_data:
       return "SPV_KHR_constant_data";
+    // HLSL Change - SPV_KHR_abort.
+    case Extension::KHR_abort:
+      return "SPV_KHR_abort";
     default:
     break;
   }
@@ -624,6 +628,18 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // is opt-in: without -fspv-extension=SPV_KHR_constant_data the
     // instruction is a compile error instead of an implicit request.
     case Extension::KHR_constant_data:
+      return false;
+    // HLSL Change - SPV_KHR_abort. A module that aborts declares the AbortKHR
+    // capability and the SPV_KHR_abort extension, and an abort is not a
+    // recovery point: VK_KHR_shader_abort requires the host to enable
+    // VkPhysicalDeviceShaderAbortFeaturesKHR::shaderAbort and makes the abort
+    // lose the device. Emitting one implicitly would therefore turn a shader
+    // that "just reports something" into a device loss on a host that never
+    // opted in. The extension is opt-in: without
+    // -fspv-extension=SPV_KHR_abort every vk::Abort call is a compile error
+    // (SpirvEmitter::processAbortKHR) and a shader that only includes the
+    // header is unchanged.
+    case Extension::KHR_abort:
       return false;
     default:
     return true;

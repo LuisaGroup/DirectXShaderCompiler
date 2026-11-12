@@ -850,6 +850,16 @@ void SpirvBuilder::createKill(SourceLocation loc, SourceRange range) {
   insertPoint->addInstruction(kill);
 }
 
+// HLSL Change Begin - SPV_KHR_abort.
+void SpirvBuilder::createAbortKHR(SpirvInstruction *message, SourceLocation loc,
+                                  SourceRange range) {
+  assert(insertPoint && "null insert point");
+  auto *abort = new (context) SpirvAbortKHR(message, loc, range);
+  insertPoint->addInstruction(abort);
+}
+// HLSL Change End - SPV_KHR_abort.
+
+
 void SpirvBuilder::createBranch(SpirvBasicBlock *targetLabel,
                                 SourceLocation loc, SpirvBasicBlock *mergeBB,
                                 SpirvBasicBlock *continueBB,

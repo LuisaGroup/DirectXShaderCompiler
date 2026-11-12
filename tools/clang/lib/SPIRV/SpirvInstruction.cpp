@@ -49,6 +49,9 @@ DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvKill)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvReturn)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvSwitch)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvUnreachable)
+// HLSL Change Begin - SPV_KHR_abort.
+DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvAbortKHR)
+// HLSL Change End - SPV_KHR_abort.
 
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvAccessChain)
 DEFINE_INVOKE_VISITOR_FOR_CLASS(SpirvUntypedAccessChainKHR)
@@ -430,6 +433,15 @@ SpirvBranchConditional::SpirvBranchConditional(SourceLocation loc,
 
 SpirvKill::SpirvKill(SourceLocation loc, SourceRange range)
     : SpirvTerminator(IK_Kill, spv::Op::OpKill, loc, range) {}
+
+// HLSL Change Begin - SPV_KHR_abort.
+SpirvAbortKHR::SpirvAbortKHR(SpirvInstruction *message, SourceLocation loc,
+                             SourceRange range)
+    : SpirvTerminator(IK_AbortKHR, spv::Op::OpAbortKHR, loc, range),
+      message(message) {
+  assert(message && "OpAbortKHR requires a message value");
+}
+// HLSL Change End - SPV_KHR_abort.
 
 SpirvReturn::SpirvReturn(SourceLocation loc, SpirvInstruction *retVal,
                          SourceRange range)

@@ -109,6 +109,8 @@ enum class Extension {
   // HLSL Change - SPV_KHR_constant_data (OpConstantDataKHR for
   // -fspv-constant-data).
   KHR_constant_data,
+  // HLSL Change - SPV_KHR_abort (OpAbortKHR for vk::Abort).
+  KHR_abort,
   Unknown,
 };
 

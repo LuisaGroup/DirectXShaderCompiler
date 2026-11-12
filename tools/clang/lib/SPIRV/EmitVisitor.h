@@ -260,6 +260,9 @@ public:
   bool visit(SpirvReturn *) override;
   bool visit(SpirvSwitch *) override;
   bool visit(SpirvUnreachable *) override;
+  // HLSL Change Begin - SPV_KHR_abort.
+  bool visit(SpirvAbortKHR *) override;
+  // HLSL Change End - SPV_KHR_abort.
   bool visit(SpirvAccessChain *) override;
   bool visit(SpirvAtomic *) override;
   bool visit(SpirvBarrier *) override;

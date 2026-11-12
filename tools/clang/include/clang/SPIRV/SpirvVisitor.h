@@ -79,6 +79,10 @@ public:
   DEFINE_VISIT_METHOD(SpirvReturn)
   DEFINE_VISIT_METHOD(SpirvSwitch)
   DEFINE_VISIT_METHOD(SpirvUnreachable)
+  // HLSL Change Begin - SPV_KHR_abort.
+  DEFINE_VISIT_METHOD(SpirvAbortKHR)
+  // HLSL Change End - SPV_KHR_abort.
+
 
   DEFINE_VISIT_METHOD(SpirvAccessChain)
   DEFINE_VISIT_METHOD(SpirvUntypedAccessChainKHR)

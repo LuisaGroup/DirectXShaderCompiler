@@ -583,6 +583,13 @@ private:
     /// SPV_EXT_split_barrier).
     SpirvInstruction *processSplitBarrierEXT(const CallExpr *, bool isArrive);
 
+    // HLSL Change Begin - SPV_KHR_abort.
+    /// Processes the 'vk::Abort' function from <vk/ext/abort.h>, which lowers to
+    /// the terminator OpAbortKHR.
+    SpirvInstruction *processAbortKHR(const CallExpr *);
+    // HLSL Change End - SPV_KHR_abort.
+
+
   /// Processes the 'GetRemainingRecursionLevels' intrinsic function.
   SpirvInstruction *
   processIntrinsicGetRemainingRecursionLevels(const CallExpr *callExpr);

@@ -21,6 +21,30 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_KHR_abort` (`VK_KHR_shader_abort`): with
+  `-fspv-extension=SPV_KHR_abort`, a `vk::Abort(message)` call (the entry point is
+  declared in `<vk/ext/abort.h>`) lowers to a single `OpAbortKHR` (5121) guarded by
+  `OpCapability AbortKHR` (5120) and
+  `OpExtension "SPV_KHR_abort"`. The instruction has no result; its two `IdRef`
+  operands are the *message type* (a type id) and the *message* (the id of a value
+  whose type must logically match it), and DXC emits the message value's own type
+  for the first one and the single `uint` argument for the second, so a message is
+  four bytes of data handed to the client API. `OpAbortKHR` is a block terminator,
+  so the statement ends the block and any code written after it is unreachable and
+  is not emitted - which is what makes "only instructions executed before the abort
+  have side effects" hold - and the instruction is accepted in every shader stage
+  and inside helper functions. The extension is opt-in: an abort is not a recovery
+  point, and `VK_KHR_shader_abort` makes a shader abort lose the device, so without
+  the flag every call is a compile error and a shader that does not abort is
+  unchanged. The `OpConstantDataKHR` message form of the extension (a bundled
+  format string and its arguments, laid out with scalar rules) is not emitted: HLSL
+  has no equivalent of that GLSL front-end convention, and the dependent
+  `ConstantDataKHR` capability is only added if such a message reaches the backend
+  by other means. The host must enable
+  `VkPhysicalDeviceShaderAbortFeaturesKHR::shaderAbort` and collect the message
+  through `VK_KHR_device_fault`; the compiler cannot check either. See the "Shader
+  abort" section of `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/khr-shader-abort.hlsl`.
 - Added support for `SPV_KHR_constant_data` (`VK_KHR_shader_constant_data`): with
   `-fspv-constant-data[=<threshold>]` and
   `-fspv-extension=SPV_KHR_constant_data`, an integer array constant whose elements
