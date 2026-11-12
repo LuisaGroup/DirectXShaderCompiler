@@ -21,6 +21,12 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_KHR_fma`: with `-fspv-extension=SPV_KHR_fma`, a fused
+  multiply-add on 32-bit float (`mad()`) is emitted as the `OpFmaKHR` core
+  instruction with the `FMAKHR` capability instead of the `GLSL.std.450` `Fma`
+  extended instruction. The extension is opt-in (modules using `OpFmaKHR` need
+  `VK_KHR_shader_fma` and the `shaderFmaFloat32` feature), and without
+  `-fspv-extension=SPV_KHR_fma` code generation is unchanged.
 - Added `-fvk-resource-heap-stride` and `-fvk-sampler-heap-stride`, which
   override the computed `ArrayStrideIdEXT` of the resource and sampler
   descriptor heaps with a literal `ArrayStride`. The value must be a power of

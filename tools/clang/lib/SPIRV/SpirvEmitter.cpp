@@ -11187,7 +11187,11 @@ SpirvEmitter::processIntrinsicCallExpr(const CallExpr *callExpr) {
     INTRINSIC_OP_CASE(exp2, Exp2, true);
     INTRINSIC_OP_CASE(faceforward, FaceForward, false);
     INTRINSIC_OP_CASE(floor, Floor, true);
-    INTRINSIC_OP_CASE(fma, Fma, true);
+  // HLSL Change - SPV_KHR_fma: a fused multiply-add on 32-bit float is
+  // emitted as OpFmaKHR when the SPV_KHR_fma extension is enabled.
+  case hlsl::IntrinsicOp::IOP_fma: {
+    retVal = processIntrinsicFma(callExpr);
+  } break;
     INTRINSIC_OP_CASE(frac, Fract, true);
     INTRINSIC_OP_CASE(length, Length, false);
     INTRINSIC_OP_CASE(lerp, FMix, true);
@@ -12543,6 +12547,56 @@ SpirvInstruction *SpirvEmitter::processIntrinsicModf(const CallExpr *callExpr) {
   return nullptr;
 }
 
+// HLSL Change Begin - SPV_KHR_fma (OpFmaKHR).
+bool SpirvEmitter::canUseOpFmaKHR(QualType type) const {
+  if (!featureManager.isExtensionEnabled(Extension::KHR_fma))
+    return false;
+  // SPV_KHR_fma defines OpFmaKHR for floating-point scalar/vector types, but
+  // Vulkan gates it per width (shaderFmaFloat16/32/64) and only the 32-bit
+  // float form is opted into here: 'half', 'min16float' and 'double' keep the
+  // GLSL.std.450 Fma extended instruction. The type must be 'float' itself, so
+  // a 'min16float' that is realized as a 32-bit float is excluded as well.
+  QualType elemType = QualType();
+  return isScalarOrVectorType(type, &elemType) &&
+         elemType == astContext.FloatTy;
+}
+
+SpirvInstruction *
+SpirvEmitter::emitOpFmaKHR(QualType retType,
+                           llvm::ArrayRef<SpirvInstruction *> operands,
+                           SourceLocation loc) {
+  // OpFmaKHR needs the FMAKHR capability and the SPV_KHR_fma extension;
+  // createSpirvIntrInstExt attaches both to the instruction so that
+  // CapabilityVisitor emits them only where the instruction is used.
+  uint32_t capabilities[]{uint32_t(spv::Capability::FMAKHR)};
+  llvm::StringRef extensions[]{"SPV_KHR_fma"};
+  llvm::StringRef instSet = "";
+  return spvBuilder.createSpirvIntrInstExt(uint32_t(spv::Op::OpFmaKHR), retType,
+                                           operands, extensions, instSet,
+                                           capabilities, loc);
+}
+
+SpirvInstruction *SpirvEmitter::processIntrinsicFma(const CallExpr *callExpr) {
+  // HLSL fma() is a 'double'-only intrinsic (see
+  // utils/hct/gen_intrin_main.txt) whose DXIL counterpart, dx.op.fma, also
+  // takes doubles, so OpFmaKHR (32-bit float) is only reached here if fma()
+  // ever gains a 'float' overload. The 32-bit float fused multiply-add that
+  // HLSL programs can write today is mad(), which processIntrinsicMad routes
+  // through the same helpers below.
+  const auto loc = callExpr->getLocStart();
+  const auto range = callExpr->getSourceRange();
+  const auto argType = callExpr->getArg(0)->getType();
+  if (canUseOpFmaKHR(argType)) {
+    SpirvInstruction *operands[]{doExpr(callExpr->getArg(0)),
+                                 doExpr(callExpr->getArg(1)),
+                                 doExpr(callExpr->getArg(2))};
+    return emitOpFmaKHR(callExpr->getType(), operands, loc);
+  }
+  return processIntrinsicUsingGLSLInst(callExpr, GLSLstd450::GLSLstd450Fma,
+                                       true, loc, range);
+}
+// HLSL Change End - SPV_KHR_fma (OpFmaKHR).
+
 SpirvInstruction *SpirvEmitter::processIntrinsicMad(const CallExpr *callExpr) {
   // Signature is: ret mad(a,b,c)
   // All of the above must be a scalar, vector, or matrix with the same
@@ -12596,6 +12650,15 @@ SpirvInstruction *SpirvEmitter::processIntrinsicMad(const CallExpr *callExpr) {
                                        range);
     }
     // Non-matrix cases
+    // HLSL Change Begin - SPV_KHR_fma. With SPV_KHR_fma enabled, a 32-bit
+    // float mad() becomes the core OpFmaKHR instruction, which guarantees the
+    // single rounding the driver may otherwise not apply to the extended
+    // instruction. No NoContraction decoration is needed for it.
+    if (canUseOpFmaKHR(argType)) {
+      SpirvInstruction *operands[]{arg0Instr, arg1Instr, arg2Instr};
+      return emitOpFmaKHR(argType, operands, loc);
+    }
+    // HLSL Change End - SPV_KHR_fma.
     auto *fma = spvBuilder.createGLSLExtInst(
         argType, GLSLstd450Fma, {arg0Instr, arg1Instr, arg2Instr}, loc, range);
     spvBuilder.decorateNoContraction(fma, loc);

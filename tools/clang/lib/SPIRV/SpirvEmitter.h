@@ -615,6 +615,19 @@ private:
 
   /// Processes the 'mad' intrinsic function.
   SpirvInstruction *processIntrinsicMad(const CallExpr *);
+  // HLSL Change Begin - SPV_KHR_fma (OpFmaKHR).
+  /// Processes the 'fma' intrinsic function.
+  SpirvInstruction *processIntrinsicFma(const CallExpr *);
+  /// Returns true if a fused multiply-add on the given type is emitted as
+  /// OpFmaKHR (SPV_KHR_fma) instead of the GLSL.std.450 Fma extended
+  /// instruction. Only 32-bit float scalar/vector types qualify.
+  bool canUseOpFmaKHR(QualType type) const;
+  /// Emits OpFmaKHR (SPV_KHR_fma) computing a * b + c. The FMAKHR
+  /// capability and the SPV_KHR_fma extension travel with the instruction.
+  SpirvInstruction *emitOpFmaKHR(QualType retType,
+                                 llvm::ArrayRef<SpirvInstruction *> operands,
+                                 SourceLocation loc);
+  // HLSL Change End - SPV_KHR_fma (OpFmaKHR).
 
   /// Processes the 'modf' intrinsic function.
   SpirvInstruction *processIntrinsicModf(const CallExpr *);

@@ -238,6 +238,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
       .Case("SPV_EXT_shader_atomic_float_min_max", Extension::EXT_shader_atomic_float_min_max)
         // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
         .Case("SPV_KHR_bfloat16", Extension::KHR_bfloat16)
+      // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+      .Case("SPV_KHR_fma", Extension::KHR_fma)
       .Default(Extension::Unknown);
 }
 
@@ -328,6 +330,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
   // HLSL Change - SPV_KHR_bfloat16 (bfloat16_t type support).
   case Extension::KHR_bfloat16:
  return "SPV_KHR_bfloat16";
+  // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+  case Extension::KHR_fma:
+    return "SPV_KHR_fma";
   default:
     break;
   }
@@ -432,6 +437,13 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // Enabling EXT_mesh_shader only when the target environment is SPIR-V 1.4
     // or above
     return isTargetEnvSpirv1p4OrAbove();
+  // HLSL Change - SPV_KHR_fma. Enabling it changes the code generation for
+  // the HLSL fused multiply-add intrinsics (the GLSL.std.450 Fma extended
+  // instruction becomes the OpFmaKHR core instruction), and modules using
+  // OpFmaKHR are rejected by drivers without VK_KHR_shader_fma. Therefore it
+  // is only enabled when the user explicitly asks for it.
+  case Extension::KHR_fma:
+    return false;
   default:
     return true;
   }

@@ -300,6 +300,32 @@ attribute is applied to a shader entry point, the SPIR-V backend will:
 This ensures that helper lanes are included in wave operations, which is the
 behavior required by the HLSL specification.
 
+Fused multiply-add
+~~~~~~~~~~~~~~~~~~
+
+The ``SPV_KHR_fma`` extension provides ``OpFmaKHR``, a core instruction that
+computes ``a * b + c`` with a single rounding that the implementation must not
+split. It is gated by the Vulkan ``VK_KHR_shader_fma`` device extension, whose
+``VkPhysicalDeviceShaderFmaFeaturesKHR`` structure carries one feature bit per
+operand width (``shaderFmaFloat16``, ``shaderFmaFloat32``, ``shaderFmaFloat64``).
+
+SPIR-V CodeGen uses ``OpFmaKHR`` for a fused multiply-add on 32-bit float
+(``float``, ``float2``, ``float3``, ``float4``) when the extension is enabled
+with ``-fspv-extension=SPV_KHR_fma``; the module then contains the ``FMAKHR``
+capability and the ``SPV_KHR_fma`` extension. HLSL spells a fused multiply-add
+``mad()``; ``fma()`` is a ``double``-only intrinsic (it maps to ``dx.op.fma``),
+and DXC does not use ``OpFmaKHR`` for ``double`` or for 16-bit float
+(``half``/``min16float``) yet, so those keep the ``GLSL.std.450`` ``Fma``
+extended instruction.
+
+The extension is **not** enabled by default, because replacing the extended
+instruction with ``OpFmaKHR`` is a visible change of the module: a driver without
+``VK_KHR_shader_fma`` rejects it. Without
+``-fspv-extension=SPV_KHR_fma`` the generated module is unchanged, and ordinary
+``a * b + c`` arithmetic is never contracted into ``OpFmaKHR``. Note that a host
+must also enable the matching ``shaderFmaFloat32`` feature; the compiler cannot
+check that.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -338,6 +364,7 @@ Supported extensions
 * SPV_KHR_quad_control
 * SPV_KHR_untyped_pointers
 * SPV_EXT_descriptor_heap
+* SPV_KHR_fma
 
 Vulkan specific attributes
 --------------------------

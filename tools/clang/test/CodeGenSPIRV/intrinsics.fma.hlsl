@@ -39,4 +39,9 @@ void main() {
 // CHECK-NEXT: [[fma_row1:%[0-9]+]] = OpExtInst %v3double [[glsl]] Fma [[c1_row1]] [[c2_row1]] [[c3_row1]]
 // CHECK-NEXT:          {{%[0-9]+}} = OpCompositeConstruct %mat2v3double [[fma_row0]] [[fma_row1]]
   fma_c = fma(c1, c2, c3);
+// SPV_KHR_fma is opt-in: without -fspv-extension=SPV_KHR_fma this file must keep
+// the GLSL.std.450 Fma extended instruction everywhere (see also
+// intrinsics.fma.off.hlsl).
+// CHECK-NOT: OpFmaKHR
+// CHECK: OpFunctionEnd
 }

@@ -592,6 +592,14 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
   case spv::Op::OpFwidthFine:
     addCapability(spv::Capability::DerivativeControl);
     break;
+  // HLSL Change Begin - SPV_KHR_fma. OpFmaKHR already carries its capability
+  // and extension (see SpirvEmitter::emitOpFmaKHR); stating them here keeps
+  // the requirement visible and ties the extension to the enabled flag.
+  case spv::Op::OpFmaKHR:
+    addExtensionAndCapabilitiesIfEnabled(Extension::KHR_fma,
+                                         {spv::Capability::FMAKHR});
+    break;
+  // HLSL Change End - SPV_KHR_fma.
   case spv::Op::OpGroupNonUniformElect:
     addCapability(spv::Capability::GroupNonUniform);
     break;
