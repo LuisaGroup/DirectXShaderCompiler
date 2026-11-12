@@ -126,6 +126,30 @@ The included licenses apply to the following files:
   a device feature, so it is not expressible with `-fspv-target-env`. The host
   must enable `VK_KHR_maintenance9` at `vkCreateDevice` and set the `maintenance9`
   feature bit; the compiler cannot check that.
+  - Added support for `VK_KHR_maintenance12`, the Vulkan device extension whose
+  first item permits non-uniform indexing of values within a variable with a
+  `PushConstant` storage class. On the SPIR-V side that permission has exactly
+  one representation, and DXC already emits it: a `NonUniform` decoration on the
+  access chain whose index is divergent, plus the `ShaderNonUniform` capability
+  (from `SPV_EXT_descriptor_indexing`) that legalises the decoration. So there is
+  no `SPV_KHR_maintenance12` to request with `-fspv-extension`, no new target
+  environment, nothing added to the module header and no flag to pass. What was
+  missing was the coverage and the guidance: a non-uniform push constant
+  subscript was untested, and nothing said how HLSL declares one.
+  `NonUniformResourceIndex()` is the declaration; despite the name its Sema check
+  accepts a plain `uint`, so it applies to a push constant subscript, and the
+  marking it puts on the index reaches the access chain, the loaded value and the
+  value's consumers. DXC does not infer divergence - an unwrapped divergent index
+  produces no decoration at all, and the module then claims the index is
+  dynamically uniform - so the marking has to be written at the indexing site.
+  `maintenance12.*.hlsl` in `tools/clang/test/CodeGenSPIRV` now pins the
+  decoration on the push constant access chain (flat array and nested
+  struct-of-arrays), its absence for uniform and unwrapped indices, the unchanged
+  classic `ConstantBuffer<>` path, and its survival through spirv-opt. The host
+  must enable `VK_KHR_maintenance12` at `vkCreateDevice` and enable the feature
+  bits it exposes (`VkPhysicalDeviceMaintenance12FeaturesKHR`); without them a
+  driver is entitled to assume the subscript is dynamically uniform, and the
+  compiler cannot check that.
 
 Place release notes for the upcoming release below this line and remove this
 line upon naming the release. Refer to previous for appropriate section names.

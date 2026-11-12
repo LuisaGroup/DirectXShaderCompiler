@@ -701,6 +701,87 @@ See ``examples/spirv-extensions/khr-maintenance9.hlsl`` for a self-contained
 example and ``tools/clang/test/CodeGenSPIRV/maintenance9.*.hlsl`` for the tests
 that pin both the flagged and the unflagged encodings.
 
+Non-uniform push constant indexing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``VK_KHR_maintenance12`` is a Vulkan maintenance extension - one device
+extension, revision 1 (2026-03-25) - and its first item is "non-uniform indexing
+of values within a variable with a ``PushConstant`` storage class". Before it, a
+push constant subscript had to be dynamically uniform even in a shader that was
+already free to index a descriptor array non-uniformly.
+
+The permission is not module surface and adds nothing to the module header: no
+instruction, no capability, no ``OpExtension`` string. The SPIR-V side already
+has the one thing it needs - the ``NonUniform`` decoration (5300) on the access
+chain whose ``Array Index`` is divergent, plus the ``ShaderNonUniform``
+capability (5301) that legalises the decoration, both defined by
+``SPV_EXT_descriptor_indexing`` in modules that do not use SPIR-V 1.5 or later.
+There is no ``SPV_KHR_maintenance12`` in the Khronos SPIR-V registry (checked
+against the vendored grammar, ``external/SPIRV-Headers`` v2026.08.0, whose only
+"maintenance" names are ``SPV_EXT_cooperative_matrix_maintenance1``), so
+``-fspv-extension=SPV_KHR_maintenance12`` is an ``unknown SPIR-V extension``
+error rather than a switch, and there is no new target environment either: the
+relaxation belongs to a device that enables the extension, so it is a property of
+the device rather than of ``-fspv-target-env``.
+
+DXC needs no switch and has none. The decoration machinery a push constant needs
+is the same one descriptor indexing already uses, and it is generic:
+``NonUniformResourceIndex()`` lowers to an ``OpCopyObject`` marked ``NonUniform``
+(``SpirvEmitter::processIntrinsicNonUniformResourceIndex``) and
+``NonUniformVisitor::visit(SpirvAccessChain)`` propagates the marking to every
+access chain built from it - whatever storage class the chain is in, at whatever
+member depth - and on to the load and the instructions that consume it. There is
+deliberately no push-constant-specific code in ``NonUniformVisitor``: the marking
+rule is per value, not per variable, and a second copy of it would drift. What
+matters for the feature is only that the decoration lands on the *access chain*
+and not merely on the loaded value, which is what
+``tools/clang/test/CodeGenSPIRV/maintenance12.*.hlsl`` pins in both directions:
+
+.. code:: hlsl
+
+  [[vk::push_constant]] PushData pc;
+
+  // Divergent index: decorated. Lowered to
+  //   %copy  = OpCopyObject %uint %masked
+  //   %chain = OpAccessChain %_ptr_PushConstant_mat4v4float %pc %int_1 %copy %int_0
+  //   OpDecorate %copy NonUniform
+  //   OpDecorate %chain NonUniform
+  // plus OpCapability ShaderNonUniform.
+  float4x4 m = pc.materials[NonUniformResourceIndex(tid.x)].transform;
+
+  // Uniform index: nothing is decorated, and the module keeps no
+  // ShaderNonUniform capability and no SPV_EXT_descriptor_indexing extension.
+  float4 t = pc.materials[0].tint;
+
+HLSL has no uniformity inference, and DXC does not guess: an index that is
+divergent in fact but never wrapped in ``NonUniformResourceIndex()`` produces no
+decoration, and the module then claims the index is dynamically uniform. That is
+the one thing the shader author has to get right, and the marking has to be
+written at the indexing site - a value parked in a ``Function``-storage variable
+carries the marking with it only after the optimizer promotes the variable to an
+SSA value, which is why the ``-fcgl`` module of such a shader can look unmarked.
+``NonUniformResourceIndex()`` is not restricted to resource handles: its Sema
+check accepts a plain ``uint``, so a push constant subscript is in range.
+
+Two things the compiler cannot check. First, whether the device permits it: the
+application must enable ``VK_KHR_maintenance12`` at ``vkCreateDevice`` and enable
+the feature bits it exposes for the items in use
+(``VkPhysicalDeviceMaintenance12FeaturesKHR``, queried with
+``vkGetPhysicalDeviceFeatures2`` and chained into ``VkDeviceCreateInfo::pNext``).
+Without it the driver is entitled to assume the subscript is dynamically uniform
+and the shader's behaviour is undefined. Second, the module itself: the shipped
+SPIRV-Tools has no target-environment rule about ``NonUniform`` on a
+``PushConstant`` access chain - there is no validator option for it, unlike the
+maintenance8 and maintenance9 relaxations - so every ``-fspv-target-env`` DXC
+accepts validates a module carrying the decoration, and the compiler has no state
+on which to raise a diagnostic. Silent acceptance is therefore intentional here and is not a
+correctness hole in the compiler: the module is valid SPIR-V, and whether the
+values may be divergent is a host/device question.
+
+See ``examples/spirv-extensions/khr-maintenance12.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/maintenance12.*.hlsl`` for the tests
+that pin the decoration, its absence for uniform indices, the nested
+struct-of-arrays shape, and its survival through spirv-opt.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
