@@ -813,6 +813,158 @@ capability, the extension, the instruction with both intersection selectors, the
 unchanged off path, the survival of the accessor through spirv-opt and the
 diagnostic for a missing ``-fspv-extension``.
 
+Linear swept spheres
+~~~~~~~~~~~~~~~~~~~~
+
+``VK_NV_ray_tracing_linear_swept_spheres`` adds two analytic geometry kinds to
+ray tracing - spheres (particles, froxels, point clouds) and linear swept spheres
+(hair, fur, curve primitives) - which are intersected analytically instead of
+being tessellated into triangles. A ray query reports such a hit as a position and
+a radius (a swept sphere additionally has a hit value that says where along the
+segment the ray hit) instead of as a triangle or an AABB. Building such an
+acceleration structure is a host operation; the shader-visible part of the
+extension is the geometry of an intersection.
+
+The accessors live in ``<vk/nv/linear_swept_spheres.h>``:
+
+.. code:: hlsl
+
+  #include <vk/nv/linear_swept_spheres.h>
+
+  // committed intersection
+  float3 center = vk::nv::RayQueryGetCommittedIntersectionSpherePosition(query);
+  float  radius = vk::nv::RayQueryGetCommittedIntersectionSphereRadius(query);
+  bool   sphere = vk::nv::RayQueryIsCommittedSphereHit(query);
+
+  // candidate intersection, inside the Proceed() loop
+  float value = vk::nv::RayQueryGetCandidateIntersectionLSSHitValue(query);
+  bool  swept = vk::nv::RayQueryIsCandidateLSSHit(query);
+
+  // raw form: the selector is spelled out
+  center = vk::nv::RayQueryGetIntersectionSpherePosition(
+      query, vk::nv::SphereIntersectionCommitted);
+
+and lower to
+
+.. code:: spirv
+
+  OpCapability RayTracingSpheresGeometryNV            ; 5418
+  OpExtension "SPV_NV_linear_swept_spheres"
+  ...
+  %center = OpRayQueryGetIntersectionSpherePositionNV %v3float %query %uint_1
+  %radius = OpRayQueryGetIntersectionSphereRadiusNV   %float   %query %uint_1
+  %sphere = OpRayQueryIsSphereHitNV                   %bool    %query %uint_1
+
+The operands are the ray query object and the intersection - the same shape as
+``OpRayQueryGetIntersectionInstanceIdKHR`` - and the result types are fixed by the
+extension: a 32-bit float 3-component vector for a position, a 32-bit float for a
+radius or a hit value (``OpRayQueryGetIntersectionLSSHitValueNV``, 5431) and a
+bool for the two predicates (``OpRayQueryIsSphereHitNV``, 5438, and
+``OpRayQueryIsLSSHitNV``, 5439). SPIRV-Tools enforces them ("expected Result Type
+to be 32-bit float 3-component vector type", ...), so a module with the wrong
+result type is invalid rather than merely surprising. The intersection operand is
+0 for the candidate intersection and 1 for the committed one, and it is a constant
+32-bit integer; the header therefore exports the two selector values
+(``vk::nv::SphereIntersectionCandidate``, ``vk::nv::SphereIntersectionCommitted``)
+and the candidate/committed wrappers instead of taking a ``bool``. The names are
+spelled differently from ``vk::nv::IntersectionCandidate`` /
+``IntersectionCommitted`` in ``<vk/nv/cluster_as.h>`` on purpose: the two headers
+share the ``vk::nv`` namespace, so identical names would be a redefinition in a
+shader that includes both.
+
+Unlike the triangle/AABB getters, the vendored SPIRV-Tools does not verify the
+constant requirement for these opcodes (its ``ValidateIntersectionId`` check is
+only wired into the ``SPV_KHR_ray_query`` getters), so the selector is a
+specification requirement that the header API shape enforces by offering the
+wrappers rather than a diagnostic that the compiler or the validator emits.
+
+**Two capabilities, selected per instruction.** The extension defines
+``RayTracingSpheresGeometryNV`` (5418) for the sphere accessors and
+``RayTracingLinearSweptSpheresGeometryNV`` (5419) for the linear-swept-sphere
+ones, because
+``VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV::spheres`` and
+``::linearSweptSpheres`` are independent device features. The capability is
+therefore chosen from the instruction that is emitted, not from the extension: a
+shader that only reads sphere parameters declares only
+``RayTracingSpheresGeometryNV`` and stays loadable on a device that does not
+enable ``linearSweptSpheres``. Only one of the two is declared per module unless
+the shader reads both kinds;
+``tools/clang/test/CodeGenSPIRV/vk.nv-swept-spheres.hlsl`` and
+``vk.nv-swept-spheres-lss.hlsl`` assert the two directions separately and each
+one asserts the absence of the other capability.
+
+**The accessors are not ``RayQuery`` methods.** Every ``RayQuery`` method is
+declared once and has to work for both backends, and DXR has no sphere geometry: a
+sphere accessor would need a DXIL lowering that cannot exist. Splitting the
+surface into a header-only free function keeps the shared method table, Sema and
+the DXIL backend untouched. It also means there is no DXIL path at all: a DXIL
+compile ignores the ``vk::`` attributes on the declaration
+(``-Wignored-attributes``) and leaves an accessor with no definition, which is an
+error in a non-library profile and an unresolved external in a library build.
+
+**Branch on the predicate, not on the intersection type.** DXR has no sphere
+intersection type, so ``RayQuery::GetCandidateType()`` (and the committed status)
+keep reporting the triangle/AABB answer for sphere geometry - the reported type is
+implementation-defined. ``OpRayQueryIsSphereHitNV`` / ``OpRayQueryIsLSSHitNV`` is
+the extension's own answer, is false for every other geometry kind, and is the
+portable way to decide whether the other accessors mean anything.
+
+The extension is **not** enabled by default. A module that reads sphere geometry
+declares a ``RayTracing*SpheresGeometryNV`` capability and
+``OpExtension "SPV_NV_linear_swept_spheres"``, which a driver without
+``VK_NV_ray_tracing_linear_swept_spheres`` rejects, so the accessors are only
+accepted with ``-fspv-extension=SPV_NV_linear_swept_spheres``. Without that flag
+every call is a compile error instead of a module that declares an extension the
+host never asked for, and a module that does not touch sphere geometry is
+unchanged - including one that includes the header. The capability and the
+extension are emitted together from the instruction through the ordinary extension
+registration path, so ``-fspv-extension`` can both select and refuse this one; they
+are deliberately *not* written with ``[[vk::ext_capability]]`` /
+``[[vk::ext_extension]]`` on the header declarations, because those attributes
+write the capability and the extension string without consulting the extension
+manager and no allow-list could reject them.
+
+Limitations:
+
+* **The values are only defined for sphere geometry.** The instructions are
+  always encodable, but for an acceleration structure built from triangles or
+  AABBs the position and the radius are undefined and the predicate is false. The
+  compiler cannot tell the two apart, so the shader author has to know how the
+  acceleration structure was built.
+* The host must enable
+  ``VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV::spheres`` (or
+  ``::linearSweptSpheres`` for swept geometry) and build the acceleration
+  structure with ``VK_GEOMETRY_TYPE_SPHERES_NV`` geometry descriptions
+  (``VkAccelerationStructureGeometrySpheresDataNV`` /
+  ``VkAccelerationStructureGeometryLinearSweptSpheresDataNV``). The compiler
+  cannot check any of that.
+* Ray queries already require Vulkan 1.2 / ``SPV_KHR_ray_query``; this extension
+  adds no additional target-environment requirement. ``-fspv-extension`` is an
+  allow-list, so a shader that passes it has to keep naming ``SPV_KHR_ray_query``
+  as well:
+  ``-fspv-extension=SPV_KHR_ray_query -fspv-extension=SPV_NV_linear_swept_spheres``.
+  Naming only the sphere extension is not an error at the extension level, but the
+  ray query itself then stops being permitted and the module fails to validate.
+* ``OpRayQueryGetIntersectionLSSPositionsNV`` (5429, a 2-element array of float3)
+  and ``OpRayQueryGetIntersectionLSSRadiiNV`` (5430, a 2-element array of float)
+  are not exposed yet. An accessor has to be a function template to work with any
+  ``RayQuery<flags>``, and this front end rejects array return types in a function
+  template (``Sema::CheckFunctionReturnType`` does not carry the HLSL
+  array-return exception that the declarator path has), so the two
+  linear-swept-sphere accessors whose result is an array cannot be declared from
+  the header. The sphere accessors and the scalar linear-swept-sphere accessors
+  are unaffected.
+* The hit object half of the extension (``OpHitObjectGetSpherePositionNV``, 5432,
+  and the rest) is not exposed: it needs ``SPV_EXT_shader_invocation_reorder``
+  support in the backend first.
+
+See ``examples/spirv-extensions/nv-linear-swept-spheres.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/vk.nv-swept-spheres*.hlsl`` for the tests that pin
+the two capabilities and the extension, the three sphere instructions with their
+result types and both intersection selectors, the linear-swept-sphere half, the
+unchanged off path, the survival of the accessors through spirv-opt and the
+diagnostic for a missing ``-fspv-extension``.
 
 Dynamic image offsets and signed remainder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1207,6 +1359,7 @@ Supported extensions
 * SPV_NV_ray_tracing
 * SPV_NV_mesh_shader
 * SPV_NV_cluster_acceleration_structure
+* SPV_NV_linear_swept_spheres
 * SPV_KHR_ray_query
 * SPV_KHR_opacity_micromap
 * SPV_EXT_shader_image_int64

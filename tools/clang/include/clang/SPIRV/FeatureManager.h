@@ -100,6 +100,9 @@ enum class Extension {
   // (OpRayQueryGetIntersectionClusterIdNV, the cluster-ID accessors in
   // <vk/nv/cluster_as.h>).
   NV_cluster_acceleration_structure,
+  // HLSL Change - SPV_NV_linear_swept_spheres (the OpRayQuery*Sphere*NV /
+  // OpRayQuery*LSS*NV accessors in <vk/nv/linear_swept_spheres.h>).
+  NV_linear_swept_spheres,
   Unknown,
 };
 

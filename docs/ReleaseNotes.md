@@ -21,6 +21,32 @@ The included licenses apply to the following files:
 
 #### SPIR-V
 
+- Added support for `SPV_NV_linear_swept_spheres`: with
+  `-fspv-extension=SPV_NV_linear_swept_spheres`, the accessors in
+  `<vk/nv/linear_swept_spheres.h>` read the analytic geometry of a ray query
+  intersection: `vk::nv::RayQueryGetCommittedIntersectionSpherePosition()` and
+  `vk::nv::RayQueryGetCommittedIntersectionSphereRadius()` are emitted as
+  `OpRayQueryGetIntersectionSpherePositionNV` (%v3float) and
+  `OpRayQueryGetIntersectionSphereRadiusNV` (%float), and
+  `vk::nv::RayQueryIsCommittedSphereHit()` as `OpRayQueryIsSphereHitNV` (%bool),
+  so a ray query can shade spheres (particles, froxels, point clouds) and linear
+  swept spheres (hair, fur) without tessellating them into triangles. The
+  capability is selected per instruction - `RayTracingSpheresGeometryNV` for the
+  sphere accessors, `RayTracingLinearSweptSpheresGeometryNV` for the
+  linear-swept-sphere ones (`OpRayQueryGetIntersectionLSSHitValueNV`,
+  `OpRayQueryIsLSSHitNV`) - because the two Vulkan feature bits are independent.
+  The accessors are header-only free functions rather than `RayQuery` methods
+  because DXR has no sphere geometry (the method table is shared with the DXIL
+  backend), the two intersection selectors are exported as
+  `vk::nv::SphereIntersectionCandidate` / `SphereIntersectionCommitted`, and
+  `IsSphereHit` is the portable way to branch because the candidate/committed
+  type enumerations only describe triangles and AABBs. The extension is opt-in
+  (without the flag every call is a compile error), and the values are only
+  defined for geometry built from spheres, which the compiler cannot check.
+  `OpRayQueryGetIntersectionLSSPositionsNV` / `...LSSRadiiNV` are not exposed yet
+  (array result types cannot be declared in a function template in this front
+  end), and the hit object half of the extension needs
+  `SPV_EXT_shader_invocation_reorder` support first.
 - Added support for `SPV_NV_cluster_acceleration_structure`: with
   `-fspv-extension=SPV_NV_cluster_acceleration_structure`,
   `vk::nv::RayQueryGetCommittedIntersectionClusterId()` and

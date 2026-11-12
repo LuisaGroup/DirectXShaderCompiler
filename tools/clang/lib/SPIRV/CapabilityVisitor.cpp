@@ -746,6 +746,53 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
     break;
   // HLSL Change End - SPV_NV_cluster_acceleration_structure.
 
+  // HLSL Change Begin - SPV_NV_linear_swept_spheres.
+  // The accessors in <vk/nv/linear_swept_spheres.h> read the analytic sphere
+  // (or linear-swept-sphere) parameters of an intersection of a ray query.
+  // VK_NV_ray_tracing_linear_swept_spheres exposes spheres and linear swept
+  // spheres as two independent device features
+  // (VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV::spheres and
+  // ::linearSweptSpheres), so the capability is selected per instruction
+  // instead of once for the whole extension: a module that only reads sphere
+  // parameters has to stay acceptable on a device that does not enable
+  // linearSweptSpheres, and one capability must never imply the other.
+  // Both halves declare the same extension. It is emitted here, from the
+  // instruction, through the ordinary registration path (and not through
+  // [[vk::ext_extension]] on the header declarations) so that
+  // -fspv-extension= stays an effective allow-list: addExtension() reports
+  // "SPIR-V extension 'SPV_NV_linear_swept_spheres' required for <op> but not
+  // permitted to use" when the extension is not enabled, and the capability is
+  // then never emitted without the extension Vulkan requires of it
+  // (SPIRV-Tools: "Capability RayTracingSpheresGeometryNV is not allowed by
+  // Vulkan 1.2 specification (or requires extension)").
+  case spv::Op::OpRayQueryGetIntersectionSpherePositionNV:
+    addExtension(Extension::NV_linear_swept_spheres,
+                 "OpRayQueryGetIntersectionSpherePositionNV", loc);
+    addCapability(spv::Capability::RayTracingSpheresGeometryNV, loc);
+    break;
+  case spv::Op::OpRayQueryGetIntersectionSphereRadiusNV:
+    addExtension(Extension::NV_linear_swept_spheres,
+                 "OpRayQueryGetIntersectionSphereRadiusNV", loc);
+    addCapability(spv::Capability::RayTracingSpheresGeometryNV, loc);
+    break;
+  case spv::Op::OpRayQueryIsSphereHitNV:
+    addExtension(Extension::NV_linear_swept_spheres, "OpRayQueryIsSphereHitNV",
+                 loc);
+    addCapability(spv::Capability::RayTracingSpheresGeometryNV, loc);
+    break;
+  case spv::Op::OpRayQueryGetIntersectionLSSHitValueNV:
+    addExtension(Extension::NV_linear_swept_spheres,
+                 "OpRayQueryGetIntersectionLSSHitValueNV", loc);
+    addCapability(spv::Capability::RayTracingLinearSweptSpheresGeometryNV, loc);
+    break;
+  case spv::Op::OpRayQueryIsLSSHitNV:
+    addExtension(Extension::NV_linear_swept_spheres, "OpRayQueryIsLSSHitNV",
+                 loc);
+    addCapability(spv::Capability::RayTracingLinearSweptSpheresGeometryNV, loc);
+    break;
+  // HLSL Change End - SPV_NV_linear_swept_spheres.
+
+
   case spv::Op::OpReportIntersectionKHR:
   case spv::Op::OpIgnoreIntersectionKHR:
   case spv::Op::OpTerminateRayKHR:

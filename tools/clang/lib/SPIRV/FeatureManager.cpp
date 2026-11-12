@@ -258,6 +258,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_NV_cluster_acceleration_structure.
         .Case("SPV_NV_cluster_acceleration_structure",
               Extension::NV_cluster_acceleration_structure)
+        // HLSL Change - SPV_NV_linear_swept_spheres.
+        .Case("SPV_NV_linear_swept_spheres",
+              Extension::NV_linear_swept_spheres)
         .Default(Extension::Unknown);
 }
 
@@ -372,6 +375,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_NV_cluster_acceleration_structure.
     case Extension::NV_cluster_acceleration_structure:
       return "SPV_NV_cluster_acceleration_structure";
+    // HLSL Change - SPV_NV_linear_swept_spheres.
+    case Extension::NV_linear_swept_spheres:
+      return "SPV_NV_linear_swept_spheres";
     default:
     break;
   }
@@ -573,6 +579,19 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // instead of a module that declares an extension the host never asked
     // for, and a module that does not read a cluster ID is unchanged.
     case Extension::NV_cluster_acceleration_structure:
+      return false;
+    // HLSL Change - SPV_NV_linear_swept_spheres. A module that reads the
+    // sphere (or linear-swept-sphere) parameters of an intersection declares
+    // RayTracingSpheresGeometryNV (or RayTracingLinearSweptSpheresGeometryNV)
+    // and OpExtension "SPV_NV_linear_swept_spheres", which a driver without
+    // VK_NV_ray_tracing_linear_swept_spheres rejects. The extension is
+    // therefore opt-in: without
+    // -fspv-extension=SPV_NV_linear_swept_spheres the accessors in
+    // <vk/nv/linear_swept_spheres.h> are compile errors (see the
+    // OpRayQuery*Sphere*NV / OpRayQuery*LSS*NV cases in CapabilityVisitor)
+    // instead of a module that declares an extension the host never asked
+    // for, and a module that does not touch sphere geometry is unchanged.
+    case Extension::NV_linear_swept_spheres:
       return false;
     default:
     return true;
