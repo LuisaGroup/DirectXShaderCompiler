@@ -109,9 +109,14 @@ enum class Extension {
   // HLSL Change - SPV_KHR_constant_data (OpConstantDataKHR for
   // -fspv-constant-data).
   KHR_constant_data,
-  // HLSL Change - SPV_KHR_abort (OpAbortKHR for vk::Abort).
-  KHR_abort,
-  Unknown,
+    // HLSL Change - SPV_KHR_abort (OpAbortKHR for vk::Abort).
+    KHR_abort,
+    // HLSL Change - SPV_ARM_cooperative_matrix_layouts (the
+    // RowBlockedInterleavedARM / ColumnBlockedInterleavedARM MemoryLayout
+    // operands of OpCooperativeMatrixLoadKHR / OpCooperativeMatrixStoreKHR, and
+    // the entry points in <vk/arm/cooperative_matrix_layouts.h>).
+    ARM_cooperative_matrix_layouts,
+    Unknown,
 };
 
 /// The class for handling SPIR-V version and extension requests.

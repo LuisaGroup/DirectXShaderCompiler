@@ -603,23 +603,58 @@ bool CapabilityVisitor::visitInstruction(SpirvInstruction *instr) {
   switch (opcode) {
   case spv::Op::OpCooperativeMatrixLoadKHR:
   case spv::Op::OpCooperativeMatrixStoreKHR: {
-    // Check for ARM cooperative matrix layouts and add the corresponding
-    // capability and extension if used.
-    if (auto *pSpvInst =
-            dyn_cast<SpirvIntrinsicInstruction>(instr)) {
-      auto operands = pSpvInst->getOperands();
-      // The layout parameter is the second operand (index 1).
-      if (operands.size() > 1) {
-        if (auto *constInst = dyn_cast<SpirvConstantInteger>(operands[1])) {
-          int64_t layoutVal = constInst->getValue().getSExtValue();
-          if (layoutVal == 4202 || layoutVal == 4203) {
-            addCapability(spv::Capability::CooperativeMatrixLayoutsARM, loc);
-            spvBuilder.requireExtension(
-                "SPV_ARM_cooperative_matrix_layouts", loc);
-          }
-        }
-      }
+    // HLSL Change Begin - SPV_ARM_cooperative_matrix_layouts.
+    // A blocked-interleaved Arm MemoryLayout (RowBlockedInterleavedARM or
+    // ColumnBlockedInterleavedARM) requires the CooperativeMatrixLayoutsARM
+    // capability and the SPV_ARM_cooperative_matrix_layouts extension
+    // ("SPV_ARM_cooperative_matrix_layouts", Validation Rules; SPIRV-Tools
+    // enforces it in source/val/validate_memory.cpp with "Using the
+    // RowBlockedInterleavedARM or ColumnBlockedInterleavedARM MemoryLayout
+    // requires the CooperativeMatrixLayoutsARM capability be declared").
+    //
+    // The MemoryLayout operand sits in declaration order after the operands the
+    // two instructions spell out:
+    //   Load  (Pointer, MemoryLayout, Stride, MemoryAccess...)
+    //   Store (Pointer, Object, MemoryLayout, Stride, MemoryAccess...)
+    // getOperands() does not include the result type/id that a load carries in
+    // front of them, so MemoryLayout is operand 1 of a load and operand 2 of a
+    // store. Testing one index for both dropped the capability for a store that
+    // no Arm-layout load preceded.
+    const auto *intrInst = dyn_cast<SpirvIntrinsicInstruction>(instr);
+    const unsigned layoutIndex =
+        opcode == spv::Op::OpCooperativeMatrixLoadKHR ? 1u : 2u;
+    const SpirvConstantInteger *layout = nullptr;
+    if (intrInst && intrInst->getOperands().size() > layoutIndex)
+      layout =
+          dyn_cast<SpirvConstantInteger>(intrInst->getOperands()[layoutIndex]);
+
+    // A MemoryLayout that is not a resolvable non-specialization constant can
+    // still be one of the two Arm layouts at run time (a specialization constant
+    // the host sets), so the capability is declared conservatively: a module may
+    // declare a capability it never exercises, but it may not use one of the
+    // enumerants without it. Same reasoning as the OpImageGatherQCOM case below.
+    bool isArmLayout = true;
+    if (layout && !layout->isSpecConstant()) {
+      const int64_t layoutVal = layout->getValue().getSExtValue();
+      const int64_t rowBlocked = static_cast<int64_t>(
+          spv::CooperativeMatrixLayout::RowBlockedInterleavedARM);
+      const int64_t columnBlocked = static_cast<int64_t>(
+          spv::CooperativeMatrixLayout::ColumnBlockedInterleavedARM);
+      isArmLayout = layoutVal == rowBlocked || layoutVal == columnBlocked;
     }
+    if (isArmLayout) {
+      const char *opName = opcode == spv::Op::OpCooperativeMatrixLoadKHR
+                               ? "OpCooperativeMatrixLoadKHR"
+                               : "OpCooperativeMatrixStoreKHR";
+      // Going through addExtension() instead of a bare requireExtension() keeps
+      // -fspv-extension= an effective allow-list: it reports "SPIR-V extension
+      // 'SPV_ARM_cooperative_matrix_layouts' required for
+      // OpCooperativeMatrixLoadKHR but not permitted to use" instead of emitting
+      // an extension the user did not allow.
+      addExtension(Extension::ARM_cooperative_matrix_layouts, opName, loc);
+      addCapability(spv::Capability::CooperativeMatrixLayoutsARM, loc);
+    }
+    // HLSL Change End
     break;
   }
   case spv::Op::OpDPdxCoarse:

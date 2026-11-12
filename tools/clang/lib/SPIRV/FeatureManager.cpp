@@ -264,11 +264,14 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         // HLSL Change - SPV_QCOM_image_processing3.
         .Case("SPV_QCOM_image_processing3",
               Extension::QCOM_image_processing3)
-        // HLSL Change - SPV_KHR_constant_data.
-        .Case("SPV_KHR_constant_data",
-              Extension::KHR_constant_data)
+          // HLSL Change - SPV_KHR_constant_data.
+          .Case("SPV_KHR_constant_data",
+                Extension::KHR_constant_data)
 .Case("SPV_KHR_abort", Extension::KHR_abort)
-        .Default(Extension::Unknown);
+          // HLSL Change - SPV_ARM_cooperative_matrix_layouts.
+          .Case("SPV_ARM_cooperative_matrix_layouts",
+                Extension::ARM_cooperative_matrix_layouts)
+          .Default(Extension::Unknown);
 }
 
 const char *FeatureManager::getExtensionName(Extension symbol) {
@@ -391,10 +394,13 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
     // HLSL Change - SPV_KHR_constant_data.
     case Extension::KHR_constant_data:
       return "SPV_KHR_constant_data";
-    // HLSL Change - SPV_KHR_abort.
-    case Extension::KHR_abort:
-      return "SPV_KHR_abort";
-    default:
+      // HLSL Change - SPV_KHR_abort.
+      case Extension::KHR_abort:
+        return "SPV_KHR_abort";
+      // HLSL Change - SPV_ARM_cooperative_matrix_layouts.
+      case Extension::ARM_cooperative_matrix_layouts:
+        return "SPV_ARM_cooperative_matrix_layouts";
+      default:
     break;
   }
   return "<unknown extension>";
@@ -639,9 +645,29 @@ bool FeatureManager::enabledByDefault(Extension ext) {
     // -fspv-extension=SPV_KHR_abort every vk::Abort call is a compile error
     // (SpirvEmitter::processAbortKHR) and a shader that only includes the
     // header is unchanged.
-    case Extension::KHR_abort:
-      return false;
-    default:
+      case Extension::KHR_abort:
+        return false;
+      // HLSL Change - SPV_ARM_cooperative_matrix_layouts. Deliberately *not*
+      // opt-in. Naming one of the Arm layouts is an explicit, unconditional
+      // request written in the HLSL source - there is no run-time flag and no
+      // alternative lowering that could silently replace it - so making the
+      // extension refusable would only turn
+      // CooperativeMatrix::LoadBlockedInterleaved<RowBlockedInterleavedARM, N>
+      // into a compile error with no way to accept it other than an extra
+      // command-line flag. No existing code generation changes either: the
+      // RowMajorKHR (0) and ColumnMajorKHR (1) paths never declare the
+      // capability or the extension, because CapabilityVisitor only does so when
+      // the MemoryLayout operand is one of the two Arm enumerants. Registration
+      // still buys three things:
+      // -fspv-extension=SPV_ARM_cooperative_matrix_layouts is accepted instead of
+      // being reported as an unknown extension, the extension is listed by the
+      // -fspv-extension= diagnostics, and it is emitted through the same
+      // addExtension() path as every other extension, so it is cross-checked
+      // against the target environment and cannot be emitted without its
+      // capability.
+      case Extension::ARM_cooperative_matrix_layouts:
+        return true;
+      default:
     return true;
   }
 }

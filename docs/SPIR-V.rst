@@ -1812,10 +1812,152 @@ Limitations:
   call on the DXIL path has no definition and is rejected with "External function
   used in non-library profile".
 
-See ``examples/spirv-extensions/khr-shader-abort.hlsl`` for a self-contained
-example and ``tools/clang/test/CodeGenSPIRV/vk.abort*.hlsl`` for the tests that pin
-the encoding, the terminator rule, the helper-function case, the stage coverage,
-the off path, the optimizer-survival path and the diagnostics.
+Arm cooperative matrix memory layouts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_ARM_cooperative_matrix_layouts`` extension adds two memory layouts to
+the cooperative matrix load and store instructions, aimed at Arm GPUs that keep
+matrices in a blocked, interleaved form in memory:
+
+* ``RowBlockedInterleavedARM`` (4202) - the blocks of the matrix are ordered
+  row-major.
+* ``ColumnBlockedInterleavedARM`` (4203) - the blocks are ordered column-major.
+
+Both are enabled by the ``CooperativeMatrixLayoutsARM`` capability.
+
+The capability is 4201 and implicitly declares
+``CooperativeMatrixKHR``, so a module that uses either layout also declares
+``SPV_KHR_cooperative_matrix``. SPIR-V CodeGen adds the capability and
+``OpExtension "SPV_ARM_cooperative_matrix_layouts"`` from the ``MemoryLayout``
+operand of ``OpCooperativeMatrixLoadKHR`` / ``OpCooperativeMatrixStoreKHR``
+itself, so a shader does not request anything: naming one of the two enumerants is
+the request. The extension is enabled by default - there is no alternative
+lowering to fall back to - and ``-fspv-extension=SPV_ARM_cooperative_matrix_layouts``
+is accepted, and only needed when an explicit allow-list is in use.
+
+Both layouts arrange a matrix in 64-byte blocks. A block holds a sub-matrix of 4
+rows and ``16 / sizeof(ComponentType)`` columns, stored row-major inside the
+block: 4 rows, times ``16 / sizeof(ComponentType)`` columns, times
+``sizeof(ComponentType)`` bytes is 64 bytes.
+``RowBlockedInterleavedARM`` orders the blocks row-major,
+``ColumnBlockedInterleavedARM`` column-major, and in both the blocks are
+interleaved at a 4-byte granularity in groups whose size is the *Stride* operand.
+
+The ``Stride`` operand
+++++++++++++++++++++++
+
+For ``RowMajorKHR`` (0) and ``ColumnMajorKHR`` (1), ``Stride`` is a byte stride:
+the distance between the starts of two consecutive rows (row-major) or columns
+(column-major), and nothing else. For the two Arm layouts it is the *interleaving
+group size, counted in blocks*, and the extension restricts it to 1, 2 or 4.
+Every other value is invalid, not merely unusual.
+
+The extension also requires ``Stride`` - and ``MemoryLayout`` itself - to come
+from a *constant* instruction. DXC lowers every HLSL function parameter to a
+pointer and reads it back with ``OpLoad``, so a stride passed as an argument can
+never satisfy that rule. The Arm layouts are therefore reached through entry
+points that take the stride as a template argument, which reaches the instruction
+as an ``OpConstant``:
+
+.. code:: hlsl
+
+  #include <vk/arm/cooperative_matrix_layouts.h>
+
+  using FloatMatA =
+      vk::khr::CooperativeMatrixA<float, vk::ScopeSubgroup, 16, 16>;
+
+  // MemoryLayout 4202, Stride 1, reading a structured buffer.
+  FloatMatA a = FloatMatA::LoadBlockedInterleaved<
+      vk::CooperativeMatrixLayoutRowBlockedInterleavedARM, 1>(source, 0);
+
+  // MemoryLayout 4203, Stride 2, writing workgroup memory.
+  a.StoreBlockedInterleaved<
+      vk::CooperativeMatrixLayoutColumnBlockedInterleavedARM, 2>(
+      vk::GetGroupSharedAddress(staging[0]));
+
+``LoadBlockedInterleaved`` is available for ``StructuredBuffer``,
+``RWStructuredBuffer`` and ``WorkgroupSpirvPointer``; ``StoreBlockedInterleaved``
+for ``RWStructuredBuffer`` and ``WorkgroupSpirvPointer``. The workgroup forms add
+the make-visible/non-private and make-available/non-private memory access operands
+with the workgroup scope, exactly like the workgroup forms of ``Load``/``Store``.
+
+Alignment requirements
+++++++++++++++++++++++
+
+``Stride`` is not a byte stride, so the shapes a matrix may have are restricted
+rather than merely aligned. With ``T`` the component type (and ``sizeof(T)`` the
+size the compiler gives it, which is what ``OpTypeCooperativeMatrixKHR`` carries):
+
+* ``RowBlockedInterleavedARM``: ``Rows`` must be a multiple of 4, and ``Columns``
+  a multiple of ``(16 / sizeof(T)) * Stride``.
+* ``ColumnBlockedInterleavedARM``: ``Rows`` must be a multiple of ``4 * Stride``,
+  and ``Columns`` a multiple of ``16 / sizeof(T)``.
+
+The first factor of each rule says that the matrix has to tile exactly into whole
+64-byte blocks; the ``Stride`` factor says that a row (or column) of blocks has to
+contain whole interleaving groups. A 16x16 ``float`` matrix therefore works with
+either layout and any of the three strides, because ``16 / sizeof(float)`` is 4:
+16 is a multiple of 4, of 4, of 8 and of 16. A 16x8 ``float`` matrix with a stride
+of 4 in ``RowBlockedInterleavedARM`` does not, because 8 is not a multiple of
+``4 * 4``.
+
+Combinations that are invalid
++++++++++++++++++++++++++++++
+
+Both restrictions are checked at compile time, and the check costs nothing at run
+time: ``LoadBlockedInterleaved`` / ``StoreBlockedInterleaved`` instantiate a
+template that only has a definition for a supported combination, so
+
+* a ``Stride`` other than 1, 2 or 4,
+* a ``Rows``/``Columns`` pair that violates the tiling rule above, or
+* a ``MemoryLayout`` that is not one of the two Arm enumerants,
+
+is a compile-time error - ``error: implicit instantiation of undefined template
+'vk::arm::BlockedInterleavedLayoutIsSupported<false>'`` followed by a note naming
+the offending call. Rather than emitting SPIR-V that ``spirv-val`` rejects, which
+is what happens if the combination is passed to the instruction anyway.
+Handing one of the Arm layouts to the ordinary ``Load``/``Store`` entry points,
+whose stride is a run-time argument, is a compile-time error as well:
+``error: implicit instantiation of undefined template
+'vk::arm::RuntimeStrideIsValidForLayout<false>'``.
+
+The classic ``RowMajorKHR`` / ``ColumnMajorKHR`` path is untouched: a module that
+does not name an Arm layout declares neither the capability nor the extension and
+passes the same operands as before.
+
+One combination is deliberately *not* diagnosed: a ``MemoryLayout`` that is a
+specialization constant. ``OpSpecConstant`` is a constant instruction, so the module
+is legal, but the compiler cannot know which layout the host will select - and the
+checks above cannot run at all. The capability and the extension are then declared
+conservatively, which is always valid, rather than rejecting legal SPIR-V; the host
+carries the responsibility, since whatever it sets has to satisfy the same rules.
+
+What the compiler cannot check
+++++++++++++++++++++++++++++++
+
+* the buffer contents. Blocks must have been written by the producer with the same
+  layout, the same interleaving group size and the same block ordering; a mismatch
+  is silently wrong numbers, not a validation error.
+* the device. ``VkCooperativeMatrixPropertiesKHR::memoryLayout`` has to report
+  ``VK_COOPERATIVE_MATRIX_LAYOUT_ROW_BLOCKED_INTERLEAVED_ARM`` or
+  ``VK_COOPERATIVE_MATRIX_LAYOUT_COLUMN_BLOCKED_INTERLEAVED_ARM`` for the component
+  type and shape in use, and the host has to enable
+  ``VK_ARM_cooperative_matrix_layouts``. The layouts are device specific and have
+  no portable fallback.
+
+The stride operand of the workgroup-memory forms has one more restriction that is
+not specific to this extension: ``spirv-val`` requires the ``Scope`` operand of
+``OpCooperativeMatrixLoadKHR`` / ``OpCooperativeMatrixStoreKHR`` to be a constant,
+and before legalization it is still a run-time argument. A ``-fcgl`` compile of
+either workgroup-memory form - with the classic layouts as well - is therefore
+rejected by validation, and the workgroup forms are covered by the tests that
+compile without ``-fcgl``.
+
+See ``examples/spirv-extensions/arm-cooperative-matrix-layouts.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/arm.cooperative-matrix.layouts*.hlsl`` for the
+tests that pin the capability, the extension, the layout and stride operands, the
+classic off path, the optimizer-survival path and the diagnostics.
 
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
@@ -1868,6 +2010,7 @@ Supported extensions
 * SPV_QCOM_multiple_wait_queues
 * SPV_NV_push_constant_bank
 * SPV_VALVE_mixed_float_dot_product
+* SPV_ARM_cooperative_matrix_layouts
 
 * ``VK_EXT_shader_uniform_buffer_unsized_array`` has no matching SPIR-V
   ``OpExtension``: it relaxes a rule of the Vulkan SPIR-V environment and reuses

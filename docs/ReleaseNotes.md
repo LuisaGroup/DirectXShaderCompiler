@@ -20,6 +20,33 @@ The included licenses apply to the following files:
 ### Upcoming Release
 
 #### SPIR-V
+- Added support for `SPV_ARM_cooperative_matrix_layouts`
+  (`VK_ARM_cooperative_matrix_layouts`): naming
+  `vk::CooperativeMatrixLayoutRowBlockedInterleavedARM` (4202) or
+  `...ColumnBlockedInterleavedARM` (4203) as the `MemoryLayout` of a cooperative
+  matrix load or store now emits `OpCapability CooperativeMatrixLayoutsARM` (4201)
+  and `OpExtension "SPV_ARM_cooperative_matrix_layouts"` for the instruction that
+  uses it. The two layouts arrange a matrix in 64-byte blocks that are ordered
+  row-major or column-major and interleaved at a 4-byte granularity in groups of
+  *Stride* blocks; for them `Stride` is therefore not a byte stride but the
+  interleaving group size, and the extension restricts it to 1, 2 or 4 and
+  requires it to come from a constant instruction. Because HLSL lowers every
+  function argument to a pointer and reads it back with `OpLoad`, the layouts are
+  reached through `LoadBlockedInterleaved`/`StoreBlockedInterleaved` in
+  `<vk/arm/cooperative_matrix_layouts.h>`, which take the stride as a template
+  argument, and an unsupported combination - a stride outside 1/2/4, a
+  `Rows`/`Columns` pair that does not tile into whole blocks and whole
+  interleaving groups, or an Arm layout handed to the ordinary `Load`/`Store`
+  entry points - is a compile-time error instead of SPIR-V that `spirv-val`
+  rejects. The classic `RowMajorKHR`/`ColumnMajorKHR` path is unchanged. The
+  extension is enabled by default, because there is no alternative lowering to
+  fall back to; `-fspv-extension=SPV_ARM_cooperative_matrix_layouts` is accepted
+  and is only needed with an explicit allow-list. The host must enable
+  `VK_ARM_cooperative_matrix_layouts` and find a
+  `VkCooperativeMatrixPropertiesKHR` that reports the layout; the compiler cannot
+  check that, nor what the producer wrote into the buffer. See the "Arm
+  cooperative matrix memory layouts" section of `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/arm-cooperative-matrix-layouts.hlsl`.
 
 - Added support for `SPV_KHR_abort` (`VK_KHR_shader_abort`): with
   `-fspv-extension=SPV_KHR_abort`, a `vk::Abort(message)` call (the entry point is

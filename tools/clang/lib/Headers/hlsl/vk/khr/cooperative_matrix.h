@@ -23,8 +23,14 @@ namespace khr {
 // it, and it has to be specialized. The answer for bfloat16_t is false: those
 // operands may only be set when the component type of the corresponding matrix
 // is an integer type.
+// HLSL Change - VK_ARM_cooperative_matrix_layouts review: probe integers by
+// integer division instead of by subtraction. '(T(0) - T(1) < T(0))' is also
+// true for floating-point component types, which made a float/half cooperative
+// matrix request the Matrix*SignedComponentsKHR operands that the validator only
+// allows for integer components. Integer division truncates, so
+// '((T(1) / T(2)) * T(2) == T(1)' holds only for floating-point types.
 template <typename T> struct HasSignedIntegerComponentType {
-  static const bool value = (T(0) - T(1) < T(0));
+  static const bool value = !((T(1) / T(2)) * T(2) == T(1));
 };
 template <> struct HasSignedIntegerComponentType<bfloat16_t> {
   static const bool value = false;
@@ -213,6 +219,49 @@ class CooperativeMatrix {
                                 uint32_t stride) {
     return Load<MemoryAccessMaskNone, layout>(data, index, stride);
   }
+
+  // HLSL Change Begin - SPV_ARM_cooperative_matrix_layouts.
+  //
+  // The blocked-interleaved Arm memory layouts (RowBlockedInterleavedARM and
+  // ColumnBlockedInterleavedARM) have their own entry points because their
+  // Stride operand must come from a *constant* instruction, which a Stride
+  // passed as a function argument can never be: every HLSL parameter is lowered
+  // to a pointer and read back with OpLoad. Here the stride is a template
+  // argument instead, so it reaches OpCooperativeMatrixLoadKHR /
+  // OpCooperativeMatrixStoreKHR as an OpConstant, and the (layout, stride,
+  // rows, columns) combination is checked at compile time. The definitions live
+  // in <vk/arm/cooperative_matrix_layouts.h>, which include that header.
+  //
+  // Loads a cooperative matrix using OpCooperativeMatrixLoadKHR with one of the
+  // two Arm memory layouts. No memory access bits are added to the operands.
+  template <CooperativeMatrixLayout layout, uint32_t stride, class Type>
+  static CooperativeMatrix LoadBlockedInterleaved(StructuredBuffer<Type> data,
+                                                  uint32_t index);
+
+  // As above, reading from a writable structured buffer.
+  template <CooperativeMatrixLayout layout, uint32_t stride, class Type>
+  static CooperativeMatrix LoadBlockedInterleaved(RWStructuredBuffer<Type> data,
+                                                  uint32_t index);
+
+  // As above, reading from workgroup memory. `NonPrivatePointer` and
+  // `MakePointerVisible` with the workgroup scope are added to the memory
+  // access operands to make the memory coherent.
+  template <CooperativeMatrixLayout layout, uint32_t stride, class Type>
+  static CooperativeMatrix LoadBlockedInterleaved(
+      WorkgroupSpirvPointer<Type> data);
+
+  // Stores the cooperative matrix using OpCooperativeMatrixStoreKHR with one of
+  // the two Arm memory layouts. No memory access bits are added to the
+  // operands.
+  template <CooperativeMatrixLayout layout, uint32_t stride, class Type>
+  void StoreBlockedInterleaved(RWStructuredBuffer<Type> data, uint32_t index);
+
+  // As above, writing to workgroup memory. `NonPrivatePointer` and
+  // `MakePointerAvailable` with the workgroup scope are added to the memory
+  // access operands to make the memory coherent.
+  template <CooperativeMatrixLayout layout, uint32_t stride, class Type>
+  void StoreBlockedInterleaved(WorkgroupSpirvPointer<Type> data);
+  // HLSL Change End
 
   // Constructs a cooperative matrix with all values initialized to v. Note that
   // all threads in scope must have the same value for v.
