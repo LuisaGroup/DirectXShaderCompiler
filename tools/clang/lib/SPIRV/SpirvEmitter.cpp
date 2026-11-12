@@ -11560,6 +11560,16 @@ SpirvEmitter::processCountBitsIntrinsic(const CallExpr *callExpr,
   // SPIRV only supports 32 bit integers for `OpBitCount` until maintenace9.
   // We need to unfold and add extra instructions to support this on
   // non-32bit integers.
+  // HLSL Change Begin - VK_KHR_maintenance9.
+  // Same relaxation as processReverseBitsIntrinsic: with the maintenance9
+  // feature the Base operand may keep its natural width, so the UConvert
+  // widening (16-bit) and the two-32-bit-halves decomposition (64-bit) below
+  // are only needed for devices without the feature.
+  if (spirvOptions.enableMaintenance9) {
+    return processIntrinsicUsingSpirvInst(callExpr, spv::Op::OpBitCount,
+                                          /* actPerRowForMatrices= */ false);
+  }
+  // HLSL Change End - VK_KHR_maintenance9.
   if (bitwidth == 32) {
     return processIntrinsicUsingSpirvInst(callExpr, spv::Op::OpBitCount,
                                           /* actPerRowForMatrices= */ false);
@@ -11635,6 +11645,22 @@ SpirvEmitter::processReverseBitsIntrinsic(const CallExpr *callExpr,
   const QualType argType = callExpr->getArg(0)->getType();
   const uint32_t bitwidth = getElementSpirvBitwidth(
       astContext, argType, spirvOptions.enable16BitTypes);
+
+  // HLSL Change Begin - VK_KHR_maintenance9.
+  // The Vulkan SPIR-V environment required the Base operand of OpBitReverse to
+  // be a 32-bit integer (VUID-RuntimeSpirv-None-10824), which is why every other
+  // width is unfolded below. VK_KHR_maintenance9 removes that restriction for
+  // devices that report the `maintenance9` feature, so the instruction can be
+  // emitted at the operand's natural width: one instruction instead of four for
+  // 16-bit and instead of nine for 64-bit. The extension adds no
+  // OpExtension, no OpCapability and no new instruction, so the relaxation is
+  // requested explicitly (-fspv-enable-maintenance9) and the validator is told
+  // about it in spirvToolsValidate.
+  if (spirvOptions.enableMaintenance9) {
+    return processIntrinsicUsingSpirvInst(callExpr, spv::Op::OpBitReverse,
+                                          /* actPerRowForMatrices= */ false);
+  }
+  // HLSL Change End - VK_KHR_maintenance9.
 
   // SPIRV only supports 32 bit integers for `OpBitReverse`. We need to
   // unfold and add extra instructions to support reversing non-32bit integers.
@@ -18433,6 +18459,20 @@ bool SpirvEmitter::spirvToolsValidate(std::vector<uint32_t> *mod,
   // docs/SPIR-V.rst ("Dynamic image offsets and signed remainder").
   options.SetAllowOffsetTextureOperand(true);
   // HLSL Change End - VK_KHR_maintenance8.
+  // HLSL Change Begin - VK_KHR_maintenance9.
+  // The Vulkan SPIR-V environment requires the Base operand of OpBitReverse,
+  // OpBitCount and OpBitFieldInsert/SExtract/UExtract to be a 32-bit integer
+  // (VUID-RuntimeSpirv-None-10824). VK_KHR_maintenance9 removes that
+  // restriction for devices that report the `maintenance9` feature, which lets
+  // the emitter keep the natural width of the operand instead of widening it
+  // (see processReverseBitsIntrinsic and processCountBitsIntrinsic). Like
+  // maintenance8 this relaxation is a property of the target environment, not
+  // of the module, so there is nothing to emit - but unlike maintenance8 the
+  // emitted instruction stream changes, so the relaxation is only applied when
+  // the user asserts the feature with -fspv-enable-maintenance9. The host
+  // requirement is documented in docs/SPIR-V.rst.
+  options.SetAllowVulkan32BitBitwise(spirvOptions.enableMaintenance9);
+  // HLSL Change End - VK_KHR_maintenance9.
   // GL: strict block layout rules
   // VK: relaxed block layout rules
   // DX: Skip block layout rules

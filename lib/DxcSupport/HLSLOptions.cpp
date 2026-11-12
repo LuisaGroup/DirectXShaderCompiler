@@ -1195,6 +1195,8 @@ int ReadDxcOpts(const OptTable *optionTable, unsigned flagsToInclude,
       Args.hasFlag(OPT_fspv_preserve_interface, OPT_INVALID, false);
   opts.SpirvOptions.enableMaximalReconvergence =
       Args.hasFlag(OPT_fspv_enable_maximal_reconvergence, OPT_INVALID, false);
+  opts.SpirvOptions.enableMaintenance9 =
+      Args.hasFlag(OPT_fspv_enable_maintenance9, OPT_INVALID, false);
   opts.SpirvOptions.useVulkanMemoryModel =
       Args.hasFlag(OPT_fspv_use_vulkan_memory_model, OPT_INVALID, false);
   opts.SpirvOptions.useUnknownImageFormat =

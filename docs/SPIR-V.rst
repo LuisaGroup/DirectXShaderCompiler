@@ -607,6 +607,100 @@ which device will run the shader.
 See ``examples/spirv-extensions/khr-maintenance8.hlsl`` for a self-contained
 example and ``tools/clang/test/CodeGenSPIRV/maintenance8.*.hlsl`` for the tests
 that pin the encoding of both items.
+
+Narrow integer bitwise operations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``VK_KHR_maintenance9`` is likewise a Vulkan maintenance extension - one feature
+bit, ``VkPhysicalDeviceMaintenance9FeaturesKHR::maintenance9`` - and the item
+that concerns DXC is a single relaxation of the Vulkan SPIR-V *environment*:
+the rule (``VUID-RuntimeSpirv-None-10824``, "Expected 32-bit int type for Base
+operand") that required the Base operand of exactly five instructions to be a
+32-bit integer. Those five instructions are ``OpBitReverse``, ``OpBitCount``,
+``OpBitFieldInsert``, ``OpBitFieldSExtract`` and ``OpBitFieldUExtract``. With
+the feature enabled any integer width is allowed, so 8-, 16- and 64-bit operands
+become legal. No other bitwise instruction is affected: ``OpBitwiseAnd``/``Or``/
+``Xor``/``Not`` and the shift instructions were never width-restricted, and DXC
+already emits them at the operand's natural width.
+
+Like maintenance8, the relaxation is not module surface: there is no
+``SPV_KHR_maintenance9`` in the Khronos SPIR-V registry, so
+``-fspv-extension=SPV_KHR_maintenance9`` is an ``unknown SPIR-V extension``
+error, and nothing is added to the module header - no ``OpExtension``, no
+``OpCapability``. Unlike maintenance8, though, the emitted *instruction stream*
+changes, because the widths the rule rejected can now be used directly. DXC
+therefore does not assume the feature: ``-fspv-enable-maintenance9`` opts in.
+
+``-fspv-enable-maintenance9`` (default off, so a module compiled without it is
+byte-for-byte what it was before) selects the native encodings:
+
+.. code:: hlsl
+
+    // Emitted only with -fspv-enable-maintenance9.
+    uint16_t r16 = reversebits(v16);  // OpBitReverse %ushort %v16
+    uint64_t r64 = reversebits(v64);  // OpBitReverse %ulong  %v64
+    uint c16 = countbits(v16);        // OpBitCount %uint %v16
+    uint c64 = countbits(v64);        // OpBitCount %uint %v64
+
+Without the flag the same expressions produce the pre-maintenance9 emulations,
+which are still valid for every device and are the only portable form:
+
+.. code:: hlsl
+
+    // reversebits on 16-bit: widen, reverse, shift right by 16, truncate.
+    %a = OpUConvert %uint   %v16
+    %b = OpBitReverse %uint %a
+    %c = OpShiftRightLogical %uint %b %uint_16
+    %d = OpUConvert %ushort %c
+
+    // reversebits on 64-bit: reverse both 32-bit halves and recombine (9
+    // instructions instead of 1).
+    // countbits on 16-bit: widen, then count (2 instructions instead of 1).
+    // countbits on 64-bit: count both halves and add (6 instead of 1).
+
+This is deliberately not tied to ``-fspv-target-env``: the relaxation depends on
+a device feature, not on the SPIR-V version, so a Vulkan 1.1/1.2/1.3 device that
+enables the extension may use it, and DXC's ``-fspv-target-env`` list stops at
+``vulkan1.3`` anyway. There is consequently no target environment at which DXC
+could infer the relaxation by itself.
+
+What stays emulated, and why:
+
+* **8-bit** widths are unlocked by the extension - the validator accepts
+  ``OpBitReverse %uchar`` and friends once the feature is declared, and inline
+  SPIR-V can use them with ``-fspv-enable-maintenance9``. HLSL's ``reversebits``
+  and ``countbits`` cannot reach them, though: the Sema overload set for these
+  intrinsics (``any_int``) covers 16-, 32- and 64-bit integers only, so an
+  ``int8_t``/``uint8_t`` argument is promoted to ``int`` before the intrinsic
+  and the operation is performed on 32 bits. To use the 8-bit forms from HLSL,
+  declare the instruction with ``[[vk::ext_instruction]]`` (see
+  ``tools/clang/test/CodeGenSPIRV/maintenance9.bitwise.int8.hlsl``).
+* ``firstbitlow``/``firstbithigh`` keep their 32-bit restriction. That limit
+  comes from ``GLSL.std.450`` (``FindILsb``/``FindSMsb``/``FindUMsb`` have no
+  16-bit form), not from the Vulkan rule maintenance9 relaxes, so the extension
+  does not help.
+* ``OpBitFieldInsert``/``OpBitFieldSExtract``/``OpBitFieldUExtract`` are emitted
+  directly at 32 bits and emulated otherwise, but the emulation is not on any
+  path maintenance9 unblocks: ``bfi``/``ubfe``/``ibfe`` are not HLSL intrinsics
+  for SPIR-V, and HLSL struct bitfields always pack into a 32-bit member, so the
+  emulated bitfield paths are not reached from HLSL today.
+
+Two things the compiler cannot check. First, DXC always validates the module it
+just produced, and it does so under the rule it emitted for:
+``SpirvEmitter::spirvToolsValidate`` calls
+``SetAllowVulkan32BitBitwise(spirvOptions.enableMaintenance9)``, so a module
+compiled with the flag is validated as a maintenance9 module and one compiled
+without it is validated as before - a mismatch is impossible, but the flag
+itself is an unverifiable promise. Second, the host side: the application must
+enable ``VK_KHR_maintenance9`` at ``vkCreateDevice`` and set
+``VkPhysicalDeviceMaintenance9FeaturesKHR::maintenance9`` to ``VK_TRUE``.
+Without it a pipeline whose shader contains a non-32-bit Base operand is
+rejected at pipeline creation.
+
+See ``examples/spirv-extensions/khr-maintenance9.hlsl`` for a self-contained
+example and ``tools/clang/test/CodeGenSPIRV/maintenance9.*.hlsl`` for the tests
+that pin both the flagged and the unflagged encodings.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -801,6 +895,17 @@ supplied via ``-fspv-extension=`` will be used. If that does not suffice, errors
 will be emitted explaining what additional extensions are required to translate
 what specific feature in the source code. If you want to allow all KHR
 extensions, you can use ``-fspv-extension=KHR``.
+
+``-fspv-enable-maintenance9`` is a third, independent kind of option: it is not
+a version and not an extension, but a statement about the *device*. It declares
+that ``VK_KHR_maintenance9`` (feature bit ``maintenance9``) is enabled, which
+lets the five bitwise instructions that the Vulkan environment restricted to
+32-bit Base operands (``OpBitReverse``, ``OpBitCount``, ``OpBitFieldInsert``,
+``OpBitFieldSExtract``, ``OpBitFieldUExtract``) keep the natural width of a
+narrow or 64-bit operand instead of being emulated. It changes the generated
+instruction stream, so it is off by default; see `Narrow integer bitwise
+operations`_ above for the exact before/after sequences and for the host
+requirements.
 
 Legalization, optimization, validation
 --------------------------------------

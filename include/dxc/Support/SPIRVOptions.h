@@ -70,6 +70,7 @@ struct SpirvCodeGenOptions {
   bool supportNonzeroBaseVertex = false;
   bool fixFuncCallArguments = false;
   bool enableMaximalReconvergence = false;
+  bool enableMaintenance9 = false;
   bool useVulkanMemoryModel = false;
   bool useUnknownImageFormat = false;
   bool useDescriptorHeap = false;

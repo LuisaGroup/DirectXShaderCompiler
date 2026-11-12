@@ -110,6 +110,22 @@ The included licenses apply to the following files:
   relaxation in effect. The host must still provide Vulkan 1.4, or Vulkan 1.1+
   with `VK_KHR_maintenance8` enabled and the `maintenance8` feature bit set; the
   compiler cannot check that.
+  - Added `-fspv-enable-maintenance9` for `VK_KHR_maintenance9`, whose
+  `maintenance9` feature bit lifts the Vulkan rule
+  (`VUID-RuntimeSpirv-None-10824`) that required a 32-bit Base operand for
+  `OpBitReverse`, `OpBitCount`, `OpBitFieldInsert`, `OpBitFieldSExtract` and
+  `OpBitFieldUExtract`. With the flag, `reversebits` on a 16-bit operand is one
+  `OpBitReverse %ushort` instead of a widen/reverse/shift/truncate sequence, and
+  on a 64-bit operand one `OpBitReverse %ulong` instead of nine instructions that
+  reverse both halves and recombine them; `countbits` similarly drops its
+  widening (16-bit) and its two-half decomposition (64-bit). The flag is off by
+  default, so generated code is unchanged without it, and the validator
+  relaxation (`SetAllowVulkan32BitBitwise`) is applied only when it is passed.
+  As with maintenance8 there is no `SPV_KHR_maintenance9` to request with
+  `-fspv-extension` and nothing is added to the module header; the relaxation is
+  a device feature, so it is not expressible with `-fspv-target-env`. The host
+  must enable `VK_KHR_maintenance9` at `vkCreateDevice` and set the `maintenance9`
+  feature bit; the compiler cannot check that.
 
 Place release notes for the upcoming release below this line and remove this
 line upon naming the release. Refer to previous for appropriate section names.
