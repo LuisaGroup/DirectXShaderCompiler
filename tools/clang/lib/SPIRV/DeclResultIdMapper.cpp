@@ -1674,6 +1674,29 @@ SpirvVariable *DeclResultIdMapper::createPushConstant(const VarDecl *decl) {
   // Register the VarDecl
   registerVariableForDecl(decl, createDeclSpirvInfo(var));
 
+  // HLSL Change Begin - VK_NV_push_constant_bank. Both decorations of
+  // SPV_NV_push_constant_bank apply to the push constant variable, not to the
+  // members of the block: BankNV selects the hardware bank the block lives in
+  // and MemberOffsetNV is a base byte offset that is added to the offsets of
+  // every member of the block. SpirvEmitter::validateVKAttributes has already
+  // rejected the attributes without [[vk::push_constant]], without
+  // -fspv-extension=SPV_NV_push_constant_bank and with out-of-range arguments,
+  // so a decoration emitted here is always wanted. Emitting none of them keeps
+  // the module byte-identical to the pre-extension output.
+  if (const auto *bankAttr = decl->getAttr<VKPushConstantBankNVAttr>()) {
+    spvBuilder.decorateWithLiterals(
+        var, static_cast<unsigned>(spv::Decoration::BankNV),
+        {static_cast<unsigned>(bankAttr->getBank())}, bankAttr->getLocation());
+  }
+  if (const auto *offsetAttr =
+          decl->getAttr<VKPushConstantBankOffsetNVAttr>()) {
+    spvBuilder.decorateWithLiterals(
+        var, static_cast<unsigned>(spv::Decoration::MemberOffsetNV),
+        {static_cast<unsigned>(offsetAttr->getOffset())},
+        offsetAttr->getLocation());
+  }
+  // HLSL Change End - VK_NV_push_constant_bank.
+
   // Do not push this variable into resourceVars since it does not need
   // descriptor set.
 

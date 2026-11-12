@@ -1900,22 +1900,124 @@ bool SpirvEmitter::validateVKAttributes(const NamedDecl *decl) {
   // So the only case we need to check co-existence is vk::push_constant and
   // vk::binding.
 
+  // HLSL Change Begin - VK_NV_push_constant_bank. Both decorations of
+  // SPV_NV_push_constant_bank apply to the push constant variable itself
+  // (MemberOffsetNV is a base byte offset added to the offsets of all members
+  // of the block, not a decoration of a single member), so the two attributes
+  // are only meaningful together with [[vk::push_constant]] and only when the
+  // extension was requested. They are diagnosed, never dropped: a silently
+  // dropped BankNV decoration moves the block back to bank 0 without telling
+  // either side, which is a miscompile.
+  const auto *pcBankAttr = decl->getAttr<VKPushConstantBankNVAttr>();
+  const auto *pcBankOffsetAttr =
+      decl->getAttr<VKPushConstantBankOffsetNVAttr>();
+  if (pcBankAttr || pcBankOffsetAttr) {
+    const auto attrLoc =
+        pcBankAttr ? pcBankAttr->getLocation() : pcBankOffsetAttr->getLocation();
+    const char *attrName = pcBankAttr ? "vk::push_constant_bank"
+                                      : "vk::push_constant_bank_offset";
+    if (!decl->hasAttr<VKPushConstantAttr>()) {
+      emitError("'[[%0]]' can only be used together with "
+                "'[[vk::push_constant]]'",
+                attrLoc) << attrName;
+      success = false;
+    }
+    if (!featureManager.isExtensionEnabled(Extension::NV_push_constant_bank)) {
+      emitError("'[[%0]]' requires the SPV_NV_push_constant_bank extension; "
+                "pass -fspv-extension=SPV_NV_push_constant_bank to enable it",
+                attrLoc) << attrName;
+      success = false;
+    }
+    // Both decorations carry a 32-bit unsigned literal (SPV_NV_push_constant_bank:
+    // "The bank index must be a 32-bit unsigned integer literal"), so a
+    // negative argument has no encoding. ValidateAttributeIntArg has already
+    // warned about it; the value still reaches here.
+    if (pcBankAttr && pcBankAttr->getBank() < 0) {
+      emitError("'[[vk::push_constant_bank]]' requires a non-negative bank "
+                "index",
+                pcBankAttr->getLocation());
+      success = false;
+    }
+    if (pcBankOffsetAttr && pcBankOffsetAttr->getOffset() < 0) {
+      emitError("'[[vk::push_constant_bank_offset]]' requires a non-negative "
+                "byte offset",
+                pcBankOffsetAttr->getLocation());
+      success = false;
+    }
+    // The two attributes have no effect on their own and repeating them is
+    // ambiguous (which of the two banks would win?), so only one of each is
+    // accepted. Clang does not diagnose duplicate attributes of the same kind
+    // in this version, so count them here. The whole attribute vector is walked
+    // rather than specific_attr_begin/end, whose iterator in this LLVM version
+    // only skips non-matching attributes when it is dereferenced.
+    unsigned numBankAttrs = 0;
+    unsigned numBankOffsetAttrs = 0;
+    for (auto it = decl->attr_begin(), end = decl->attr_end(); it != end; ++it) {
+      if (isa<VKPushConstantBankNVAttr>(*it))
+        ++numBankAttrs;
+      else if (isa<VKPushConstantBankOffsetNVAttr>(*it))
+        ++numBankOffsetAttrs;
+    }
+    if (numBankAttrs > 1) {
+      emitError("'[[vk::push_constant_bank]]' cannot be applied more than once "
+                "to the same declaration",
+                attrLoc);
+      success = false;
+    }
+    if (numBankOffsetAttrs > 1) {
+      emitError("'[[vk::push_constant_bank_offset]]' cannot be applied more "
+                "than once to the same declaration",
+                attrLoc);
+      success = false;
+    }
+  }
+  // HLSL Change End - VK_NV_push_constant_bank.
+
   if (const auto *pcAttr = decl->getAttr<VKPushConstantAttr>()) {
     const auto loc = pcAttr->getLocation();
 
-    if (seenPushConstantAt.isInvalid()) {
-      seenPushConstantAt = loc;
+    // HLSL Change Begin - VK_NV_push_constant_bank. Several push constant
+    // blocks may coexist as long as they live in different banks of
+    // SPV_NV_push_constant_bank, so with the extension the rule becomes "at
+    // most one block per bank". Without the extension the historical rule and
+    // its diagnostics are kept unchanged.
+    if (!featureManager.isExtensionEnabled(Extension::NV_push_constant_bank)) {
+      if (seenPushConstantAt.isInvalid()) {
+        seenPushConstantAt = loc;
+      } else {
+        // TODO: Actually this is slightly incorrect. The Vulkan spec says:
+        //   There must be no more than one push constant block statically used
+        //   per shader entry point.
+        // But we are checking whether there are more than one push constant
+        // blocks defined. Tracking usage requires more work.
+        emitError("cannot have more than one push constant block", loc);
+        emitNote("push constant block previously defined here",
+                 seenPushConstantAt);
+        success = false;
+      }
     } else {
-      // TODO: Actually this is slightly incorrect. The Vulkan spec says:
-      //   There must be no more than one push constant block statically used
-      //   per shader entry point.
-      // But we are checking whether there are more than one push constant
-      // blocks defined. Tracking usage requires more work.
-      emitError("cannot have more than one push constant block", loc);
-      emitNote("push constant block previously defined here",
-               seenPushConstantAt);
-      success = false;
+      // A block without [[vk::push_constant_bank(N)]] is in bank 0
+      // (SPV_NV_push_constant_bank: "If not present, the bank is assumed to be
+      // 0"), so it can still collide with an explicit bank 0 block.
+      const uint32_t bank =
+          pcBankAttr ? static_cast<uint32_t>(pcBankAttr->getBank()) : 0;
+      SourceLocation previousLoc;
+      for (const auto &seen : seenPushConstantBanks) {
+        if (seen.first == bank) {
+          previousLoc = seen.second;
+          break;
+        }
+      }
+      if (previousLoc.isInvalid()) {
+        seenPushConstantBanks.push_back({bank, loc});
+      } else {
+        emitError("cannot have more than one push constant block in bank %0",
+                  loc) << bank;
+        emitNote("push constant block previously defined here", previousLoc);
+        success = false;
+      }
     }
+    // HLSL Change End - VK_NV_push_constant_bank.
 
     if (decl->hasAttr<VKBindingAttr>()) {
       emitError("vk::push_constant attribute cannot be used together with "

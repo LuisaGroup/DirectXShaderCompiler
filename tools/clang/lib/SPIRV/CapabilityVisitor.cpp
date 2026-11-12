@@ -325,6 +325,20 @@ bool CapabilityVisitor::visit(SpirvDecoration *decor) {
     addCapability(spv::Capability::FragmentBarycentricKHR);
     break;
   }
+  // HLSL Change Begin - SPV_NV_push_constant_bank. Both decorations are only
+  // valid together with PushConstantBanksNV, and the emitter rejects the
+  // attributes unless -fspv-extension=SPV_NV_push_constant_bank was given, so
+  // reaching this point means the capability and the OpExtension are both
+  // wanted. The two decorations are handled together because they come from
+  // the same extension and either one alone still needs the capability.
+  case spv::Decoration::BankNV:
+  case spv::Decoration::MemberOffsetNV: {
+    addExtensionAndCapabilitiesIfEnabled(
+        Extension::NV_push_constant_bank,
+        {spv::Capability::PushConstantBanksNV});
+    break;
+  }
+  // HLSL Change End - SPV_NV_push_constant_bank.
   case spv::Decoration::NodeSharesPayloadLimitsWithAMDX:
   case spv::Decoration::NodeMaxPayloadsAMDX:
   case spv::Decoration::TrackFinishWritingAMDX:

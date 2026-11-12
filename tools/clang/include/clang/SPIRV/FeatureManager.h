@@ -87,7 +87,10 @@ enum class Extension {
       // HLSL Change - SPV_QCOM_multiple_wait_queues
       // ([[vk::multiple_wait_queues]] on a loop).
       QCOM_multiple_wait_queues,
-    Unknown,
+  // HLSL Change - SPV_NV_push_constant_bank ([[vk::push_constant_bank(N)]]
+  // and [[vk::push_constant_bank_offset(N)]] on a push constant block).
+  NV_push_constant_bank,
+  Unknown,
 };
 
 /// The class for handling SPIR-V version and extension requests.

@@ -1534,6 +1534,28 @@ def VKPushConstant : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+// HLSL Change - VK_NV_push_constant_bank. Despite the name, MemberOffsetNV is
+// a decoration on the push constant *variable* (it is a base byte offset that
+// is added to the offsets of all members of the block), not on a structure
+// member, so both attributes below take the same subject as vk::push_constant
+// and are required to be used together with it. See validateVKAttributes() in
+// lib/SPIRV/SpirvEmitter.cpp for the cross-attribute checks.
+def VKPushConstantBankNV : InheritableAttr {
+  let Spellings = [CXX11<"vk", "push_constant_bank">];
+  let Subjects = SubjectList<[StructGlobalVar], ErrorDiag, "ExpectedStructGlobalVar">;
+  let Args = [IntArgument<"Bank">];
+  let LangOpts = [SPIRV];
+  let Documentation = [Undocumented];
+}
+
+def VKPushConstantBankOffsetNV : InheritableAttr {
+  let Spellings = [CXX11<"vk", "push_constant_bank_offset">];
+  let Subjects = SubjectList<[StructGlobalVar], ErrorDiag, "ExpectedStructGlobalVar">;
+  let Args = [IntArgument<"Offset">];
+  let LangOpts = [SPIRV];
+  let Documentation = [Undocumented];
+}
+
 def VKOffset : InheritableAttr {
   let Spellings = [CXX11<"vk", "offset">];
   let Subjects = SubjectList<[Field], ErrorDiag, "ExpectedField">;

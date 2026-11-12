@@ -1864,6 +1864,14 @@ private:
   /// Invalid means no push constant blocks defined thus far.
   SourceLocation seenPushConstantAt;
 
+  // HLSL Change - VK_NV_push_constant_bank. With SPV_NV_push_constant_bank the
+  // push constant uniqueness rule is per bank, so the bank index each block was
+  // seen in is tracked here (a vector, not a map: a module has at most a
+  // handful of push constant blocks). Unused without the extension;
+  // seenPushConstantAt still implements the historical "at most one block"
+  // rule in that case.
+  std::vector<std::pair<uint32_t, SourceLocation>> seenPushConstantBanks;
+
   /// Indicates whether the current emitter is in specialization constant mode:
   /// all 32-bit scalar constants will be translated into OpSpecConstant.
   bool isSpecConstantMode;

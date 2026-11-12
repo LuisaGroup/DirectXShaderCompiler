@@ -67,8 +67,27 @@ The included licenses apply to the following files:
     annotated loop is a compile error, and code generation without the
     attribute is unchanged. The annotation on a statement that is not a loop,
     and two copies of it on one statement, are compile errors. This is an
-    encoding-level performance hint only - a driver may ignore it, it implies
-    no memory ordering, and results are identical either way.
+      encoding-level performance hint only - a driver may ignore it, it implies
+      no memory ordering, and results are identical either way.
+  - Added support for `SPV_NV_push_constant_bank`:
+    `[[vk::push_constant_bank(N)]]` on a `[[vk::push_constant]]` block places the
+    block in hardware push constant bank `N` (`OpDecorate %pc BankNV N`, 5397),
+    and `[[vk::push_constant_bank_offset(N)]]` adds the base byte offset `N` to
+    every member offset of the block (`OpDecorate %pc MemberOffsetNV N`, 5358;
+    despite the name it decorates the variable, not a struct member). A module
+    that uses either decoration declares `OpCapability PushConstantBanksNV`
+    (5423) and `OpExtension "SPV_NV_push_constant_bank"`, and the "at most one
+    push constant block" rule becomes "at most one block per bank" - the only
+    rule change. The extension is opt-in
+    (`-fspv-extension=SPV_NV_push_constant_bank`, driver side
+    `VK_NV_push_constant_bank` plus the `pushConstantBank` feature): without the
+    flag the attributes are compile errors, code generation without them is
+    unchanged, and a second block in the same bank, a repeated attribute, a
+    negative bank/offset and the attributes without `[[vk::push_constant]]` are
+    compile errors. The bank count (`maxGraphicsPushConstantBanks` /
+    `maxComputePushConstantBanks`) and the bank size
+    (`maxPushConstantsSize`) are host facts the compiler cannot check.
+
 - Added `-fvk-resource-heap-stride` and `-fvk-sampler-heap-stride`, which
   override the computed `ArrayStrideIdEXT` of the resource and sampler
   descriptor heaps with a literal `ArrayStride`. The value must be a power of

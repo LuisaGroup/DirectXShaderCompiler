@@ -15355,6 +15355,22 @@ void hlsl::HandleDeclAttributeForHLSL(Sema &S, Decl *D, const AttributeList &A,
     declAttr = ::new (S.Context) VKPushConstantAttr(
         A.getRange(), S.Context, A.getAttributeSpellingListIndex());
     break;
+  // HLSL Change - VK_NV_push_constant_bank. The only argument is the literal
+  // the decoration carries: the bank index for [[vk::push_constant_bank(N)]]
+  // and the base byte offset for [[vk::push_constant_bank_offset(N)]]. Both
+  // decorations take an unsigned 32-bit literal; a negative argument is
+  // rejected later, in SpirvEmitter::validateVKAttributes, together with the
+  // other cross-attribute checks.
+  case AttributeList::AT_VKPushConstantBankNV:
+    declAttr = ::new (S.Context) VKPushConstantBankNVAttr(
+        A.getRange(), S.Context, ValidateAttributeIntArg(S, A),
+        A.getAttributeSpellingListIndex());
+    break;
+  case AttributeList::AT_VKPushConstantBankOffsetNV:
+    declAttr = ::new (S.Context) VKPushConstantBankOffsetNVAttr(
+        A.getRange(), S.Context, ValidateAttributeIntArg(S, A),
+        A.getAttributeSpellingListIndex());
+    break;
   case AttributeList::AT_VKOffset:
     declAttr = ::new (S.Context)
         VKOffsetAttr(A.getRange(), S.Context, ValidateAttributeIntArg(S, A),

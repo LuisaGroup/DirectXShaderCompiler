@@ -226,7 +226,9 @@ struct types in HLSL. The variables (not the underlying struct types) should be
 annotated with the ``[[vk::push_constant]]`` attribute.
 
 Please note as per the requirements of Vulkan, "there must be no more than one
-push constant block statically used per shader entry point."
+push constant block statically used per shader entry point." The one exception is
+``SPV_NV_push_constant_bank``, where the blocks are spread over hardware banks
+and the rule becomes per bank; see `Push constant banks`_ below.
 
 Specialization constants
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -458,6 +460,95 @@ Limitations:
   more queues than ``maxShaderWaitQueues`` reports. The compiler cannot check
   either of these; an argument above the device limit is at best ignored.
 
+Push constant banks
+~~~~~~~~~~~~~~~~~~~
+
+The ``SPV_NV_push_constant_bank`` extension lets a shader place its push constant
+blocks in different hardware *banks* and at an explicit byte offset inside its
+bank. NVIDIA hardware has several banks of push constant / push data memory,
+while a descriptor set exposes a single set of push data; spreading push
+constants over several banks is what lets a descriptor-heap application reach
+more root-descriptor data without a descriptor set per shader. It is gated by the
+Vulkan ``VK_NV_push_constant_bank`` device extension, whose
+``VkPhysicalDevicePushConstantBankFeaturesNV`` structure carries the
+``pushConstantBank`` feature bit.
+
+The extension adds no instruction, only two decorations, both of which apply to
+the push constant *variable*:
+
+.. code:: spirv
+
+  OpCapability PushConstantBanksNV ; 5423
+  OpExtension "SPV_NV_push_constant_bank"
+  OpDecorate %pcs BankNV 1         ; 5397, the bank the block lives in
+  OpDecorate %pcs MemberOffsetNV 64 ; 5358, base byte offset inside that bank
+
+``MemberOffsetNV`` is *not* a member decoration, despite its name: the registry
+text says "Apply to a variable with PushConstant storage class to specify a base
+offset (in bytes) that is added to all member offsets within the block", and both
+decorations are plain ``OpDecorate`` on the ``OpVariable``. It does not replace
+the ``OpMemberDecorate ... Offset`` decorations, which keep describing the
+layout inside the block. A block without ``BankNV`` is in bank 0, and a block
+without ``MemberOffsetNV`` starts at byte 0 of its bank, so a shader that uses
+neither decoration is encoded exactly as before.
+
+In HLSL the two attributes go on the ``[[vk::push_constant]]`` block:
+
+.. code:: hlsl
+
+  [[vk::push_constant]]
+  [[vk::push_constant_bank(1)]]
+  [[vk::push_constant_bank_offset(64)]]
+  PerDraw perDraw; // bank 1, members start at byte 64 of bank 1
+
+.. code:: hlsl
+
+  // Two blocks in two banks, which plain SPIR-V forbids.
+  [[vk::push_constant]] PerFrame perFrame;      // bank 0, offset 0
+  [[vk::push_constant]]
+  [[vk::push_constant_bank(1)]] PerDraw perDraw;
+
+A module that declares more than one ``PushConstant`` variable per entry point is
+valid only with the ``PushConstantBanksNV`` capability, so the uniqueness rule
+becomes **at most one push constant block per bank** rather than at most one
+block: two blocks may coexist if and only if their banks differ. A block without
+``[[vk::push_constant_bank]]`` counts as bank 0, so it still collides with an
+explicit bank 0 block. Two blocks in the same bank, the attributes without
+``[[vk::push_constant]]``, one attribute twice on the same declaration, a
+negative bank index or offset, and the attributes without
+``-fspv-extension=SPV_NV_push_constant_bank`` are all errors - see
+``tools/clang/test/CodeGenSPIRV/vk.push-constant-bank.*.hlsl``.
+
+The extension is **not** enabled by default: a module that uses the decorations
+declares the ``PushConstantBanksNV`` capability and the
+``SPV_NV_push_constant_bank`` extension, which a driver without
+``VK_NV_push_constant_bank`` rejects. Without
+``-fspv-extension=SPV_NV_push_constant_bank`` the attributes are therefore
+rejected instead of silently dropped, and a module that does not use them is
+unchanged.
+
+Limitations:
+
+* **Bank count and bank size are host facts.** How many banks the device has is
+  reported per stage by
+  ``VkPhysicalDevicePushConstantBankPropertiesNV::maxGraphicsPushConstantBanks``
+  and ``maxComputePushConstantBanks`` (and the ``...PushDataBanks`` variants when
+  push data is mapped through ``SPV_EXT_descriptor_heap``); the size of each bank
+  is the ordinary ``VkPhysicalDeviceLimits::maxPushConstantsSize``. The compiler
+  cannot check either of them, so a shader that asks for bank 3 compiles and
+  validates, and is only wrong on a device with fewer banks. Keep the bank
+  numbers of the shader and of the host mapping in one place in the application.
+* **The host must agree with the decoration.** Placement is decided by
+  ``VkPushConstantBankInfoNV`` - chained to ``VkPushConstantsInfo`` and submitted
+  with ``vkCmdPushConstants2``, or chained to
+  ``VkDescriptorSetAndBindingMappingEXT`` / ``VkPushDataInfoEXT`` under a
+  descriptor heap. The offset given to the API is the byte offset inside the bank
+  and therefore already includes the ``MemberOffsetNV`` base offset. Nothing in
+  the module can be checked against the host mapping at compile time.
+* Offsets stay subject to the ordinary push constant layout rules, so
+  ``MemberOffsetNV`` has to respect the alignment of the block's first member;
+  DXC does not round it and does not diagnose a misaligned base offset.
+
 Supported extensions
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -500,6 +591,7 @@ Supported extensions
 * SPV_EXT_descriptor_heap
 * SPV_KHR_fma
 * SPV_QCOM_multiple_wait_queues
+* SPV_NV_push_constant_bank
 
 Vulkan specific attributes
 --------------------------
@@ -520,7 +612,16 @@ The namespace ``vk`` will be used for all Vulkan attributes:
   set number for the associated counter is always the same as the main resource.
 - ``push_constant``: For marking a variable as the push constant block. Allowed
   on global variables of struct type. At most one variable can be marked as
-  ``push_constant`` in a shader.
+  ``push_constant`` in a shader, unless ``SPV_NV_push_constant_bank`` is enabled,
+  in which case it is at most one per bank. See `Push constant banks`_ above.
+- ``push_constant_bank(X)``: For placing the annotated ``push_constant`` block in
+  hardware bank ``X`` (``BankNV``). Requires
+  ``-fspv-extension=SPV_NV_push_constant_bank`` and a ``push_constant`` block,
+  at most once per declaration. See `Push constant banks`_ above.
+- ``push_constant_bank_offset(X)``: For adding the base byte offset ``X`` to every
+  member offset of the annotated ``push_constant`` block (``MemberOffsetNV``).
+  Requires ``-fspv-extension=SPV_NV_push_constant_bank`` and a ``push_constant``
+  block, at most once per declaration. See `Push constant banks`_ above.
 - ``offset(X)``: For manually layout struct members. Annotating a struct member
   with this attribute will force the compiler to put the member at offset ``X``
   w.r.t. the beginning of the struct. Only allowed on struct members.

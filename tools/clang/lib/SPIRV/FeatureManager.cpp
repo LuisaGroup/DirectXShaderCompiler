@@ -248,6 +248,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
           // HLSL Change - SPV_QCOM_multiple_wait_queues.
           .Case("SPV_QCOM_multiple_wait_queues",
                 Extension::QCOM_multiple_wait_queues)
+        // HLSL Change - SPV_NV_push_constant_bank.
+        .Case("SPV_NV_push_constant_bank", Extension::NV_push_constant_bank)
         .Default(Extension::Unknown);
 }
 
@@ -350,6 +352,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
       // HLSL Change - SPV_QCOM_multiple_wait_queues.
       case Extension::QCOM_multiple_wait_queues:
         return "SPV_QCOM_multiple_wait_queues";
+    // HLSL Change - SPV_NV_push_constant_bank.
+    case Extension::NV_push_constant_bank:
+      return "SPV_NV_push_constant_bank";
     default:
     break;
   }
@@ -505,6 +510,16 @@ bool FeatureManager::enabledByDefault(Extension ext) {
       // rejected with a diagnostic rather than silently dropped, and the
       // capability is only ever emitted together with the extension.
       case Extension::QCOM_multiple_wait_queues:
+      return false;
+    // HLSL Change - SPV_NV_push_constant_bank. Opt-in for the same reason: the
+    // BankNV / MemberOffsetNV decorations change the descriptor contract with
+    // the host (the shader no longer reads bank 0 at offset 0), and a module
+    // that carries the PushConstantBanksNV capability is rejected by a driver
+    // without VK_NV_push_constant_bank. Without
+    // -fspv-extension=SPV_NV_push_constant_bank the two attributes are
+    // rejected with a diagnostic instead of silently dropped, and the
+    // capability is only ever emitted together with the extension.
+    case Extension::NV_push_constant_bank:
       return false;
     default:
     return true;
