@@ -10963,7 +10963,8 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
   // is done by OpConvertSToF / OpConvertUToF alone: an intermediate 8-bit
   // integer would require the Int8 capability and would truncate the value
   // before the float conversion rounds it.
-  if (isOrContainsFloat8Type(toType) && !isFloatOrVecOfFloatType(fromType))
+  if ((isOrContainsFloat8Type(toType) || isOrContainsMicroscalingType(toType)) &&
+    !isFloatOrVecOfFloatType(fromType))
     return fromVal;
   // HLSL Change End.
 
@@ -10981,8 +10982,14 @@ SpirvEmitter::convertBitwidth(SpirvInstruction *fromVal, SourceLocation loc,
   // when the storage width matches (float8_e4m3_t <-> float8_e5m2_t), and both
   // float8 formats have to survive as the operand/result type of the
   // conversion instead of being rebuilt from a bitwidth.
-  const bool isFloat8Conversion =
-      isOrContainsFloat8Type(fromType) || isOrContainsFloat8Type(toType);
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The micro-scaled
+  // formats need the same treatment as the float8 ones: their encoding, not
+  // their width, identifies the type.
+  const bool isFloat8Conversion = isOrContainsFloat8Type(fromType) ||
+                               isOrContainsFloat8Type(toType) ||
+                               isOrContainsMicroscalingType(fromType) ||
+                               isOrContainsMicroscalingType(toType);
+  // HLSL Change End.
   // HLSL Change End.
   const bool needsExplicitFloatConversion =
       isBFloat16Conversion || isFloat8Conversion;

@@ -325,6 +325,10 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
   // HLSL Change Begin - SPV_EXT_float8.
   case BuiltinType::Float8E4M3:
   case BuiltinType::Float8E5M2:
+  case BuiltinType::Float4E2M1:
+  case BuiltinType::Float6E3M2:
+  case BuiltinType::Float6E2M3:
+  case BuiltinType::Float8E8M0:
   // HLSL Change End.
   case BuiltinType::HalfFloat:
   case BuiltinType::Min10Float:

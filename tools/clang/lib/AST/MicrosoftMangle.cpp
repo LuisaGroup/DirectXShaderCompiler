@@ -1621,6 +1621,12 @@ void MicrosoftCXXNameMangler::mangleType(const BuiltinType *T, Qualifiers,
   case BuiltinType::Float8E5M2:
     Out << "$f8e5m2@";
     break;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    case BuiltinType::Float4E2M1: Out << "$f4e2m1@"; break;
+    case BuiltinType::Float6E3M2: Out << "$f6e3m2@"; break;
+    case BuiltinType::Float6E2M3: Out << "$f6e2m3@"; break;
+    case BuiltinType::Float8E8M0: Out << "$f8e8m0@"; break;
+    // HLSL Change End.
   // HLSL Change End.
   case BuiltinType::Min12Int:
     Out << "$min12i@";

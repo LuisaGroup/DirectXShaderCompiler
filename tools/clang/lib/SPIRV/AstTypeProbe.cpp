@@ -110,6 +110,16 @@ std::string getAstTypeName(QualType type) {
           return "float8_e4m3";
         case BuiltinType::Float8E5M2:
           return "float8_e5m2";
+          // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+          case BuiltinType::Float4E2M1:
+            return "float4_e2m1";
+          case BuiltinType::Float6E3M2:
+            return "float6_e3m2";
+          case BuiltinType::Float6E2M3:
+            return "float6_e2m3";
+          case BuiltinType::Float8E8M0:
+            return "float8_e8m0";
+          // HLSL Change End.
         // HLSL Change End.
         case BuiltinType::Min12Int:
           return "min12int";
@@ -563,6 +573,77 @@ bool isOrContainsFloat8Type(QualType type) {
 
   return false;
 }
+// HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+/// Walks a type the way isOrContainsFloat8Type does, for the micro-scaled
+/// formats. The traversal is shared by both predicates below.
+static bool isOrContainsMicroscalingTypeImpl(QualType type, bool subByteOnly) {
+  {
+    QualType ty = {};
+    if (isScalarType(type, &ty)) {
+      if (const auto *builtinType = ty->getAs<BuiltinType>()) {
+        switch (builtinType->getKind()) {
+        case BuiltinType::Float4E2M1:
+        case BuiltinType::Float6E3M2:
+        case BuiltinType::Float6E2M3:
+          return true;
+        case BuiltinType::Float8E8M0:
+          return !subByteOnly;
+        default:
+          return false;
+        }
+      }
+    }
+  }
+  {
+    QualType elemType = {};
+    if (isVectorType(type, &elemType))
+      return isOrContainsMicroscalingTypeImpl(elemType, subByteOnly);
+  }
+  {
+    QualType elemType = {};
+    if (isMxNMatrix(type, &elemType))
+      return isOrContainsMicroscalingTypeImpl(elemType, subByteOnly);
+  }
+  if (const auto *structType = type->getAs<RecordType>()) {
+    for (const auto *field : structType->getDecl()->fields()) {
+      if (isOrContainsMicroscalingTypeImpl(field->getType(), subByteOnly))
+        return true;
+    }
+    return false;
+  }
+  if (const auto *arrayType = type->getAsArrayTypeUnsafe())
+    return isOrContainsMicroscalingTypeImpl(arrayType->getElementType(),
+                                            subByteOnly);
+  if (const auto *refType = type->getAs<ReferenceType>())
+    return isOrContainsMicroscalingTypeImpl(refType->getPointeeType(),
+                                            subByteOnly);
+  if (const auto *ptrType = type->getAs<PointerType>())
+    return isOrContainsMicroscalingTypeImpl(ptrType->getPointeeType(),
+                                            subByteOnly);
+  if (const auto *typedefType = type->getAs<TypedefType>())
+    return isOrContainsMicroscalingTypeImpl(typedefType->desugar(), subByteOnly);
+      // An HLSL resource exposes its element type, which is where a buffer of a
+      // sub-byte micro-scaled type shows up.
+      if (isResourceType(type))
+    return isOrContainsMicroscalingTypeImpl(
+        hlsl::GetHLSLResourceResultType(type), subByteOnly);
+      // An HLSL resource exposes its element type, which is where a buffer of a
+      // sub-byte micro-scaled type shows up.
+      if (isResourceType(type))
+    return isOrContainsMicroscalingTypeImpl(
+        hlsl::GetHLSLResourceResultType(type), subByteOnly);
+
+  return false;
+}
+
+bool isOrContainsMicroscalingType(QualType type) {
+  return isOrContainsMicroscalingTypeImpl(type, /*subByteOnly=*/false);
+}
+
+bool isOrContainsSubByteMicroscalingType(QualType type) {
+  return isOrContainsMicroscalingTypeImpl(type, /*subByteOnly=*/true);
+}
+// HLSL Change End.
 // HLSL Change End.
 
 bool isOrContains8BitType(QualType type) {
@@ -711,6 +792,15 @@ uint32_t getElementSpirvBitwidth(const ASTContext &astContext, QualType type,
       // HLSL Change Begin - SPV_EXT_float8: 8-bit floats.
       case BuiltinType::Float8E4M3:
       case BuiltinType::Float8E5M2:
+        return 8;
+      // HLSL Change End.
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+      case BuiltinType::Float4E2M1:
+        return 4;
+      case BuiltinType::Float6E3M2:
+      case BuiltinType::Float6E2M3:
+        return 6;
+      case BuiltinType::Float8E8M0:
         return 8;
       // HLSL Change End.
     // HalfFloat builtin type is just an alias for Float builtin type and is
@@ -883,6 +973,47 @@ QualType getTypeWithCustomBitwidth(const ASTContext &ctx, QualType type,
     case 64:
       return ctx.DoubleTy;
     }
+  }
+  // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. A micro-scaled type
+  // keeps its identity at its own width and widens like the other floating
+  // point types otherwise.
+  if (type->isSpecificBuiltinType(BuiltinType::Float4E2M1)) {
+  switch (bitwidth) {
+  case 4:
+    return type;
+  case 16:
+    return ctx.HalfTy;
+  case 32:
+    return ctx.FloatTy;
+  case 64:
+    return ctx.DoubleTy;
+  }
+  }
+  if (type->isSpecificBuiltinType(BuiltinType::Float6E3M2) ||
+    type->isSpecificBuiltinType(BuiltinType::Float6E2M3)) {
+  switch (bitwidth) {
+  case 6:
+    return type;
+  case 16:
+    return ctx.HalfTy;
+  case 32:
+    return ctx.FloatTy;
+  case 64:
+    return ctx.DoubleTy;
+  }
+  }
+  if (type->isSpecificBuiltinType(BuiltinType::Float8E8M0)) {
+  switch (bitwidth) {
+  case 8:
+    return type;
+  case 16:
+    return ctx.HalfTy;
+  case 32:
+    return ctx.FloatTy;
+  case 64:
+    return ctx.DoubleTy;
+  }
   }
   // HLSL Change End.
   if (type->isSpecificBuiltinType(BuiltinType::BFloat16)) {

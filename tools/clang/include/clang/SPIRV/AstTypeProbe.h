@@ -141,6 +141,30 @@ bool isOrContainsBFloat16Type(QualType type);
 /// HLSL Change - Returns true if the given type is or contains a float8_e4m3_t
 /// or float8_e5m2_t (SPV_EXT_float8) type.
 bool isOrContainsFloat8Type(QualType type);
+/// HLSL Change - Returns true if the given type is or contains one of the
+/// micro-scaled types of SPV_EXT_ocp_microscaling_types (float4_e2m1_t,
+/// float6_e3m2_t, float6_e2m3_t, float8_e8m0_t).
+bool isOrContainsMicroscalingType(QualType type);
+/// HLSL Change - Returns true if the given type is or contains a 4- or 6-bit
+/// micro-scaled type. SPIR-V only allows those in Function and Private
+/// storage, never in a buffer, so a resource of one of them is rejected.
+bool isOrContainsSubByteMicroscalingType(QualType type);
+/// HLSL Change - Returns true if the given type is or contains one of the
+/// micro-scaled types of SPV_EXT_ocp_microscaling_types (float4_e2m1_t,
+/// float6_e3m2_t, float6_e2m3_t, float8_e8m0_t).
+bool isOrContainsMicroscalingType(QualType type);
+/// HLSL Change - Returns true if the given type is or contains a 4- or 6-bit
+/// micro-scaled type. SPIR-V only allows those in Function and Private
+/// storage, never in a buffer, so a resource of one of them is rejected.
+bool isOrContainsSubByteMicroscalingType(QualType type);
+/// HLSL Change - Returns true if the given type is or contains one of the
+/// micro-scaled types of SPV_EXT_ocp_microscaling_types (float4_e2m1_t,
+/// float6_e3m2_t, float6_e2m3_t, float8_e8m0_t).
+bool isOrContainsMicroscalingType(QualType type);
+/// HLSL Change - Returns true if the given type is or contains a 4- or 6-bit
+/// micro-scaled type. SPIR-V only allows those in Function and Private
+/// storage, never in a buffer, so a resource of one of them is rejected.
+bool isOrContainsSubByteMicroscalingType(QualType type);
 
 /// NOTE: This method doesn't handle Literal types correctly at the moment.
 ///

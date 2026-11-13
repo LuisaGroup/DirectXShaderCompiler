@@ -2564,6 +2564,12 @@ uint32_t EmitTypeHandler::getOrCreateConstantFloat(SpirvConstantFloat *inst) {
         // HLSL Change Begin - SPV_EXT_float8: the two 8-bit encodings.
         : floatType->isFloat8E4M3() ? llvm::APFloat::Float8E4M3
         : floatType->isFloat8E5M2() ? llvm::APFloat::Float8E5M2
+        // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+        : floatType->isFloat4E2M1() ? llvm::APFloat::Float4E2M1
+        : floatType->isFloat6E3M2() ? llvm::APFloat::Float6E3M2
+        : floatType->isFloat6E2M3() ? llvm::APFloat::Float6E2M3
+        : floatType->isFloat8E8M0() ? llvm::APFloat::Float8E8M0
+        // HLSL Change End.
         // HLSL Change End.
         : typeBitwidth == 16   ? llvm::APFloat::IEEEhalf
         : typeBitwidth == 32   ? llvm::APFloat::IEEEsingle

@@ -270,6 +270,14 @@ public:
   // OpTypeFloat 8 types with the Float8E4M3EXT / Float8E5M2EXT encodings.
   const FloatType *getFloat8E4M3Type();
   const FloatType *getFloat8E5M2Type();
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The
+  // Float4E2M1EXT / Float6E3M2EXT / Float6E2M3EXT /
+  // Float8UnsignedE8M0EXT encoded types.
+  const FloatType *getFloat4E2M1Type();
+  const FloatType *getFloat6E3M2Type();
+  const FloatType *getFloat6E2M3Type();
+  const FloatType *getFloat8E8M0Type();
+  // HLSL Change End.
   // HLSL Change End.
 
   const VectorType *getVectorType(const SpirvType *elemType, uint32_t count);
@@ -529,6 +537,11 @@ private:
   // encoded 8-bit floats, kept separate from floatTypes for the same reason.
   const FloatType *float8E4M3Type = nullptr;
   const FloatType *float8E5M2Type = nullptr;
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  const FloatType *float4E2M1Type = nullptr;
+  const FloatType *float6E3M2Type = nullptr;
+  const FloatType *float6E2M3Type = nullptr;
+  const FloatType *float8E8M0Type = nullptr;
   // HLSL Change End.
 
   // The VectorType at index i has the length of i. For example, vector of

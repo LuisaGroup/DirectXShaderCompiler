@@ -1263,6 +1263,21 @@ SpirvVariable *DeclResultIdMapper::createExternVar(const VarDecl *var) {
 
 SpirvVariable *DeclResultIdMapper::createExternVar(const VarDecl *var,
                                                    QualType type) {
+                                                     // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. A 4- or 6-bit
+                                                     // micro-scaled type may only be allocated in Function or Private storage
+                                                     // (SPIR-V "Variable": a Float4EXT/Float6EXT type cannot be in a buffer
+                                                     // storage class), so a resource whose element type contains one is
+                                                     // rejected here instead of producing an invalid module.
+                                                     if (isOrContainsSubByteMicroscalingType(type)) {
+                                                       emitError(
+                                                           "a resource of float4_e2m1_t, float6_e3m2_t or float6_e2m3_t is not "
+                                                           "supported: a 4- or 6-bit micro-scaled type has no addressable "
+                                                           "storage, so the packed integer word has to be loaded instead and "
+                                                           "the value extracted with vk::mx::bitcast_extract",
+                                                           var->getLocation());
+                                                       return nullptr;
+                                                     }
+                                                     // HLSL Change End.
   const bool isGroupShared = var->hasAttr<HLSLGroupSharedAttr>();
   const bool hasInlineSpirvSC = var->hasAttr<VKStorageClassExtAttr>();
   const bool isACSBuffer =
@@ -3881,6 +3896,20 @@ bool DeclResultIdMapper::createStageVars(StageVarDataBundle &stageVarData,
         stageVarData.decl->getLocation());
     return false;
   }
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The micro-scaled
+  // encodings are rejected in the Input and Output storage classes as well
+  // (VUID-StandaloneSpirv-OpVariable-10823), so a value has to be decoded
+  // with vk::mx::bitcast_extract from an integer input instead.
+  if (isOrContainsMicroscalingType(stageVarData.type)) {
+    emitError(
+        "float4_e2m1_t, float6_e3m2_t, float6_e2m3_t and float8_e8m0_t are not "
+        "supported in shader stage input/output: "
+        "SPV_EXT_ocp_microscaling_types does not allow a micro-scaled "
+        "OpTypeFloat encoding in the Input or Output storage class",
+        stageVarData.decl->getLocation());
+    return false;
+  }
+  // HLSL Change End.
   // HLSL Change End.
   // invocationId should only be used for handling HS per-vertex output.
   if (stageVarData.invocationId.hasValue()) {
@@ -5130,6 +5159,28 @@ bool DeclResultIdMapper::tryToCreateConstantVar(const ValueDecl *decl) {
     constVal =
         spvBuilder.getConstantFloat(astContext.Float8E5M2Ty, val->getFloat());
     break;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The APFloat value
+    // already carries the E2M1 / E3M2 / E2M3 / E8M0 semantics, so the bit
+    // pattern written by APFloat::bitcastToAPInt is the one the encoding
+    // defines - saturated to the largest finite value for the three
+    // all-patterns-finite formats, and clamped to 2^127 for E8M0.
+    case BuiltinType::Float4E2M1: // float4_e2m1_t
+      constVal =
+      spvBuilder.getConstantFloat(astContext.Float4E2M1Ty, val->getFloat());
+      break;
+    case BuiltinType::Float6E3M2: // float6_e3m2_t
+      constVal =
+      spvBuilder.getConstantFloat(astContext.Float6E3M2Ty, val->getFloat());
+      break;
+    case BuiltinType::Float6E2M3: // float6_e2m3_t
+      constVal =
+      spvBuilder.getConstantFloat(astContext.Float6E2M3Ty, val->getFloat());
+      break;
+    case BuiltinType::Float8E8M0: // float8_e8m0_t
+      constVal =
+      spvBuilder.getConstantFloat(astContext.Float8E8M0Ty, val->getFloat());
+      break;
+    // HLSL Change End.
   // HLSL Change End.
   case BuiltinType::Float:     // float32_t
   case BuiltinType::HalfFloat: // float16_t without -enable-16bit-types

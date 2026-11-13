@@ -320,6 +320,16 @@ SpirvDebugType *DebugTypeVisitor::lowerToDebugType(const SpirvType *spirvType) {
       debugName = "float8_e4m3_t";
     } else if (floatType->isFloat8E5M2()) {
       debugName = "float8_e5m2_t";
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+      } else if (floatType->isFloat4E2M1()) {
+        debugName = "float4_e2m1_t";
+      } else if (floatType->isFloat6E3M2()) {
+        debugName = "float6_e3m2_t";
+      } else if (floatType->isFloat6E2M3()) {
+        debugName = "float6_e2m3_t";
+      } else if (floatType->isFloat8E8M0()) {
+        debugName = "float8_e8m0_t";
+      // HLSL Change End.
       // HLSL Change End.
     } else if (size == 32) {
       debugName = "float";

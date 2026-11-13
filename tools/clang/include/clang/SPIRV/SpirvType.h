@@ -170,6 +170,28 @@ public:
     return fpEncoding == spv::FPEncoding::Float8E5M2EXT;
   }
   bool isFloat8() const { return isFloat8E4M3() || isFloat8E5M2(); }
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The micro-scaled
+  // encodings. isMicroscaling() covers all four; the 4- and 6-bit formats have
+  // no addressable storage of their own.
+  bool isFloat4E2M1() const {
+  return fpEncoding == spv::FPEncoding::Float4E2M1EXT;
+  }
+  bool isFloat6E3M2() const {
+  return fpEncoding == spv::FPEncoding::Float6E3M2EXT;
+  }
+  bool isFloat6E2M3() const {
+  return fpEncoding == spv::FPEncoding::Float6E2M3EXT;
+  }
+  bool isFloat8E8M0() const {
+  return fpEncoding == spv::FPEncoding::Float8UnsignedE8M0EXT;
+  }
+  bool isMicroscaling() const {
+  return isFloat4E2M1() || isFloat6E3M2() || isFloat6E2M3() || isFloat8E8M0();
+  }
+  /// The 4- and 6-bit formats, which cannot be allocated in a buffer.
+  bool isSubByteMicroscaling() const {
+  return isFloat4E2M1() || isFloat6E3M2() || isFloat6E2M3();
+  }
   // HLSL Change End.
 
 private:

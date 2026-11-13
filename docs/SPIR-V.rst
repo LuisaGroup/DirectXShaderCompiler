@@ -2257,6 +2257,203 @@ example and ``tools/clang/test/CodeGenSPIRV/float8.*.hlsl`` for the tests that p
 both encodings, the conversions, the storage layout, the two diagnostics and the
 optimizer-survival path.
 
+OCP micro-scaling types
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``SPV_EXT_ocp_microscaling_types`` (``VK_EXT_shader_ocp_microscaling_types``)
+adds four micro-scaled floating point formats and one instruction that reads a
+value out of packed storage. It builds on ``SPV_EXT_float8``, and it implements
+the *data types* only: block scaling, tensors and MMA are not part of it.
+
+``float4_e2m1_t``
+  1 sign bit, 2 exponent bits (bias 1), 1 mantissa bit. Values
+  {0, 0.5, 1, 1.5, 2, 3, 4, 6} and their negatives, so the range is -6 .. 6.
+  Every bit pattern is finite: there is no infinity and no NaN, and a value
+  outside the range saturates to 6. Two values per byte.
+``float6_e3m2_t``
+  1/3/2 with a bias of 3. Normal range 2^-2 .. 28, subnormals down to 2^-4. All
+  32 patterns finite. Five lanes plus two unused bits per 32-bit word.
+``float6_e2m3_t``
+  1/2/3 with a bias of 1. Normal range 1 .. 7.5, subnormals down to 2^-3. All 32
+  patterns finite. The same packing as ``float6_e3m2_t``, one more mantissa bit
+  and two fewer exponent decades.
+``float8_e8m0_t``
+  Unsigned, 8 exponent bits with a bias of 127, no significand: the value is
+  exactly 2^(e-127), so the range is 2^-127 .. 2^127. ``0xff`` is the only NaN;
+  there is no zero and no negative value. This is the MX block scale, and it is
+  one byte wide.
+
+Each format is an ``OpTypeFloat`` with its own FP encoding and its own
+capability, and both 6-bit formats share ``Float6EXT`` - there is no per-format
+float4 or float6 name, so a shader that uses two formats declares two
+capabilities:
+
+.. code-block:: spirv
+
+    OpCapability Float4EXT                  ; 4229, float4_e2m1_t
+    OpCapability Float6EXT                  ; 4228, float6_e3m2_t / float6_e2m3_t
+    OpCapability Float8UnsignedE8M0EXT      ; 4230, float8_e8m0_t
+    OpCapability BitcastExtractEXT          ; 4232, OpBitcastExtractEXT
+    OpExtension "SPV_EXT_ocp_microscaling_types"
+    %fp4 = OpTypeFloat 4 Float4E2M1EXT      ; 4225
+    %fp6a = OpTypeFloat 6 Float6E3M2EXT     ; 4224
+    %fp6b = OpTypeFloat 6 Float6E2M3EXT     ; 4223
+    %e8m0 = OpTypeFloat 8 Float8UnsignedE8M0EXT ; 4226
+
+``MXInt8EXT`` (4231) is the fifth encoding of the extension and is not
+implemented: ``OpTypeFloat 8 MXInt8EXT`` holds a signed 8-bit *integer*, which
+needs an integer-valued constant encoding that ``APFloat`` cannot express
+(two's complement has an asymmetric range), so the type would land without exact
+constants. Until then the extension's capability count for this compiler is four
+formats and not five.
+
+Extraction: ``OpBitcastExtractEXT``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A 4- or 6-bit type has no addressable storage. SPIR-V only allows a variable
+containing a ``Float4EXT`` or ``Float6EXT`` type in ``Function`` or ``Private``
+storage, never in a buffer, so ``RWStructuredBuffer<float4_e2m1_t>`` does not
+exist:
+
+.. code-block:: text
+
+    error: a resource of float4_e2m1_t, float6_e3m2_t or float6_e2m3_t is not
+    supported: a 4- or 6-bit micro-scaled type has no addressable storage, so the
+    packed integer word has to be loaded instead and the value extracted with
+    vk::mx::bitcast_extract
+
+The packed word is loaded as an integer and the field is extracted. The
+instruction is declared in ``<vk/ext/ocp_microscaling.h>``:
+
+.. code-block:: hlsl
+
+    #include <vk/ext/ocp_microscaling.h>
+
+    uint word = Packed[lane >> 2];                 // eight E2M1 lanes per word
+    float4_e2m1_t e = vk::mx::bitcast_extract_e2m1(word, (lane & 3u) << 2);
+
+and lowers to (``IdResultType``, ``IdResult``, ``IdRef Base``, ``IdRef
+Offset``):
+
+.. code-block:: spirv
+
+    %r = OpBitcastExtractEXT %fp4e2m1 %word %uint_12
+
+``Base`` is an integer scalar or vector, ``Offset`` is a *scalar* integer and
+``Result Type`` is the micro-scaled value; the vector size of ``Base`` must
+match the result's and its component width must be larger. The offset is the
+ABI's offset in bits and reaches the instruction unchanged - lane *i* of an
+E2M1 stream is at bit ``4*i``, lane *i* of an E3M2/E2M3 stream at bit ``6*i`` -
+so the packing rule is the caller's business, and a wrong offset still
+validates. Three formats and three base widths are declared
+(``uint32_t``, ``uint2`` and ``uint4``).
+
+``float8_e8m0_t`` is not extracted: it is one byte, so it is an ordinary buffer
+element with ``ArrayStride`` 1, like the float8 formats.
+
+Conversion and arithmetic
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+SPIR-V forbids ``OpFConvert``, ``OpConvertSToF`` and ``OpConvertUToF`` from
+*producing* an OCP micro-scaling type, and allows consuming one only to produce
+IEEE 754, ``Float8E4M3EXT``, ``Float8E5M2EXT`` or ``BFloat16KHR``. The model that
+follows is therefore one-directional:
+
+* a micro-scaled value widens implicitly to ``float``/``double``;
+* an explicit cast to ``float``, ``double``, ``half``, ``bfloat16_t``,
+  ``float8_e4m3_t`` or ``float8_e5m2_t`` lowers to one ``OpFConvert``;
+* there is no conversion *into* a micro-scaled type except from a literal, which
+  folds to an ``OpConstant`` - so ``float4_e2m1_t(1.0)`` is a constant while
+  ``float4_e2m1_t(f)`` is the error ``cannot convert from 'float' to
+  'float4_e2m1_t'``;
+* there is no direct conversion between a micro-scaled and an *integer* type;
+  widen to ``float`` first;
+* there is no arithmetic, comparison, bitwise or unary operation, and no
+  conversion to or from ``bool``:
+
+.. code-block:: text
+
+    error: operator is not supported for float4_e2m1_t, float6_e3m2_t,
+    float6_e2m3_t or float8_e8m0_t; SPV_EXT_ocp_microscaling_types defines no
+    arithmetic, comparison or bitwise operations - convert the operand to float
+    or double explicitly
+
+Combining two different formats in one expression is a type mismatch, not a
+silent conversion.
+
+Values that are out of the range of the format saturate to the largest finite
+value (6, 28, 7.5) or, for ``float8_e8m0_t``, clamp to 2^127; the usual
+``-Wconst-expr-overflow`` warning is not produced for these destinations. The
+constant bit patterns are produced by ``APFloat``, which gained the four
+formats, so ``OpConstant`` is exact.
+
+Stage I/O
+^^^^^^^^^
+
+None of the encodings may appear in the ``Input`` or ``Output`` storage class
+(VUID-StandaloneSpirv-OpVariable-10823), so a micro-scaled value - including
+vectors, matrices and structs containing one - cannot be a shader stage input or
+output:
+
+.. code-block:: text
+
+    error: float4_e2m1_t, float6_e3m2_t, float6_e2m3_t and float8_e8m0_t are not
+    supported in shader stage input/output: SPV_EXT_ocp_microscaling_types does
+    not allow a micro-scaled OpTypeFloat encoding in the Input or Output storage
+    class
+
+Pass packed integers between stages and call ``vk::mx::bitcast_extract`` in the
+consumer.
+
+Block scaling is not implemented
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``SPV_EXT_ocp_microscaling_types`` defines the formats and the extraction only.
+An MX block is a ``float8_e8m0_t`` scale times a vector of elements, and
+applying that scale is the shader's job:
+
+.. code-block:: hlsl
+
+    float8_e8m0_t scale = BlockScale[index >> 5];
+    float decoded = float(e0) * float(scale);   // the multiply is explicit
+
+The compiler emits no scale multiply and no tensor or MMA operation. Whole-block
+arithmetic would need a tensor-shaped type (``OpTypeTensorARM``, a cooperative
+matrix) whose element type is a micro-scaled format, arithmetic instructions
+that accept it, and a rule for applying the scale - none of which this extension
+provides.
+
+``-fspv-extension=`` gate
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``-fspv-extension=`` is an allow-list: with an explicit list that omits
+``SPV_EXT_ocp_microscaling_types``, using any of the types fails with
+
+.. code-block:: text
+
+    error: SPIR-V extension 'SPV_EXT_ocp_microscaling_types' required for
+    float4_e2m1_t/float6_e3m2_t/float6_e2m3_t/float8_e8m0_t type but not
+    permitted to use
+
+Host requirements
+^^^^^^^^^^^^^^^^^
+
+``VK_EXT_shader_ocp_microscaling_types`` is a device extension. The application
+must enable it at ``vkCreateDevice`` and set the corresponding members of
+``VkPhysicalDeviceShaderOcpMicroscalingTypesFeaturesEXT`` - ``shaderFloat4``,
+``shaderFloat6``, ``shaderFloat8UnsignedE8M0`` and ``shaderBitcastExtract`` -
+to ``VK_TRUE``, queried with ``vkGetPhysicalDeviceFeatures2``, for every format
+and for the instruction the module actually declares. A driver without the
+feature rejects a module that declares the capability; the compiler cannot check
+the host half.
+
+See ``examples/spirv-extensions/ext-ocp-microscaling-types.hlsl`` for a
+self-contained example and
+``tools/clang/test/CodeGenSPIRV/microscaling.*.hlsl`` for the tests that pin the
+four encodings, the capability per format, the operand order of
+``OpBitcastExtractEXT``, the conversion model, the diagnostics and the
+optimizer-survival path.
+
 Non-uniform push constant indexing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``VK_KHR_maintenance12`` is a Vulkan maintenance extension - one device
@@ -3508,6 +3705,7 @@ Supported extensions
 * SPV_EXT_float8
 * SPV_EXT_long_vector
 * SPV_EXT_mesh_shader
+* SPV_EXT_ocp_microscaling_types
   * SPV_EXT_shader_64bit_indexing
 * SPV_EXT_shader_stencil_support
 * SPV_EXT_shader_subgroup_partitioned

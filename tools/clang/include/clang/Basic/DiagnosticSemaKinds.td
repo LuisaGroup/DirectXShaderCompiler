@@ -7655,6 +7655,18 @@ def err_hlsl_unsupported_float8_op : Error<
   "operator is not supported for float8_e4m3_t or float8_e5m2_t; "
   "SPV_EXT_float8 defines no arithmetic, comparison or bitwise operations - "
   "convert the operand to float or double explicitly">;
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  def err_hlsl_unsupported_microscaling_op : Error<
+  "operator is not supported for float4_e2m1_t, float6_e3m2_t, float6_e2m3_t "
+  "or float8_e8m0_t; SPV_EXT_ocp_microscaling_types defines no arithmetic, "
+  "comparison or bitwise operations - convert the operand to float or double "
+  "explicitly">;
+  def err_hlsl_unsupported_microscaling_conversion : Error<
+  "cannot convert %0 to %1: SPV_EXT_ocp_microscaling_types has no conversion "
+  "into a micro-scaled type; a float4_e2m1_t, float6_e3m2_t or float6_e2m3_t "
+  "value comes from vk::mx::bitcast_extract and a float8_e8m0_t value from "
+  "storage">;
+  // HLSL Change End.
 // HLSL Change End.
 def err_hlsl_unsupported_lvalue_cast_op : Error<
   "cannot truncate lvalue vector/matrix">;

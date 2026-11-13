@@ -341,6 +341,17 @@ std::pair<uint32_t, uint32_t> AlignmentSizeCalculator::getAlignmentAndSize(
           return {1, 1};
           // HLSL Change End.
         // 'HalfFloat' always represents 32-bit floats.
+        // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The 8-bit E8M0
+        // scale occupies one byte like the float8 formats. The 4- and 6-bit
+        // formats have no byte-sized storage of their own: SPIR-V only lets them
+        // live in Function or Private storage, never in a buffer, so they are
+        // rounded up to one byte here and no ABI layout is defined for them.
+        case BuiltinType::Float4E2M1:
+        case BuiltinType::Float6E3M2:
+        case BuiltinType::Float6E2M3:
+        case BuiltinType::Float8E8M0:
+          return {1, 1};
+        // HLSL Change End.
         case BuiltinType::HalfFloat:
           return {4, 4};
         case BuiltinType::SChar:

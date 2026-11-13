@@ -495,6 +495,13 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
     case BuiltinType::Float8E4M3:
     case BuiltinType::Float8E5M2:
       llvm_unreachable("float8 types are only supported by the SPIR-V backend");
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+      case BuiltinType::Float4E2M1:
+      case BuiltinType::Float6E3M2:
+      case BuiltinType::Float6E2M3:
+      case BuiltinType::Float8E8M0:
+      llvm_unreachable("micro-scaled types are only supported by the SPIR-V backend");
+      // HLSL Change End.
     // HLSL Change End.
 
     case BuiltinType::Dependent:

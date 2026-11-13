@@ -84,6 +84,12 @@ enum ArBasicKind {
   // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
   AR_BASIC_FLOAT8_E4M3,
   AR_BASIC_FLOAT8_E5M2,
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  AR_BASIC_FLOAT4_E2M1,
+  AR_BASIC_FLOAT6_E3M2,
+  AR_BASIC_FLOAT6_E2M3,
+  AR_BASIC_FLOAT8_E8M0,
+  // HLSL Change End.
   // HLSL Change End.
 
   AR_BASIC_COUNT,
@@ -465,6 +471,18 @@ const UINT g_uBasicKindProps[] = {
         BPROP_BITS8, // AR_BASIC_FLOAT8_E4M3
     BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
         BPROP_BITS8, // AR_BASIC_FLOAT8_E5M2
+        // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. There is no 4- or
+        // 6-bit subtype flag, so a sub-byte format reports BPROP_BITS0: it is not
+        // addressable on its own and its width is not a byte count.
+            BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS0, // AR_BASIC_FLOAT4_E2M1
+            BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS0, // AR_BASIC_FLOAT6_E3M2
+            BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS0, // AR_BASIC_FLOAT6_E2M3
+            BPROP_PRIMITIVE | BPROP_NUMERIC | BPROP_FLOATING |
+        BPROP_BITS8, // AR_BASIC_FLOAT8_E8M0
+        // HLSL Change End.
     BPROP_OTHER,    // AR_BASIC_COUNT
 
     //
@@ -1842,6 +1860,12 @@ static const char *g_ArBasicTypeNames[] = {
     // HLSL Change Begin - SPV_EXT_float8.
     "float8_e4m3_t",
     "float8_e5m2_t",
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    "float4_e2m1_t",
+    "float6_e3m2_t",
+    "float6_e2m3_t",
+    "float8_e8m0_t",
+    // HLSL Change End.
     // HLSL Change End.
 
     "<count>",
@@ -2347,6 +2371,17 @@ template <typename T> inline void AssignOpt(T value, T *ptr) {
   }
 }
 
+// HLSL Change Begin - SPV_EXT_float8 / SPV_EXT_ocp_microscaling_types.
+/// True for the narrow float formats that have no arithmetic of their own:
+/// float8_e4m3_t, float8_e5m2_t, float4_e2m1_t, float6_e3m2_t,
+/// float6_e2m3_t and float8_e8m0_t.
+static bool IsNarrowFloatKind(ArBasicKind kind) {
+  return kind == AR_BASIC_FLOAT8_E4M3 || kind == AR_BASIC_FLOAT8_E5M2 ||
+         kind == AR_BASIC_FLOAT4_E2M1 || kind == AR_BASIC_FLOAT6_E3M2 ||
+         kind == AR_BASIC_FLOAT6_E2M3 || kind == AR_BASIC_FLOAT8_E8M0;
+}
+// HLSL Change End.
+
 static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
                               ArBasicKind *pOutKind) {
   // Make sure the kinds are both valid
@@ -2361,41 +2396,40 @@ static bool CombineBasicTypes(ArBasicKind LeftKind, ArBasicKind RightKind,
     return true;
   }
 
-  // HLSL Change Begin - SPV_EXT_float8: float8_e4m3_t and float8_e5m2_t are
-  // distinct types. A float8 operand widens to float32/float64, keeps its own
-  // kind against a literal (so that arithmetic on it is diagnosed below instead
-  // of being silently performed in float32), and is a type mismatch against
-  // every other type - including the other float8 format, bfloat16_t and
-  // float16_t - because SPV_EXT_float8 defines no conversion that would make
-  // such a combination well defined.
-  {
-    const bool bLeftIsFloat8 =
-        LeftKind == AR_BASIC_FLOAT8_E4M3 || LeftKind == AR_BASIC_FLOAT8_E5M2;
-    const bool bRightIsFloat8 =
-        RightKind == AR_BASIC_FLOAT8_E4M3 || RightKind == AR_BASIC_FLOAT8_E5M2;
-    if (bLeftIsFloat8 || bRightIsFloat8) {
-      if (bLeftIsFloat8 && bRightIsFloat8)
-        return false;
-      const ArBasicKind f8Kind = bLeftIsFloat8 ? LeftKind : RightKind;
-      const ArBasicKind other = bLeftIsFloat8 ? RightKind : LeftKind;
-      switch (other) {
-      case AR_BASIC_FLOAT32:
-      case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
-        *pOutKind = AR_BASIC_FLOAT32;
-        return true;
-      case AR_BASIC_FLOAT64:
-        *pOutKind = AR_BASIC_FLOAT64;
-        return true;
-      case AR_BASIC_LITERAL_FLOAT:
-      case AR_BASIC_LITERAL_INT:
-        *pOutKind = f8Kind;
-        return true;
-      default:
-        return false;
+    // HLSL Change Begin - SPV_EXT_float8 / SPV_EXT_ocp_microscaling_types. The
+    // 4-, 6- and 8-bit float formats are distinct types. One of them widens to
+    // float32/float64, keeps its own kind against a literal (so that arithmetic on
+    // it is diagnosed below instead of being silently performed in float32), and is
+    // a type mismatch against every other type - including the other narrow float
+    // formats, bfloat16_t and float16_t - because neither SPV_EXT_float8 nor
+    // SPV_EXT_ocp_microscaling_types defines a conversion that would make such a
+    // combination well defined.
+    {
+      const bool bLeftIsNarrow = IsNarrowFloatKind(LeftKind);
+      const bool bRightIsNarrow = IsNarrowFloatKind(RightKind);
+      if (bLeftIsNarrow || bRightIsNarrow) {
+        if (bLeftIsNarrow && bRightIsNarrow)
+          return false;
+        const ArBasicKind narrowKind = bLeftIsNarrow ? LeftKind : RightKind;
+        const ArBasicKind other = bLeftIsNarrow ? RightKind : LeftKind;
+        switch (other) {
+        case AR_BASIC_FLOAT32:
+        case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
+          *pOutKind = AR_BASIC_FLOAT32;
+          return true;
+        case AR_BASIC_FLOAT64:
+          *pOutKind = AR_BASIC_FLOAT64;
+          return true;
+        case AR_BASIC_LITERAL_FLOAT:
+        case AR_BASIC_LITERAL_INT:
+          *pOutKind = narrowKind;
+          return true;
+        default:
+          return false;
+        }
       }
     }
-  }
-  // HLSL Change End.
+    // HLSL Change End.
 
   // HLSL Change Begin - bfloat16_t must never be silently reclassified as
   // float16_t or another type. It does not combine with float16_t or
@@ -4680,6 +4714,11 @@ public:
       // HLSL Change Begin - SPV_EXT_float8.
       case HLSLScalarType_float8_e4m3:
       case HLSLScalarType_float8_e5m2:
+      // HLSL Change - SPV_EXT_ocp_microscaling_types.
+      case HLSLScalarType_float4_e2m1:
+      case HLSLScalarType_float6_e3m2:
+      case HLSLScalarType_float6_e2m3:
+      case HLSLScalarType_float8_e8m0:
       // HLSL Change End.
         m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_version)
             << HLSLScalarTypeNames[type] << "2018";
@@ -4704,8 +4743,13 @@ public:
     if (!getSema()->getLangOpts().SPIRV &&
         (type == HLSLScalarType_bfloat16 ||
          type == HLSLScalarType_float8_e4m3 ||
-         type == HLSLScalarType_float8_e5m2)) {
-      // HLSL Change End.
+         type == HLSLScalarType_float8_e5m2 ||
+         // HLSL Change - SPV_EXT_ocp_microscaling_types.
+         type == HLSLScalarType_float4_e2m1 ||
+         type == HLSLScalarType_float6_e3m2 ||
+         type == HLSLScalarType_float6_e2m3 ||
+         type == HLSLScalarType_float8_e8m0)) {
+        // HLSL Change End.
       m_sema->Diag(Loc, diag::err_hlsl_unsupported_keyword_for_spirv)
           << HLSLScalarTypeNames[type];
       return false;
@@ -5032,6 +5076,15 @@ public:
         return AR_BASIC_FLOAT8_E4M3;
       case BuiltinType::Float8E5M2:
         return AR_BASIC_FLOAT8_E5M2;
+        // HLSL Change - SPV_EXT_ocp_microscaling_types.
+        case BuiltinType::Float4E2M1:
+          return AR_BASIC_FLOAT4_E2M1;
+        case BuiltinType::Float6E3M2:
+          return AR_BASIC_FLOAT6_E3M2;
+        case BuiltinType::Float6E2M3:
+          return AR_BASIC_FLOAT6_E2M3;
+        case BuiltinType::Float8E8M0:
+          return AR_BASIC_FLOAT8_E8M0;
       // HLSL Change End.
       case BuiltinType::HalfFloat:
         return AR_BASIC_FLOAT32_PARTIAL_PRECISION;
@@ -5150,6 +5203,15 @@ public:
       return HLSLScalarType_float8_e4m3;
     case AR_BASIC_FLOAT8_E5M2:
       return HLSLScalarType_float8_e5m2;
+      // HLSL Change - SPV_EXT_ocp_microscaling_types.
+      case AR_BASIC_FLOAT4_E2M1:
+        return HLSLScalarType_float4_e2m1;
+      case AR_BASIC_FLOAT6_E3M2:
+        return HLSLScalarType_float6_e3m2;
+      case AR_BASIC_FLOAT6_E2M3:
+        return HLSLScalarType_float6_e2m3;
+      case AR_BASIC_FLOAT8_E8M0:
+        return HLSLScalarType_float8_e8m0;
     // HLSL Change End.
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return HLSLScalarType_float;
@@ -5216,6 +5278,15 @@ public:
       return m_context->Float8E4M3Ty;
     case AR_BASIC_FLOAT8_E5M2:
       return m_context->Float8E5M2Ty;
+      // HLSL Change - SPV_EXT_ocp_microscaling_types.
+      case AR_BASIC_FLOAT4_E2M1:
+        return m_context->Float4E2M1Ty;
+      case AR_BASIC_FLOAT6_E3M2:
+        return m_context->Float6E3M2Ty;
+      case AR_BASIC_FLOAT6_E2M3:
+        return m_context->Float6E2M3Ty;
+      case AR_BASIC_FLOAT8_E8M0:
+        return m_context->Float8E8M0Ty;
     // HLSL Change End.
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
       return m_context->HalfFloatTy;
@@ -6866,6 +6937,11 @@ void HLSLExternalSource::AddBaseTypes() {
   // HLSL Change Begin - SPV_EXT_float8.
   m_baseTypes[HLSLScalarType_float8_e4m3] = m_context->Float8E4M3Ty;
   m_baseTypes[HLSLScalarType_float8_e5m2] = m_context->Float8E5M2Ty;
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  m_baseTypes[HLSLScalarType_float4_e2m1] = m_context->Float4E2M1Ty;
+  m_baseTypes[HLSLScalarType_float6_e3m2] = m_context->Float6E3M2Ty;
+  m_baseTypes[HLSLScalarType_float6_e2m3] = m_context->Float6E2M3Ty;
+  m_baseTypes[HLSLScalarType_float8_e8m0] = m_context->Float8E8M0Ty;
   // HLSL Change End.
   m_baseTypes[HLSLScalarType_float32] = m_context->FloatTy;
   m_baseTypes[HLSLScalarType_float64] = m_context->DoubleTy;
@@ -8423,8 +8499,15 @@ bool HLSLExternalSource::IsPromotion(ArBasicKind leftKind,
       return false; // No other type is a promotion.
     }
     break;
+  // HLSL Change Begin - SPV_EXT_float8 / SPV_EXT_ocp_microscaling_types. The
+  // narrow float formats never take part in an arithmetic conversion, so they
+  // are only ever the target of a promotion from a wider float.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
     switch (leftKind) {
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT64:
@@ -8678,6 +8761,11 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
   // HLSL Change - SPV_EXT_float8.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
     case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -8692,6 +8780,11 @@ bool HLSLExternalSource::IsCast(ArBasicKind leftKind, ArBasicKind rightKind) {
   // HLSL Change - SPV_EXT_float8.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
   case AR_BASIC_BFLOAT16:
     switch (rightKind) {
     case AR_BASIC_LITERAL_FLOAT:
@@ -8786,6 +8879,11 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
   // HLSL Change - SPV_EXT_float8.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
     case AR_BASIC_BFLOAT16:
     case AR_BASIC_FLOAT32:
     case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -8800,6 +8898,11 @@ bool HLSLExternalSource::IsIntCast(ArBasicKind leftKind,
   // HLSL Change - SPV_EXT_float8.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
   case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
@@ -10476,6 +10579,56 @@ static bool ValidateFloat8Conversion(ArBasicKind targetKind,
     return true;
   return explicitConversion;
 }
+// HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+/// <summary>True for the micro-scaled formats of
+/// SPV_EXT_ocp_microscaling_types.</summary>
+static bool IsMicroscalingKind(ArBasicKind kind) {
+  return kind == AR_BASIC_FLOAT4_E2M1 || kind == AR_BASIC_FLOAT6_E3M2 ||
+         kind == AR_BASIC_FLOAT6_E2M3 || kind == AR_BASIC_FLOAT8_E8M0;
+}
+
+/// <summary>Applies the SPV_EXT_ocp_microscaling_types conversion model to a
+/// component conversion.</summary>
+/// A micro-scaled value can only be *produced* by OpBitcastExtractEXT (the 4-
+/// and 6-bit formats, from packed integer storage) or by loading it from a
+/// buffer (the 8-bit E8M0 scale). SPIR-V forbids OpFConvert, OpConvertSToF and
+/// OpConvertUToF from producing an OCP micro-scaling type in the Vulkan
+/// environment, and from consuming one except to produce IEEE 754, E4M3, E5M2
+/// or BFloat16, so the model is:
+///   - a micro-scaled value widens implicitly to float32/float64,
+///   - a literal converts into a micro-scaled type (it folds to OpConstant,
+///     which is not a conversion),
+///   - every other conversion needs an explicit cast and is allowed only when
+///     the result is not micro-scaled, i.e. toward float, double, half,
+///     bfloat16_t or one of the two float8 formats,
+///   - no conversion to or from bool exists.
+static bool ValidateMicroscalingConversion(ArBasicKind targetKind,
+                                           ArBasicKind sourceKind,
+                                           bool explicitConversion) {
+  if (!IsMicroscalingKind(targetKind) && !IsMicroscalingKind(sourceKind))
+    return true;
+  if (IS_BASIC_BOOL(targetKind) || IS_BASIC_BOOL(sourceKind))
+    return false;
+  if (IsMicroscalingKind(targetKind)) {
+    // Only a literal: everything else would have to be a conversion that
+    // produces a micro-scaled type, which SPIR-V does not allow.
+    return sourceKind == AR_BASIC_LITERAL_FLOAT ||
+           sourceKind == AR_BASIC_LITERAL_INT;
+  }
+  // sourceKind is micro-scaled. Widening is implicit; the conversions to the
+  // formats the extension names as FConvert targets need an explicit cast.
+  // OpConvertFToS/OpConvertFToU must not consume an OCP micro-scaling type
+  // and OpConvertSToF/OpConvertUToF must not produce one
+  // (VUID-StandaloneSpirv-OpConvertFToU-12465), so there is no direct
+  // conversion between a micro-scaled and an integer type; widen to float
+  // first.
+  if (IS_BASIC_SINT(targetKind) || IS_BASIC_UINT(targetKind))
+    return false;
+  if (targetKind == AR_BASIC_FLOAT32 || targetKind == AR_BASIC_FLOAT64 ||
+      targetKind == AR_BASIC_FLOAT32_PARTIAL_PRECISION)
+    return true;
+  return explicitConversion;
+}
 // HLSL Change End.
 
 static bool ConvertComponent(ArTypeInfo TargetInfo, ArTypeInfo SourceInfo,
@@ -10791,6 +10944,13 @@ bool HLSLExternalSource::CanConvert(SourceLocation loc, Expr *sourceExpr,
   // HLSL Change End.
 
   // HLSL Change Begin - SPV_EXT_float8: float8 types only convert implicitly to
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types: a micro-scaled value
+  // widens to float32/float64 and accepts a literal; every other conversion
+  // has to name its non-micro-scaled result type explicitly.
+  if (!ValidateMicroscalingConversion(TargetInfo.EltKind, SourceInfo.EltKind,
+                                      explicitConversion))
+    return false;
+  // HLSL Change End.
   // float32/float64 (and from numeric literals); every other conversion
   // requires an explicit cast.
   if (!ValidateFloat8Conversion(TargetInfo.EltKind, SourceInfo.EltKind,
@@ -11223,6 +11383,16 @@ void HLSLExternalSource::CheckBinOpForHLSL(SourceLocation OpLoc,
   }
   // HLSL Change End.
 
+// HLSL Change Begin - SPV_EXT_ocp_microscaling_types. SPV_EXT_ocp_microscaling_types
+// defines no arithmetic, comparison or bitwise operation on the micro-scaled
+// types either, so an operation whose combined kind stays micro-scaled is
+// rejected; the operands have to be widened to float or double first.
+if (IsMicroscalingKind(resultElementKind)) {
+  m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_microscaling_op);
+  ResultTy = QualType();
+  return;
+}
+// HLSL Change End.
   bool bFailedFirstRHSCast = false;
 
   // Perform necessary conversion sequences for LHS and RHS
@@ -11384,6 +11554,14 @@ QualType HLSLExternalSource::CheckUnaryOpForHLSL(SourceLocation OpLoc,
        Opc == UO_PostInc || Opc == UO_PreDec || Opc == UO_PostDec)) {
     m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_float8_op);
     return QualType();
+  }
+  // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  if (IsMicroscalingKind(elementKind) &&
+    (Opc == UO_Plus || Opc == UO_Minus || Opc == UO_PreInc ||
+     Opc == UO_PostInc || Opc == UO_PreDec || Opc == UO_PostDec)) {
+  m_sema->Diag(OpLoc, diag::err_hlsl_unsupported_microscaling_op);
+  return QualType();
   }
   // HLSL Change End.
 
@@ -12038,6 +12216,26 @@ static void GetFloatLimits(ArBasicKind basicKind, double *minValue,
     *maxValue = 57344.0;
     return;
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. Largest finite is 6
+  // for E2M1, 28 for E3M2 and 7.5 for E2M3; E8M0 is an unsigned scale with a
+  // range of 2^-127 to 2^127 and no zero.
+  case AR_BASIC_FLOAT4_E2M1:
+  *minValue = -6.0;
+  *maxValue = 6.0;
+  return;
+  case AR_BASIC_FLOAT6_E3M2:
+  *minValue = -28.0;
+  *maxValue = 28.0;
+  return;
+  case AR_BASIC_FLOAT6_E2M3:
+  *minValue = -7.5;
+  *maxValue = 7.5;
+  return;
+  case AR_BASIC_FLOAT8_E8M0:
+  *minValue = 0.0;
+  *maxValue = 0x1p127;
+  return;
+  // HLSL Change End.
   case AR_BASIC_BFLOAT16: // Same exponent range as float32.
     *minValue = -(FLT_MIN);
     *maxValue = FLT_MAX;
@@ -12376,6 +12574,11 @@ void hlsl::DiagnoseRegisterType(clang::Sema *self, clang::SourceLocation loc,
   // HLSL Change - SPV_EXT_float8.
   case AR_BASIC_FLOAT8_E4M3:
   case AR_BASIC_FLOAT8_E5M2:
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case AR_BASIC_FLOAT4_E2M1:
+  case AR_BASIC_FLOAT6_E3M2:
+  case AR_BASIC_FLOAT6_E2M3:
+  case AR_BASIC_FLOAT8_E8M0:
   case AR_BASIC_BFLOAT16:
   case AR_BASIC_FLOAT32_PARTIAL_PRECISION:
   case AR_BASIC_FLOAT32:

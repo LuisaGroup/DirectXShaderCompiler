@@ -36,6 +36,7 @@ features.
 | `khr-bfloat16.hlsl` | `VK_KHR_shader_bfloat16` → `bfloat16_t` storage, `OpDot` with `BFloat16DotProductKHR`, bfloat16 cooperative matrix | `-HV 2021 -enable-16bit-types` |
 | `valve-mixed-float-dot-product.hlsl` | `VK_VALVE_shader_mixed_float_dot_product` → `OpFDot2MixAcc32VALVE` for `dot2add` | `-fspv-extension=SPV_VALVE_mixed_float_dot_product` |
 | `ext-shader-float8.hlsl` | `VK_EXT_shader_float8` → `float8_e4m3_t` / `float8_e5m2_t` | `-HV 2021` |
+| `ext-ocp-microscaling-types.hlsl` | `VK_EXT_shader_ocp_microscaling_types` -> `float4_e2m1_t` / `float6_e3m2_t` / `float6_e2m3_t` / `float8_e8m0_t`, `OpBitcastExtractEXT` | `-HV 2021` |
 | `arm-cooperative-matrix-layouts.hlsl` | `VK_ARM_cooperative_matrix_layouts` → blocked-interleaved cooperative matrix layouts | `-fspv-target-env=vulkan1.3 -HV 2021` |
 | `ext-cooperative-matrix-maintenance1.hlsl` | `VK_EXT_cooperative_matrix_maintenance1` → convert-use / reduce / per-element / get-coordinate | `-fspv-target-env=vulkan1.3 -HV 2021` |
 | `ext-long-vector.hlsl` | `VK_EXT_shader_long_vector` → `OpTypeVector` with 8/16 components, `OpCompositeConstruct`/`Extract`/`Insert` | `-fspv-target-env=vulkan1.1 -fspv-extension=SPV_EXT_long_vector` |

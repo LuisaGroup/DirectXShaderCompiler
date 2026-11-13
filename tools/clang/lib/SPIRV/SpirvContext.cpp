@@ -169,6 +169,38 @@ const FloatType *SpirvContext::getFloat8E5M2Type() {
   }
   return float8E5M2Type;
 }
+
+// HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+const FloatType *SpirvContext::getFloat4E2M1Type() {
+  if (float4E2M1Type == nullptr) {
+    float4E2M1Type = new (this) FloatType(4, spv::FPEncoding::Float4E2M1EXT);
+  }
+  return float4E2M1Type;
+}
+
+const FloatType *SpirvContext::getFloat6E3M2Type() {
+  if (float6E3M2Type == nullptr) {
+    float6E3M2Type = new (this) FloatType(6, spv::FPEncoding::Float6E3M2EXT);
+  }
+  return float6E3M2Type;
+}
+
+const FloatType *SpirvContext::getFloat6E2M3Type() {
+  if (float6E2M3Type == nullptr) {
+    float6E2M3Type = new (this) FloatType(6, spv::FPEncoding::Float6E2M3EXT);
+  }
+  return float6E2M3Type;
+}
+
+const FloatType *SpirvContext::getFloat8E8M0Type() {
+  if (float8E8M0Type == nullptr) {
+    float8E8M0Type =
+        new (this) FloatType(8, spv::FPEncoding::Float8UnsignedE8M0EXT);
+  }
+  return float8E8M0Type;
+}
+// HLSL Change End.
+
 // HLSL Change End.
 
 const VectorType *SpirvContext::getVectorType(const SpirvType *elemType,

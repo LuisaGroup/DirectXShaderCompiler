@@ -76,6 +76,8 @@ enum class Extension {
   KHR_bfloat16,
   // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
   EXT_float8,
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  EXT_ocp_microscaling_types,
     // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
     KHR_fma,
     // HLSL Change - SPV_EXT_split_barrier (vk::SplitBarrierArrive/Wait).

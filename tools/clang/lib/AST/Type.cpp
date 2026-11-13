@@ -2533,6 +2533,12 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   // HLSL Change Begin - SPV_EXT_float8.
   case Float8E4M3: return "float8_e4m3_t";
   case Float8E5M2: return "float8_e5m2_t";
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  case Float4E2M1: return "float4_e2m1_t";
+  case Float6E3M2: return "float6_e3m2_t";
+  case Float6E2M3: return "float6_e2m3_t";
+  case Float8E8M0: return "float8_e8m0_t";
+  // HLSL Change End.
   // HLSL Change End.
   case HalfFloat:
   case Half:              return /*Policy.Half*/ true ? "half" : "__fp16";

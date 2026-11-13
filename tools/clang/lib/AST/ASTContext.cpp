@@ -62,9 +62,15 @@ unsigned ASTContext::NumImplicitDestructorsDeclared;
 
 enum FloatingRank {
   LitFloatRank, Min10FloatRank, Min16FloatRank,
-  // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t rank below
-  // every other HLSL floating point type: fewest significand bits).
+  // HLSL Change Begin - SPV_EXT_float8 / SPV_EXT_ocp_microscaling_types. The
+  // 4-, 6- and 8-bit float formats rank below every other HLSL floating point
+  // type: they have the fewest significand bits, so an arithmetic conversion
+  // lands on them last. Float8Rank is shared by the two float8 encodings and by
+  // float8_e8m0_t; the 4- and 6-bit micro-scaled formats get one rank below it
+  // because they never take part in an arithmetic conversion at all.
+  MicroscalingRank,
   Float8Rank,
+  // HLSL Change End.
   BFloat16Rank, HalfRank,
   HalfFloatRank, FloatRank, DoubleRank, LongDoubleRank // HLSL Change
 };
@@ -1113,6 +1119,11 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
     // HLSL Change - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
     InitBuiltinType(Float8E4M3Ty, BuiltinType::Float8E4M3);
     InitBuiltinType(Float8E5M2Ty, BuiltinType::Float8E5M2);
+    // HLSL Change - SPV_EXT_ocp_microscaling_types.
+    InitBuiltinType(Float4E2M1Ty, BuiltinType::Float4E2M1);
+    InitBuiltinType(Float6E3M2Ty, BuiltinType::Float6E3M2);
+    InitBuiltinType(Float6E2M3Ty, BuiltinType::Float6E2M3);
+    InitBuiltinType(Float8E8M0Ty, BuiltinType::Float8E8M0);
     InitBuiltinType(LitIntTy, BuiltinType::LitInt);
     InitBuiltinType(LitFloatTy, BuiltinType::LitFloat);
     InitBuiltinType(Int8_4PackedTy, BuiltinType::Int8_4Packed);
@@ -1356,6 +1367,12 @@ const llvm::fltSemantics &ASTContext::getFloatTypeSemantics(QualType T) const {
     // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
     case BuiltinType::Float8E4M3: return llvm::APFloat::Float8E4M3;
     case BuiltinType::Float8E5M2: return llvm::APFloat::Float8E5M2;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    case BuiltinType::Float4E2M1: return llvm::APFloat::Float4E2M1;
+    case BuiltinType::Float6E3M2: return llvm::APFloat::Float6E3M2;
+    case BuiltinType::Float6E2M3: return llvm::APFloat::Float6E2M3;
+    case BuiltinType::Float8E8M0: return llvm::APFloat::Float8E8M0;
+    // HLSL Change End.
     // HLSL Change End.
   case BuiltinType::HalfFloat: // HLSL Change
   case BuiltinType::Float:      return Target->getFloatFormat();
@@ -1683,6 +1700,23 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       Width = 8;
       Align = 8;
       break;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The micro-scaled
+    // formats are 4, 6, 6 and 8 bits wide. A sub-byte type is never addressable
+    // on its own (see AlignmentSizeCalculator), so the bit width here only feeds
+    // sizeof() and the range computations in Sema.
+    case BuiltinType::Float4E2M1:
+    Width = 4;
+    Align = 4;
+    break;
+    case BuiltinType::Float6E3M2:
+    case BuiltinType::Float6E2M3:
+    Width = 6;
+    Align = 6;
+    break;
+    case BuiltinType::Float8E8M0:
+    Width = 8;
+    Align = 8;
+    break;
     // HLSL Change End.
     case BuiltinType::BFloat16: // HLSL Change
       Width = 16;
@@ -4726,6 +4760,12 @@ static FloatingRank getFloatingRank(QualType T) {
   // HLSL Change Begin - SPV_EXT_float8 (both float8 encodings share a rank).
   case BuiltinType::Float8E4M3:
   case BuiltinType::Float8E5M2: return Float8Rank;
+  // HLSL Change - SPV_EXT_ocp_microscaling_types. The 4- and 6-bit formats
+  // and the E8M0 scale rank below float8_e4m3_t.
+  case BuiltinType::Float4E2M1:
+  case BuiltinType::Float6E3M2:
+  case BuiltinType::Float6E2M3:
+  case BuiltinType::Float8E8M0: return MicroscalingRank;
   // HLSL Change End.
   case BuiltinType::BFloat16: return BFloat16Rank; // HLSL Change
   case BuiltinType::Half:       return HalfRank;
@@ -4755,6 +4795,7 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
     case LongDoubleRank: return LongDoubleComplexTy;
     // HLSL Changes begin
     case Float8Rank: // HLSL Change - SPV_EXT_float8
+    case MicroscalingRank: // HLSL Change - SPV_EXT_ocp_microscaling_types
     case BFloat16Rank:
     case HalfRank:
     case LitFloatRank:
@@ -4772,6 +4813,8 @@ QualType ASTContext::getFloatingTypeOfSizeWithinDomain(QualType Size,
   case Min10FloatRank: return Min10FloatTy; // HLSL Change
   case BFloat16Rank:   return BFloat16Ty;   // HLSL Change
   // HLSL Change - SPV_EXT_float8
+  // HLSL Change - SPV_EXT_ocp_microscaling_types.
+  case MicroscalingRank: return Float4E2M1Ty;
   case Float8Rank:     return Float8E4M3Ty;
   case HalfRank:       return HalfTy;
   case FloatRank:      return FloatTy;
@@ -5610,6 +5653,11 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
     // HLSL Change - SPV_EXT_float8.
     case BuiltinType::Float8E4M3:
     case BuiltinType::Float8E5M2:
+    // HLSL Change - SPV_EXT_ocp_microscaling_types.
+    case BuiltinType::Float4E2M1:
+    case BuiltinType::Float6E3M2:
+    case BuiltinType::Float6E2M3:
+    case BuiltinType::Float8E8M0:
     case BuiltinType::Min12Int:
     case BuiltinType::Min10Float:
     case BuiltinType::Min16Float:

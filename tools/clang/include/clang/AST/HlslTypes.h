@@ -89,7 +89,12 @@ enum HLSLScalarType {
   HLSLScalarType_bfloat16,
   // HLSL Change Begin - SPV_EXT_float8 (float8_e4m3_t / float8_e5m2_t).
   HLSLScalarType_float8_e4m3,
-  HLSLScalarType_float8_e5m2
+  HLSLScalarType_float8_e5m2,
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  HLSLScalarType_float4_e2m1,
+  HLSLScalarType_float6_e3m2,
+  HLSLScalarType_float6_e2m3,
+  HLSLScalarType_float8_e8m0
   // HLSL Change End.
 };
 
@@ -98,7 +103,9 @@ HLSLScalarType MakeUnsigned(HLSLScalarType T);
 static const HLSLScalarType HLSLScalarType_minvalid = HLSLScalarType_bool;
 // HLSL Change - SPV_EXT_float8 (HLSLScalarType_bfloat16 -> ..._float8_e5m2).
 static const HLSLScalarType HLSLScalarType_max =
-    HLSLScalarType_float8_e5m2;
+    // HLSL Change - SPV_EXT_ocp_microscaling_types
+    // (HLSLScalarType_float8_e5m2 -> ..._float8_e8m0).
+    HLSLScalarType_float8_e8m0;
 static const size_t HLSLScalarTypeCount =
     static_cast<size_t>(HLSLScalarType_max) + 1;
 

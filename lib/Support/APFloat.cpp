@@ -66,6 +66,18 @@ namespace llvm {
   const fltSemantics APFloat::Float8E4M3 = { 8, -6, 4, 8 };
   const fltSemantics APFloat::Float8E5M2 = { 15, -14, 3, 8 };
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The 4- and 6-bit OCP
+  // micro-scaling formats, and the 8-bit unsigned E8M0 scale. E2M1 is 1 sign
+  // bit, a 2-bit exponent with a bias of 1 and 1 mantissa bit (values 0.5 to 6);
+  // E3M2 is 1/3/2 with a bias of 3 (0.0625 to 28) and E2M3 is 1/2/3 with a bias
+  // of 1 (0.125 to 7.5). All three have every bit pattern finite. E8M0 is 8
+  // unsigned exponent bits with a bias of 127 (2^-127 to 2^127) and 0xff as its
+  // only NaN code, so it has no sign bit and no significand.
+  const fltSemantics APFloat::Float4E2M1 = { 2, 0, 2, 4 };
+  const fltSemantics APFloat::Float6E3M2 = { 4, -2, 3, 6 };
+  const fltSemantics APFloat::Float6E2M3 = { 2, 0, 4, 6 };
+  const fltSemantics APFloat::Float8E8M0 = { 127, -127, 1, 8 };
+  // HLSL Change End.
   const fltSemantics APFloat::IEEEsingle = { 127, -126, 24, 32 };
   const fltSemantics APFloat::IEEEdouble = { 1023, -1022, 53, 64 };
   const fltSemantics APFloat::IEEEquad = { 16383, -16382, 113, 128 };
@@ -3185,10 +3197,147 @@ APFloat::convertBFloat16APFloatToAPInt() const
         mysignificand = 0x2;
     }
 
-    return APInt(8, (((sign&1) << 7) | ((myexponent&0x1f) << 2) |
-                     (mysignificand & 0x3)));
+      return APInt(8, (((sign&1) << 7) | ((myexponent&0x1f) << 2) |
+                       (mysignificand & 0x3)));
+    }
+    // HLSL Change End.
+
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+  //
+  // The 4- and 6-bit micro-scaling formats and the unsigned E8M0 scale. The
+  // bit patterns are those of the Float4E2M1EXT, Float6E3M2EXT, Float6E2M3EXT
+  // and Float8UnsignedE8M0EXT encodings of OpTypeFloat.
+  //
+  // E2M1, E3M2 and E2M3 have every bit pattern finite: there is no infinity and
+  // no NaN, so an infinity, a NaN, or a value beyond the largest representable
+  // one saturates to the largest finite value with the sign of the input. This
+  // is the rounding the OCP MX specification defines for a conversion into
+  // these formats, and it is also what an out-of-range HLSL literal folds to.
+  namespace {
+  // Assembles a sign/exponent/mantissa bit pattern. expFieldBits and
+  // mantFieldBits describe the layout of one of the micro-scaling formats; the
+  // result is an APInt of the format's bit width so that it can be handed to
+  // OpConstant, whose literal carries the pattern in the low-order bits.
+  APInt assembleMicroscalingBits(bool negative, unsigned expField,
+                                 unsigned mantField, unsigned expFieldBits,
+                                 unsigned mantFieldBits) {
+    const unsigned width = 1 + expFieldBits + mantFieldBits;
+    unsigned bits = negative ? 1u : 0u;
+    bits = (bits << expFieldBits) | (expField & ((1u << expFieldBits) - 1));
+    bits = (bits << mantFieldBits) | (mantField & ((1u << mantFieldBits) - 1));
+    return APInt(width, bits);
+  }
+  } // namespace
+
+  APInt
+  APFloat::convertFloat4E2M1APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float4E2M1);
+    assert(partCount()==1);
+
+    // Float4E2M1EXT: sign(1) exponent(2, bias 1) mantissa(1). Largest finite is
+    // 6.0 (0b0110), smallest non-zero is 0.5, and the exponent field 3 with
+    // mantissa 1 is 6.0 rather than a NaN.
+    if (isFiniteNonZero()) {
+      unsigned sig = (unsigned)*significandParts();
+      unsigned myexponent = (unsigned)(exponent + 1); // bias
+      // The integer bit of the significand distinguishes a subnormal (only
+      // the exponent field 0) from the smallest normal value.
+      if (myexponent == 1 && !(sig & 0x2))
+        myexponent = 0; // denormal
+      unsigned mysignificand = sig & 0x1;
+      if (myexponent > 3) { // saturate to the largest finite value
+        myexponent = 3;
+        mysignificand = 1;
+      }
+      return assembleMicroscalingBits(sign, myexponent, mysignificand, 2, 1);
+    }
+    if (category == fcZero)
+      return assembleMicroscalingBits(sign, 0, 0, 2, 1);
+    // No infinity and no NaN pattern exists; saturate.
+    return assembleMicroscalingBits(sign, 3, 1, 2, 1);
+  }
+
+  APInt
+  APFloat::convertFloat6E3M2APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float6E3M2);
+    assert(partCount()==1);
+
+    // Float6E3M2EXT: sign(1) exponent(3, bias 3) mantissa(2). Largest finite is
+    // 28.0 (0b011111), smallest non-zero is 2^-4.
+    if (isFiniteNonZero()) {
+      unsigned sig = (unsigned)*significandParts();
+      unsigned myexponent = (unsigned)(exponent + 3); // bias
+      if (myexponent == 1 && !(sig & 0x4))
+        myexponent = 0; // denormal
+      unsigned mysignificand = sig & 0x3;
+      if (myexponent > 7) { // saturate to the largest finite value
+        myexponent = 7;
+        mysignificand = 3;
+      }
+      return assembleMicroscalingBits(sign, myexponent, mysignificand, 3, 2);
+    }
+    if (category == fcZero)
+      return assembleMicroscalingBits(sign, 0, 0, 3, 2);
+    return assembleMicroscalingBits(sign, 7, 3, 3, 2);
+  }
+
+  APInt
+  APFloat::convertFloat6E2M3APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float6E2M3);
+    assert(partCount()==1);
+
+    // Float6E2M3EXT: sign(1) exponent(2, bias 1) mantissa(3). Largest finite is
+    // 7.5 (0b011111), smallest non-zero is 2^-3.
+    if (isFiniteNonZero()) {
+      unsigned sig = (unsigned)*significandParts();
+      unsigned myexponent = (unsigned)(exponent + 1); // bias
+      if (myexponent == 1 && !(sig & 0x8))
+        myexponent = 0; // denormal
+      unsigned mysignificand = sig & 0x7;
+      if (myexponent > 3) { // saturate to the largest finite value
+        myexponent = 3;
+        mysignificand = 7;
+      }
+      return assembleMicroscalingBits(sign, myexponent, mysignificand, 2, 3);
+    }
+    if (category == fcZero)
+      return assembleMicroscalingBits(sign, 0, 0, 2, 3);
+    return assembleMicroscalingBits(sign, 3, 7, 2, 3);
+  }
+
+  APInt
+  APFloat::convertFloat8E8M0APFloatToAPInt() const
+  {
+    assert(semantics == (const llvm::fltSemantics*)&Float8E8M0);
+    assert(partCount()==1);
+
+    // Float8UnsignedE8M0EXT: 8 exponent bits with a bias of 127, no sign bit and
+    // no mantissa. The value 2^(e-127) is encoded as e for e in [0, 254]; 0xff is
+    // the only NaN. The format has no zero and cannot represent a negative
+    // number, so a negative value saturates to the smallest scale (e = 0,
+    // 2^-127) and an infinity or an overflow saturates to the largest one
+    // (e = 254, 2^127).
+    if (isFiniteNonZero()) {
+      if (sign)
+        return APInt(8, 0);
+      int myexponent = (int)exponent + 127; // bias
+      if (myexponent < 0)
+        myexponent = 0;
+      if (myexponent > 254)
+        myexponent = 254;
+      return APInt(8, (uint32_t)myexponent);
+    }
+    if (category == fcZero)
+      return APInt(8, 0);
+    if (category == fcInfinity)
+      return APInt(8, sign ? 0 : 254);
+    return APInt(8, 255); // fcNaN
   }
   // HLSL Change End.
+
 
 
 // This function creates an APInt that is just a bit map of the floating
@@ -3208,9 +3357,19 @@ APFloat::bitcastToAPInt() const
     if (semantics == (const llvm::fltSemantics*)&Float8E4M3)
       return convertFloat8E4M3APFloatToAPInt();
 
-    if (semantics == (const llvm::fltSemantics*)&Float8E5M2)
-      return convertFloat8E5M2APFloatToAPInt();
-    // HLSL Change End.
+      if (semantics == (const llvm::fltSemantics*)&Float8E5M2)
+        return convertFloat8E5M2APFloatToAPInt();
+      // HLSL Change End.
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+      if (semantics == (const llvm::fltSemantics*)&Float4E2M1)
+        return convertFloat4E2M1APFloatToAPInt();
+      if (semantics == (const llvm::fltSemantics*)&Float6E3M2)
+        return convertFloat6E3M2APFloatToAPInt();
+      if (semantics == (const llvm::fltSemantics*)&Float6E2M3)
+        return convertFloat6E2M3APFloatToAPInt();
+      if (semantics == (const llvm::fltSemantics*)&Float8E8M0)
+        return convertFloat8E8M0APFloatToAPInt();
+      // HLSL Change End.
 
   if (semantics == (const llvm::fltSemantics*)&IEEEsingle)
     return convertFloatAPFloatToAPInt();
@@ -3546,10 +3705,112 @@ APFloat::initFromBFloat16APInt(const APInt & api)
       if (myexponent==0) // denormal
         exponent = -14;
       else
-        *significandParts() |= 0x4; // integer bit
+          *significandParts() |= 0x4; // integer bit
+      }
     }
-  }
-  // HLSL Change End.
+    // HLSL Change End.
+
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The inverse of the
+    // convert*APFloatToAPInt functions above, for the same four encodings.
+    void
+    APFloat::initFromFloat4E2M1APInt(const APInt & api)
+    {
+      assert(api.getBitWidth()==4);
+      uint32_t i = (uint32_t)*api.getRawData();
+      uint32_t myexponent = (i >> 1) & 0x3;
+      uint32_t mysignificand = i & 0x1;
+
+      initialize(&APFloat::Float4E2M1);
+      assert(partCount()==1);
+
+      sign = i >> 3;
+      if (myexponent==0 && mysignificand==0) {
+        category = fcZero;
+      } else {
+        // Every pattern of this format is finite.
+        category = fcNormal;
+        *significandParts() = mysignificand;
+        if (myexponent==0) { // denormal
+          exponent = 0;
+        } else {
+          exponent = myexponent - 1;  //bias
+          *significandParts() |= 0x2; // integer bit
+        }
+      }
+    }
+
+    void
+    APFloat::initFromFloat6E3M2APInt(const APInt & api)
+    {
+      assert(api.getBitWidth()==6);
+      uint32_t i = (uint32_t)*api.getRawData();
+      uint32_t myexponent = (i >> 2) & 0x7;
+      uint32_t mysignificand = i & 0x3;
+
+      initialize(&APFloat::Float6E3M2);
+      assert(partCount()==1);
+
+      sign = i >> 5;
+      if (myexponent==0 && mysignificand==0) {
+        category = fcZero;
+      } else {
+        category = fcNormal;
+        *significandParts() = mysignificand;
+        if (myexponent==0) { // denormal
+          exponent = -2;
+        } else {
+          exponent = myexponent - 3;  //bias
+          *significandParts() |= 0x4; // integer bit
+        }
+      }
+    }
+
+    void
+    APFloat::initFromFloat6E2M3APInt(const APInt & api)
+    {
+      assert(api.getBitWidth()==6);
+      uint32_t i = (uint32_t)*api.getRawData();
+      uint32_t myexponent = (i >> 3) & 0x3;
+      uint32_t mysignificand = i & 0x7;
+
+      initialize(&APFloat::Float6E2M3);
+      assert(partCount()==1);
+
+      sign = i >> 5;
+      if (myexponent==0 && mysignificand==0) {
+        category = fcZero;
+      } else {
+        category = fcNormal;
+        *significandParts() = mysignificand;
+        if (myexponent==0) { // denormal
+          exponent = 0;
+        } else {
+          exponent = myexponent - 1;  //bias
+          *significandParts() |= 0x8; // integer bit
+        }
+      }
+    }
+
+    void
+    APFloat::initFromFloat8E8M0APInt(const APInt & api)
+    {
+      assert(api.getBitWidth()==8);
+      uint32_t i = (uint32_t)*api.getRawData();
+
+      initialize(&APFloat::Float8E8M0);
+      assert(partCount()==1);
+
+      sign = false; // the format is unsigned
+      *significandParts() = 1; // precision 1: the only significand is 1.0
+      if (i == 0xff) {
+        category = fcNaN;
+        return;
+      }
+      category = fcNormal;
+      exponent = (int)i - 127;  //bias
+    }
+    // HLSL Change End.
+
 
 
 /// Treat api as containing the bits of a floating point number.  Currently
@@ -3566,10 +3827,20 @@ APFloat::initFromAPInt(const fltSemantics* Sem, const APInt& api)
     // HLSL Change Begin - SPV_EXT_float8.
     if (Sem == &Float8E4M3)
       return initFromFloat8E4M3APInt(api);
-    if (Sem == &Float8E5M2)
-      return initFromFloat8E5M2APInt(api);
-    // HLSL Change End.
-  if (Sem == &IEEEsingle)
+      if (Sem == &Float8E5M2)
+        return initFromFloat8E5M2APInt(api);
+      // HLSL Change End.
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+      if (Sem == &Float4E2M1)
+        return initFromFloat4E2M1APInt(api);
+      if (Sem == &Float6E3M2)
+        return initFromFloat6E3M2APInt(api);
+      if (Sem == &Float6E2M3)
+        return initFromFloat6E2M3APInt(api);
+      if (Sem == &Float8E8M0)
+        return initFromFloat8E8M0APInt(api);
+      // HLSL Change End.
+    if (Sem == &IEEEsingle)
     return initFromFloatAPInt(api);
   if (Sem == &IEEEdouble)
     return initFromDoubleAPInt(api);

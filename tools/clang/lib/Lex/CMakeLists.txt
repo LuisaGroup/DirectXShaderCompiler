@@ -55,6 +55,7 @@ vk/arm/tosa.h
          vk/ext/abort.h
      vk/ext/invocation_reorder.h
      vk/ext/long_vector.h
+     vk/ext/ocp_microscaling.h
      vk/ext/split_barrier.h
  vk/khr/cooperative_matrix.h
  vk/khr/cooperative_matrix.impl

@@ -2048,6 +2048,12 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     // HLSL Change Begin - SPV_EXT_float8.
     case BuiltinType::Float8E4M3: Out << "float8_e4m3_t"; break;
     case BuiltinType::Float8E5M2: Out << "float8_e5m2_t"; break;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    case BuiltinType::Float4E2M1: Out << "float4_e2m1_t"; break;
+    case BuiltinType::Float6E3M2: Out << "float6_e3m2_t"; break;
+    case BuiltinType::Float6E2M3: Out << "float6_e2m3_t"; break;
+    case BuiltinType::Float8E8M0: Out << "float8_e8m0_t"; break;
+    // HLSL Change End.
     // HLSL Change End.
   case BuiltinType::Min12Int: Out << "min12_int"; break;
   case BuiltinType::LitInt: Out << "lit_int"; break;

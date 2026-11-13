@@ -606,6 +606,16 @@ void USRGenerator::VisitType(QualType T) {
           c = 'E'; break;
         case BuiltinType::Float8E5M2:
           c = 'e'; break;
+          // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+          case BuiltinType::Float4E2M1:
+          c = '4'; break;
+          case BuiltinType::Float6E3M2:
+          c = '6'; break;
+          case BuiltinType::Float6E2M3:
+          c = '7'; break;
+          case BuiltinType::Float8E8M0:
+          c = '8'; break;
+          // HLSL Change End.
         // HLSL Change End.
         case BuiltinType::Float:
           c = 'f'; break;

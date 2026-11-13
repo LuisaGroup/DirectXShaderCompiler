@@ -110,6 +110,23 @@ void CapabilityVisitor::addCapabilityForType(const SpirvType *type,
         addCapability(spv::Capability::Float8EXT);
         return;
       }
+      // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. Each micro-scaled
+      // format names its own capability, and both 6-bit formats share Float6EXT;
+      // there is no per-format float4 name, so a shader that mixes formats emits
+      // one OpCapability per format family.
+      if (floatType->isMicroscaling()) {
+        addExtension(Extension::EXT_ocp_microscaling_types,
+               "float4_e2m1_t/float6_e3m2_t/float6_e2m3_t/float8_e8m0_t type",
+               loc);
+        if (floatType->isFloat4E2M1())
+          addCapability(spv::Capability::Float4EXT);
+        else if (floatType->isFloat6E3M2() || floatType->isFloat6E2M3())
+          addCapability(spv::Capability::Float6EXT);
+        else
+          addCapability(spv::Capability::Float8UnsignedE8M0EXT);
+        return;
+      }
+      // HLSL Change End.
       // HLSL Change End.
     switch (floatType->getBitwidth()) {
     case 16: {

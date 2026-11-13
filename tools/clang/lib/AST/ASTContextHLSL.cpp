@@ -67,7 +67,11 @@ const char *HLSLScalarTypeNames[] = {
     "int8_t",         "uint8_t",        "int8_t4_packed",
     "uint8_t4_packed", "bfloat16_t",
     // HLSL Change Begin - SPV_EXT_float8.
-    "float8_e4m3_t", "float8_e5m2_t"
+    "float8_e4m3_t", "float8_e5m2_t",
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    "float4_e2m1_t", "float6_e3m2_t",
+    "float6_e2m3_t", "float8_e8m0_t"
+    // HLSL Change End.
     // HLSL Change End.
 };
 
@@ -256,18 +260,41 @@ static HLSLScalarType FindScalarTypeByName(const char *typeName,
           return HLSLScalarType_float64;
         }
       }
-      case 13: // float8_e4m3_t, float8_e5m2_t (SPV_EXT_float8)
+      case 13: // float8_e4m3_t, float8_e5m2_t (SPV_EXT_float8) and the 13-character
+               // micro-scaled names of SPV_EXT_ocp_microscaling_types.
         if (typeName[0] == 'f' && typeName[1] == 'l' && typeName[6] == '_' &&
             typeName[7] == 'e') {
-          if (typeName[8] == '4') {
-            if (strncmp(typeName, "float8_e4m3_t", 13))
-              break;
-            return HLSLScalarType_float8_e4m3;
+          if (typeName[5] == '8') {
+            if (typeName[8] == '4') {
+              if (strncmp(typeName, "float8_e4m3_t", 13))
+                break;
+              return HLSLScalarType_float8_e4m3;
+            }
+            if (typeName[8] == '5') {
+              if (strncmp(typeName, "float8_e5m2_t", 13))
+                break;
+              return HLSLScalarType_float8_e5m2;
+            }
+            if (typeName[8] == '8') {
+              if (strncmp(typeName, "float8_e8m0_t", 13))
+                break;
+              return HLSLScalarType_float8_e8m0;
+            }
           }
-          if (typeName[8] == '5') {
-            if (strncmp(typeName, "float8_e5m2_t", 13))
+          if (typeName[5] == '4') {
+            if (strncmp(typeName, "float4_e2m1_t", 13))
               break;
-            return HLSLScalarType_float8_e5m2;
+            return HLSLScalarType_float4_e2m1;
+          }
+          if (typeName[5] == '6') {
+            if (typeName[8] == '3') {
+              if (strncmp(typeName, "float6_e3m2_t", 13))
+                break;
+              return HLSLScalarType_float6_e3m2;
+            }
+            if (strncmp(typeName, "float6_e2m3_t", 13))
+              break;
+            return HLSLScalarType_float6_e2m3;
           }
         }
         break;

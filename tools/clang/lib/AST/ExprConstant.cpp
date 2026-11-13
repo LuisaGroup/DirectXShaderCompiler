@@ -1551,9 +1551,19 @@ static void HandleOverflow(EvalInfo &Info, const Expr *E,
   // the documented result rather than a mistake worth a diagnostic.
   if (const BuiltinType *BT = DestType->getAs<BuiltinType>()) {
     if (BT->getKind() == BuiltinType::Float8E4M3 ||
-        BT->getKind() == BuiltinType::Float8E5M2)
+        BT->getKind() == BuiltinType::Float8E5M2 ||
+        // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The same holds
+        // for the micro-scaled formats: a conversion into them saturates
+        // (E2M1, E3M2 and E2M3 have no infinity and no NaN) or clamps to the
+        // smallest or the largest scale (E8M0), so an out-of-range value is
+        // not a mistake.
+        BT->getKind() == BuiltinType::Float4E2M1 ||
+        BT->getKind() == BuiltinType::Float6E3M2 ||
+        BT->getKind() == BuiltinType::Float6E2M3 ||
+        BT->getKind() == BuiltinType::Float8E8M0)
+      // HLSL Change End.
       return;
-  }
+    }
   // HLSL Change End.
   Info.CCEDiag(E, diag::note_constexpr_overflow)
     << SrcValue << DestType;

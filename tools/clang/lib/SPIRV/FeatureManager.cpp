@@ -252,6 +252,9 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         .Case("SPV_KHR_bfloat16", Extension::KHR_bfloat16)
         // HLSL Change - SPV_EXT_float8.
         .Case("SPV_EXT_float8", Extension::EXT_float8)
+        // HLSL Change - SPV_EXT_ocp_microscaling_types.
+        .Case("SPV_EXT_ocp_microscaling_types",
+              Extension::EXT_ocp_microscaling_types)
         // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
         .Case("SPV_KHR_fma", Extension::KHR_fma)
         // HLSL Change - SPV_EXT_split_barrier.
@@ -409,6 +412,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
  case Extension::EXT_float8:
    return "SPV_EXT_float8";
     // HLSL Change - SPV_KHR_fma (OpFmaKHR for HLSL fused multiply-add).
+    // HLSL Change - SPV_EXT_ocp_microscaling_types.
+    case Extension::EXT_ocp_microscaling_types:
+      return "SPV_EXT_ocp_microscaling_types";
     case Extension::KHR_fma:
       return "SPV_KHR_fma";
     // HLSL Change - SPV_EXT_split_barrier.

@@ -1171,6 +1171,10 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
     // HLSL Change Begin - SPV_EXT_float8 (no float8 literal suffix).
     case BuiltinType::Float8E4M3: break;
     case BuiltinType::Float8E5M2: break;
+    case BuiltinType::Float4E2M1:
+    case BuiltinType::Float6E3M2:
+    case BuiltinType::Float6E2M3:
+    case BuiltinType::Float8E8M0:
     // HLSL Change End.
     case BuiltinType::Min10Float: break; // no suffix, as this is a literal and 'F' would pollute expression
     case BuiltinType::HalfFloat:
@@ -1192,6 +1196,10 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
   // HLSL Change Begin - SPV_EXT_float8 (no float8 literal suffix).
   case BuiltinType::Float8E4M3: break;
   case BuiltinType::Float8E5M2: break;
+  case BuiltinType::Float4E2M1:
+  case BuiltinType::Float6E3M2:
+  case BuiltinType::Float6E2M3:
+  case BuiltinType::Float8E8M0:
   // HLSL Change End.
   case BuiltinType::Double:     break; // no suffix.
   case BuiltinType::Float:      OS << 'F'; break;

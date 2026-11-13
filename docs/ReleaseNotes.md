@@ -293,6 +293,31 @@ The included licenses apply to the following files:
   implicitly. The two encodings are not allowed in shader stage input/output.
   Cooperative-matrix float8 (`Float8CooperativeMatrixEXT`) is not implemented.
   See `docs/SPIR-V.rst` and `examples/spirv-extensions/ext-shader-float8.hlsl`.
+  - Added support for `SPV_EXT_ocp_microscaling_types`
+  (`VK_EXT_shader_ocp_microscaling_types`): the HLSL types `float4_e2m1_t`,
+  `float6_e3m2_t`, `float6_e2m3_t` and `float8_e8m0_t` lower to `OpTypeFloat
+  4/6/6/8` with the `Float4E2M1EXT` (4225), `Float6E3M2EXT` (4224),
+  `Float6E2M3EXT` (4223) and `Float8UnsignedE8M0EXT` (4226) encodings, and
+  declare `Float4EXT` (4229), `Float6EXT` (4228) or `Float8UnsignedE8M0EXT`
+  (4230) - there is no per-format capability, so a mixed-format shader emits
+  one `OpCapability` per format family. `OpBitcastExtractEXT` (4195,
+  capability `BitcastExtractEXT` 4232) is available through
+  `<vk/ext/ocp_microscaling.h>` as `vk::mx::bitcast_extract_{e2m1,e3m2,e2m3}`
+  for `uint32_t`, `uint2` and `uint4` bases.
+  The 4- and 6-bit types are value-only - SPIR-V allows them in `Function` and
+  `Private` storage only, so a resource of one is rejected and the packed
+  integer word has to be loaded and decoded - while `float8_e8m0_t` is a
+  one-byte storage element like the float8 formats. SPIR-V forbids producing a
+  micro-scaled value with `OpFConvert`/`OpConvertSToF`/`OpConvertUToF`, so the
+  conversion model is one-directional: a literal folds to `OpConstant`, a
+  micro-scaled value widens to `float`/`double` implicitly and converts
+  explicitly to `half`/`bfloat16_t`/`float8_e4m3_t`/`float8_e5m2_t`, and there
+  are no arithmetic, comparison, bitwise, unary or integer conversions. The
+  encodings are rejected in shader stage input/output. `MXInt8EXT` (4231) is
+  not implemented, and block-scale arithmetic is not part of the extension.
+  See `docs/SPIR-V.rst` and
+  `examples/spirv-extensions/ext-ocp-microscaling-types.hlsl`.
+
 - Added support for `SPV_EXT_cooperative_matrix_maintenance1`
   (`VK_EXT_cooperative_matrix_maintenance1`). Four new members of
   `vk::khr::CooperativeMatrix` in `<vk/khr/cooperative_matrix.h>` emit the

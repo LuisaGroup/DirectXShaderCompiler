@@ -478,6 +478,17 @@ const SpirvType *LowerTypeVisitor::lowerType(QualType type,
             return spvContext.getFloat8E4M3Type();
           case BuiltinType::Float8E5M2:
             return spvContext.getFloat8E5M2Type();
+            // HLSL Change Begin - SPV_EXT_ocp_microscaling_types: OpTypeFloat 4 / 6 /
+            // 6 / 8 with the matching encoding.
+            case BuiltinType::Float4E2M1:
+              return spvContext.getFloat4E2M1Type();
+            case BuiltinType::Float6E3M2:
+              return spvContext.getFloat6E3M2Type();
+            case BuiltinType::Float6E2M3:
+              return spvContext.getFloat6E2M3Type();
+            case BuiltinType::Float8E8M0:
+              return spvContext.getFloat8E8M0Type();
+            // HLSL Change End.
           // HLSL Change End.
         case BuiltinType::Short: // int16_t
           return spvContext.getSIntType(16);

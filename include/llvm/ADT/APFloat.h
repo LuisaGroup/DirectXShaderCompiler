@@ -138,6 +138,17 @@ public:
   static const fltSemantics Float8E4M3;
   static const fltSemantics Float8E5M2;
   // HLSL Change End.
+  // HLSL Change Begin - SPV_EXT_ocp_microscaling_types. The four micro-scaled
+  // formats used by the HLSL float4_e2m1_t, float6_e3m2_t, float6_e2m3_t and
+  // float8_e8m0_t types. E2M1/E3M2/E2M3 are "all patterns finite" (no infinity
+  // and no NaN), and E8M0 is an unsigned exponent-only scale with the bias 127
+  // and 0xff as its single NaN code. They are needed so that constants of these
+  // types are rounded and encoded exactly.
+  static const fltSemantics Float4E2M1;
+  static const fltSemantics Float6E3M2;
+  static const fltSemantics Float6E2M3;
+  static const fltSemantics Float8E8M0;
+  // HLSL Change End.
   static const fltSemantics IEEEsingle;
   static const fltSemantics IEEEdouble;
   static const fltSemantics IEEEquad;
@@ -617,9 +628,15 @@ private:
 
   APInt convertHalfAPFloatToAPInt() const;
   APInt convertBFloat16APFloatToAPInt() const;
-  // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
-  APInt convertFloat8E4M3APFloatToAPInt() const;
-  APInt convertFloat8E5M2APFloatToAPInt() const;
+    // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
+    APInt convertFloat8E4M3APFloatToAPInt() const;
+    APInt convertFloat8E5M2APFloatToAPInt() const;
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    APInt convertFloat4E2M1APFloatToAPInt() const;
+    APInt convertFloat6E3M2APFloatToAPInt() const;
+    APInt convertFloat6E2M3APFloatToAPInt() const;
+    APInt convertFloat8E8M0APFloatToAPInt() const;
+    // HLSL Change End.
   APInt convertFloatAPFloatToAPInt() const;
   APInt convertDoubleAPFloatToAPInt() const;
   APInt convertQuadrupleAPFloatToAPInt() const;
@@ -628,9 +645,15 @@ private:
   void initFromAPInt(const fltSemantics *Sem, const APInt &api);
   void initFromHalfAPInt(const APInt &api);
   void initFromBFloat16APInt(const APInt &api);
-  // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
-  void initFromFloat8E4M3APInt(const APInt &api);
-  void initFromFloat8E5M2APInt(const APInt &api);
+    // HLSL Change - SPV_EXT_float8 (FP8 E4M3 / E5M2).
+    void initFromFloat8E4M3APInt(const APInt &api);
+    void initFromFloat8E5M2APInt(const APInt &api);
+    // HLSL Change Begin - SPV_EXT_ocp_microscaling_types.
+    void initFromFloat4E2M1APInt(const APInt &api);
+    void initFromFloat6E3M2APInt(const APInt &api);
+    void initFromFloat6E2M3APInt(const APInt &api);
+    void initFromFloat8E8M0APInt(const APInt &api);
+    // HLSL Change End.
   void initFromFloatAPInt(const APInt &api);
   void initFromDoubleAPInt(const APInt &api);
   void initFromQuadrupleAPInt(const APInt &api);
