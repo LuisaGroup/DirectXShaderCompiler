@@ -47,3 +47,12 @@ option was routed to DSE, but the shared default also affected GVN's
 memory-dependence queries. #9003 restores the upstream default and adds a
 focused GVN test after the divergence caused a severe compile-time regression
 on a large generated compute shader.
+
+## Submodules
+
+`external/SPIRV-Headers`, `external/SPIRV-Tools` and `external/DirectX-Headers`
+point at `https://github.com/LuisaGroup/*` on purpose and are pinned to those forks'
+`main`. Do not revert the URLs to KhronosGroup / microsoft and do not downgrade the
+gitlinks to the pre-`ee24c4715` revisions - the newer headers and
+`include/dxc/WslStubCompat/` are a matched pair. See `SUBMODULES.md` for the
+rationale, the pin table and the safe update procedure.
