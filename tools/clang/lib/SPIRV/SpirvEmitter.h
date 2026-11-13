@@ -534,6 +534,30 @@ private:
                                 QualType toType, SourceLocation,
                                 SourceRange range = {});
 
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+  /// \brief Returns true if 64-bit buffer indexing is enabled: either
+  /// -fspv-enable-64bit-indexing was given or the extension was requested
+  /// through -fspv-extension=SPV_EXT_shader_64bit_indexing.
+  bool use64BitIndexing() const;
+
+  /// \brief Converts the runtime-array index operand of a storage-buffer
+  /// access chain to a 64-bit integer (a 64-bit constant for a literal
+  /// index, OpUConvert/OpSConvert otherwise) and returns it.
+  ///
+  /// Returns the operand unchanged when 64-bit indexing is disabled so that
+  /// the default module stays byte-identical, and when the index is already
+  /// 64 bits wide.
+  SpirvInstruction *widenBufferIndexTo64Bits(SpirvInstruction *index,
+    QualType indexType,
+    SourceLocation loc);
+
+  /// \brief Reports, once per module, that the given index path keeps its
+  /// 32-bit arithmetic under -fspv-enable-64bit-indexing. Only called when
+  /// 64-bit indexing is enabled.
+  void diagnoseNot64BitIndexable(llvm::StringRef what, bool *reported,
+    SourceLocation loc);
+  // HLSL Change End
+
 private:
   /// Processes HLSL instrinsic functions.
   SpirvInstruction *processIntrinsicCallExpr(const CallExpr *);
@@ -1919,6 +1943,13 @@ private:
 
   SpirvContext spvContext;
   FeatureManager featureManager;
+
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. Set once the
+  // corresponding warning has been reported, so that a shader with many
+  // unwidened index sites produces one diagnostic per flavour.
+  bool reported64BitIndexingByteAddressBuffer = false;
+  bool reported64BitIndexingAppendConsume = false;
+  // HLSL Change End
   SpirvBuilder spvBuilder;
   DeclResultIdMapper declIdMapper;
   ConstEvaluator constEvaluator;

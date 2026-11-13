@@ -86,6 +86,16 @@ struct SpirvCodeGenOptions {
   /// Uniform-storage-class block), which is lowered to OpTypeRuntimeArray.
   bool enableUniformBufferUnsizedArray = false;
   // HLSL Change End
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+  /// Widens the index operands that address a storage buffer's runtime-sized
+  /// array to 64-bit integers, and declares the Shader64BitIndexingEXT
+  /// execution mode plus the Shader64BitIndexingEXT capability
+  /// (SPV_EXT_shader_64bit_indexing). Set by -fspv-enable-64bit-indexing, or
+  /// implied by -fspv-extension=SPV_EXT_shader_64bit_indexing. Off by default:
+  /// the execution mode makes the driver use 64-bit addressing, which is only
+  /// valid for hosts that requested the matching feature bit.
+  bool enable64BitIndexing = false;
+  // HLSL Change End
   bool useVulkanMemoryModel = false;
   bool useUnknownImageFormat = false;
   bool useDescriptorHeap = false;

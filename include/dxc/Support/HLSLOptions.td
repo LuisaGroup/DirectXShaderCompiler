@@ -419,6 +419,10 @@ def fspv_enable_maintenance9: Flag<["-"], "fspv-enable-maintenance9">, Group<spi
 def fspv_enable_uniform_buffer_unsized_array: Flag<["-"], "fspv-enable-uniform-buffer-unsized-array">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"Allow an unsized array as the last member of a constant buffer (uniform buffer block), lowered to OpTypeRuntimeArray. Requires the VK_EXT_shader_uniform_buffer_unsized_array feature (shaderUniformBufferUnsizedArray) on the device.">;
 // HLSL Change End
+// HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+def fspv_enable_64bit_indexing: Flag<["-"], "fspv-enable-64bit-indexing">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
+  HelpText<"Use 64-bit integers for the runtime-array index operands of storage-buffer access chains and declare the Shader64BitIndexingEXT execution mode (SPV_EXT_shader_64bit_indexing). Requires the VK_EXT_shader_64bit_indexing feature (shader64BitIndexing) on the device.">;
+// HLSL Change End
 def fspv_use_vulkan_memory_model: Flag<["-"], "fspv-use-vulkan-memory-model">, Group<spirv_Group>, Flags<[CoreOption, DriverOption]>,
   HelpText<"Generates SPIR-V modules that use the Vulkan memory model instead of GLSL450.">;
 def fspv_use_unknown_image_format

@@ -302,6 +302,72 @@ attribute is applied to a shader entry point, the SPIR-V backend will:
 This ensures that helper lanes are included in wave operations, which is the
 behavior required by the HLSL specification.
 
+64-bit indexing
+~~~~~~~~~~~~~~~
+Without this extension a Vulkan storage buffer binding has at most
+``maxStorageBufferRange`` bytes of range, and DXC emits the element index of a
+storage buffer's runtime-sized array as a 32-bit integer. The Vulkan extension
+``VK_EXT_shader_64bit_indexing`` removes that range limit for devices that enable
+its ``shader64BitIndexing`` feature bit, and the SPIR-V extension
+``SPV_EXT_shader_64bit_indexing`` lets the module declare that it is ready for it:
+the ``Shader64BitIndexingEXT`` capability, the ``OpExtension
+"SPV_EXT_shader_64bit_indexing"`` string and, per entry point, the
+``Shader64BitIndexingEXT`` execution mode. Per the Vulkan SPIR-V environment, the
+effect is that "the calculation of index multiplied by ``ArrayStride`` for a
+runtime-sized array when evaluating an access chain in ``StorageBuffer`` or
+``PhysicalStorageBuffer`` will have 64 bits of range"; ``OpArrayLength`` may also
+return a 64-bit value, and the offset operands of the cooperative vector
+instructions and the row/column stride products of the cooperative matrix
+instructions are relaxed in the same way.
+
+``-fspv-enable-64bit-indexing`` (default off, so a module compiled without it is
+byte-for-byte what it was before) makes DXC emit that header and widen the one
+address calculation the extension is about - the index into a storage buffer's
+runtime-sized array - by converting the index operand of the access chain to a
+64-bit integer:
+
+.. code:: spirv
+
+  %idx = OpUConvert %ulong %uint_index   ; the 32-bit HLSL index, widened once
+  %elt = OpAccessChain %ptr %buf %int_0 %idx
+
+What is widened and what is not:
+
+* a literal index becomes a 64-bit ``OpConstant`` (e.g. ``%ulong_3``) instead of
+  a converted 32-bit one;
+* a signed index keeps its signedness (``OpSConvert`` to ``%long``), which is what
+  ``StructuredBuffer::Load(int)`` produces;
+* the runtime-array index of every ``(RW|Append|Consume)StructuredBuffer`` access
+  is widened: ``buf[i]``, ``buf.Load(i)``, member chains such as
+  ``buf[i].member``, and elements of an array of buffers;
+* the struct member index that selects the runtime array (the permanent leading
+  ``%int_0``), indices into sized arrays, ``cbuffer``/``tbuffer`` blocks,
+  ``groupshared`` arrays, function-local arrays, descriptor-array indices and
+  ``ResourceDescriptorHeap`` indices are unchanged: a struct or a sized array is
+  still smaller than 4 GiB because ``Offset`` and ``ArrayStride`` are 32-bit
+  literals, and a descriptor index is not an address calculation;
+* arithmetic is not promoted: only the access-chain operand is widened, so
+  ``buf[i + 1]`` still computes ``i + 1`` in 32 bits;
+* the HLSL index expression itself stays 32 bits, because
+  ``RWStructuredBuffer<T>::operator[]`` and ``StructuredBuffer<T>::Load`` take a
+  ``uint`` and Sema converts a wider index down to it. What the extension widens is
+  the ``index * ArrayStride`` product, which for a 48-byte element already
+  addresses up to 192 GiB through a single binding;
+* index paths that the flag cannot widen are diagnosed instead of being silently
+  left behind: ``(RW)ByteAddressBuffer.Load``/``Store`` take a 32-bit byte offset
+  and ``Append``/``Consume`` use a 32-bit buffer counter, so a shader that uses
+  them with the flag on gets a warning that the index arithmetic of that path stays
+  32 bits wide.
+
+The flag can also be spelled ``-fspv-extension=SPV_EXT_shader_64bit_indexing``;
+both enable the same code path. The resulting module is only valid on a host that
+enabled ``VK_EXT_shader_64bit_indexing`` and requested 64-bit indexing for the
+pipeline or shader object (``VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT``,
+``VK_SHADER_CREATE_64_BIT_INDEXING_BIT_EXT``, or the execution mode already in the
+module). Indexing a descriptor with more than 4 GiB of range without that request
+is undefined behaviour. The compiler cannot check any of that, and the mode can
+cost performance on some implementations, which is why it stays opt-in.
+
 Fused multiply-add
 ~~~~~~~~~~~~~~~~~~
 
@@ -3442,6 +3508,7 @@ Supported extensions
 * SPV_EXT_float8
 * SPV_EXT_long_vector
 * SPV_EXT_mesh_shader
+  * SPV_EXT_shader_64bit_indexing
 * SPV_EXT_shader_stencil_support
 * SPV_EXT_shader_subgroup_partitioned
 * SPV_EXT_shader_viewport_index_layer
@@ -7751,6 +7818,13 @@ codegen for Vulkan:
   major) when accessing raw buffers (e.g., ByteAdddressBuffer).
 - ``-fspv-preserve-interface``: Preserves all interface variables in the entry
   point, even when those variables are unused.
+  - ``-fspv-enable-64bit-indexing``: Widens the runtime-array index operands of
+    storage-buffer access chains to 64 bits and declares the
+    ``Shader64BitIndexingEXT`` execution mode and capability
+    (``SPV_EXT_shader_64bit_indexing``), so that a single storage buffer binding
+    can exceed 4 GiB. Requires the ``shader64BitIndexing`` feature of
+    ``VK_EXT_shader_64bit_indexing`` on the device. See `64-bit indexing`_
+    above.
 - ``-Wno-vk-ignored-features``: Does not emit warnings on ignored features
   resulting from no Vulkan support, e.g., cbuffer member initializer.
 

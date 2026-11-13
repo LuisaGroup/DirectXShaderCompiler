@@ -114,6 +114,18 @@ FeatureManager::FeatureManager(DiagnosticsEngine &de,
       allowExtension("SPV_KHR_vulkan_memory_model");
     }
   }
+    // HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+    // -fspv-enable-64bit-indexing is the feature switch for 64-bit indexing
+    // and implies that the extension may be declared: without the
+    // OpExecutionMode/OpCapability pair the widened index operands would be
+    // a lie, and a module that declares them is rejected by a driver without
+    // VK_EXT_shader_64bit_indexing, so the extension is opt-in (see
+    // enabledByDefault()) and is not allowed in the default mode.
+    // -fspv-extension=SPV_EXT_shader_64bit_indexing enables it the same way,
+    // which is why the two spellings are interchangeable.
+    if (opts.enable64BitIndexing)
+      allowExtension("SPV_EXT_shader_64bit_indexing");
+    // HLSL Change End
 }
 
 bool FeatureManager::allowExtension(llvm::StringRef name) {
@@ -301,6 +313,8 @@ Extension FeatureManager::getExtensionSymbol(llvm::StringRef name) {
         Extension::NV_ray_tracing_motion_blur)
   // HLSL Change - SPV_QCOM_tile_shading.
   .Case("SPV_QCOM_tile_shading", Extension::QCOM_tile_shading)
+  // HLSL Change - SPV_EXT_shader_64bit_indexing.
+  .Case("SPV_EXT_shader_64bit_indexing", Extension::EXT_shader_64bit_indexing)
   .Default(Extension::Unknown);
   }
 
@@ -466,6 +480,9 @@ const char *FeatureManager::getExtensionName(Extension symbol) {
             // HLSL Change - SPV_QCOM_tile_shading.
             case Extension::QCOM_tile_shading:
               return "SPV_QCOM_tile_shading";
+            // HLSL Change - SPV_EXT_shader_64bit_indexing.
+            case Extension::EXT_shader_64bit_indexing:
+              return "SPV_EXT_shader_64bit_indexing";
         default:
     break;
   }
@@ -904,6 +921,15 @@ bool FeatureManager::enabledByDefault(Extension ext) {
           // rejected with a diagnostic, and no module ever declares the
           // capability by accident.
           case Extension::QCOM_tile_shading:
+            return false;
+          // HLSL Change - SPV_EXT_shader_64bit_indexing. Emitting the
+          // Shader64BitIndexingEXT execution mode changes the addressing
+          // calculations of the module (and therefore the driver code generated
+          // for it), and a module that declares it is rejected by a driver
+          // without VK_EXT_shader_64bit_indexing, so registration is opt-in:
+          // -fspv-enable-64bit-indexing or
+          // -fspv-extension=SPV_EXT_shader_64bit_indexing must be given.
+          case Extension::EXT_shader_64bit_indexing:
             return false;
       return true;
     }

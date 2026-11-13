@@ -1069,6 +1069,18 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
                                 SourceLocation());
   }
 
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. The capability and
+  // the OpExtension are requested by CapabilityVisitor, which is the only
+  // place that emits them; the execution mode is per entry point and takes
+  // no literal operands. Use of the mode without the widened index
+  // operands is not emitted: use64BitIndexing() also drives the widening.
+  if (use64BitIndexing() && entryFunction) {
+    spvBuilder.addExecutionMode(entryFunction,
+                           spv::ExecutionMode::Shader64BitIndexingEXT, {},
+                           SourceLocation());
+  }
+  // HLSL Change End.
+
   for (const FunctionInfo *entryInfo : workQueue) {
     if (!entryInfo->isEntryFunction)
       continue;
@@ -5683,6 +5695,14 @@ SpirvInstruction *SpirvEmitter::processByteAddressBufferLoadStore(
   const auto object = expr->getImplicitObjectArgument();
   auto *objectInfo = loadIfAliasVarRef(object);
   assert(numWords >= 1 && numWords <= 4);
+
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. The byte address of
+  // Load/Store is a 32-bit HLSL operand and is shifted into a 32-bit
+  // element index below, so this path cannot address beyond 4 GiB.
+  diagnoseNot64BitIndexable("(RW)ByteAddressBuffer.Load/Store",
+                            &reported64BitIndexingByteAddressBuffer,
+                            expr->getExprLoc());
+  // HLSL Change End.
   if (doStore) {
     assert(isRWByteAddressBuffer(object->getType()));
     assert(expr->getNumArgs() == 2);
@@ -5828,6 +5848,63 @@ SpirvInstruction *SpirvEmitter::processByteAddressBufferLoadStore(
   return result;
 }
 
+// HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+bool SpirvEmitter::use64BitIndexing() const {
+  return spirvOptions.enable64BitIndexing ||
+         featureManager.isExtensionEnabled(
+             Extension::EXT_shader_64bit_indexing);
+}
+
+SpirvInstruction *
+SpirvEmitter::widenBufferIndexTo64Bits(SpirvInstruction *index,
+                                      QualType indexType,
+                                      SourceLocation loc) {
+  if (!index || !use64BitIndexing() || !indexType->isIntegerType())
+    return index;
+
+  // An index that is already 64 bits wide needs no conversion.
+  if (astContext.getTypeSize(indexType) >= 64)
+    return index;
+
+  const bool isSigned = indexType->isSignedIntegerType();
+  const QualType wideType =
+      isSigned ? astContext.LongLongTy : astContext.UnsignedLongLongTy;
+
+  // A literal index becomes a 64-bit constant directly; converting a 32-bit
+  // constant would add a pointless OpSConvert/OpUConvert. A specialization
+  // constant cannot be folded because the host picks its value.
+  if (auto *constantIndex = dyn_cast<SpirvConstantInteger>(index)) {
+    if (!constantIndex->isSpecConstant()) {
+      const llvm::APInt value = constantIndex->getValue();
+      return spvBuilder.getConstantInt(
+          wideType, isSigned ? value.sextOrTrunc(64) : value.zextOrTrunc(64));
+    }
+  }
+
+  // An access-chain index must be a value, not a pointer.
+  if (!index->isRValue())
+    index = spvBuilder.createLoad(indexType, index, loc);
+
+  return spvBuilder.createUnaryOp(
+      isSigned ? spv::Op::OpSConvert : spv::Op::OpUConvert, wideType, index,
+      loc);
+}
+
+void SpirvEmitter::diagnoseNot64BitIndexable(llvm::StringRef what,
+                                               bool *reported,
+                                               SourceLocation loc) {
+  if (!use64BitIndexing() || *reported)
+    return;
+  *reported = true;
+  emitWarning(
+      "64-bit indexing is enabled, but the index arithmetic of %0 stays 32 "
+      "bits wide: only the runtime-array index operands of storage-buffer "
+      "access chains are widened",
+      loc)
+      << what;
+}
+// HLSL Change End.
+
 SpirvInstruction *
 SpirvEmitter::processStructuredBufferLoad(const CXXMemberCallExpr *expr) {
   if (expr->getNumArgs() == 2) {
@@ -5846,6 +5923,12 @@ SpirvEmitter::processStructuredBufferLoad(const CXXMemberCallExpr *expr) {
 
   auto *zero = spvBuilder.getConstantInt(astContext.IntTy, llvm::APInt(32, 0));
   auto *index = doExpr(expr->getArg(0));
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. StructuredBuffer::
+  // Load(index) indexes the runtime-sized array of the buffer, so the
+  // operand is widened when 64-bit indexing is enabled.
+  index = widenBufferIndexTo64Bits(index, expr->getArg(0)->getType(),
+        expr->getArg(0)->getExprLoc());
+  // HLSL Change End.
 
   SpirvInstruction *result =
       derefOrCreatePointerToValue(buffer->getType(), info, structType,
@@ -6444,6 +6527,13 @@ SpirvEmitter::getOrCreateDeclForMethodObject(const CXXMethodDecl *method) {
 
 SpirvInstruction *
 SpirvEmitter::processACSBufferAppendConsume(const CXXMemberCallExpr *expr) {
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. Append/Consume
+  // use the buffer counter as the element index; the counter is a 32-bit
+  // HLSL value and is not part of the widened runtime-array index path.
+  diagnoseNot64BitIndexable(
+      "AppendStructuredBuffer::Append/ConsumeStructuredBuffer::Consume",
+      &reported64BitIndexingAppendConsume, expr->getExprLoc());
+  // HLSL Change End.
   const bool isAppend = expr->getNumArgs() == 1;
 
   auto *zero =
@@ -10585,7 +10675,18 @@ const Expr *SpirvEmitter::collectArrayStructIndices(
           is1x1Matrix(thisBaseType) || is1xNMatrix(thisBaseType)) {
         // If this is a size-1 vector or 1xN matrix, ignore the index.
       } else {
-        indices->push_back(doExpr(indexing->getArg(1)));
+        SpirvInstruction *thisIndex = doExpr(indexing->getArg(1));
+        // HLSL Change Begin - VK_EXT_shader_64bit_indexing. The index that
+        // selects an element of a structured buffer's runtime-sized array is
+        // the one address calculation that can exceed 4 GiB, so it is widened
+        // when 64-bit indexing is enabled. Indices into sized arrays (cbuffer,
+        // groupshared, local) and struct member indices stay 32 bits.
+        if (isStructuredBuffer(thisBaseType))
+          thisIndex = widenBufferIndexTo64Bits(
+              thisIndex, indexing->getArg(1)->getType(),
+              indexing->getArg(1)->getExprLoc());
+        // HLSL Change End.
+        indices->push_back(thisIndex);
       }
       return base;
     }
@@ -10601,7 +10702,12 @@ const Expr *SpirvEmitter::collectArrayStructIndices(
       // object.
       indices->push_back(
           spvBuilder.getConstantInt(astContext.IntTy, llvm::APInt(32, 0)));
-      indices->push_back(doExpr(index));
+      // HLSL Change Begin - VK_EXT_shader_64bit_indexing.
+      // object.Load(index) indexes the runtime-sized array of the buffer, so
+      // its index operand is widened when 64-bit indexing is enabled.
+      indices->push_back(widenBufferIndexTo64Bits(
+          doExpr(index), index->getType(), index->getExprLoc()));
+      // HLSL Change End.
       return object;
     }
   }

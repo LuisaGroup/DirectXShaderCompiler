@@ -186,6 +186,12 @@ enum class Extension {
       // modes, i.e. the API of <vk/qcom/tile_shading.h>. Opt-in; see
       // enabledByDefault() in FeatureManager.cpp.
       QCOM_tile_shading,
+      // HLSL Change - SPV_EXT_shader_64bit_indexing (the Shader64BitIndexingEXT
+      // execution mode and the Shader64BitIndexingEXT capability, emitted for
+      // -fspv-enable-64bit-indexing together with 64-bit runtime-array index
+      // operands on storage-buffer access chains). Opt-in; see
+      // enabledByDefault() in FeatureManager.cpp.
+      EXT_shader_64bit_indexing,
       Unknown,
 };
 

@@ -20,6 +20,32 @@ The included licenses apply to the following files:
 ### Upcoming Release
 ### Upcoming Release
 #### SPIR-V
+
+- Added support for `SPV_EXT_shader_64bit_indexing`
+  (`VK_EXT_shader_64bit_indexing`): a storage buffer binding can now be larger
+  than 4 GiB. Without the extension a binding is limited to
+  `maxStorageBufferRange` bytes, and DXC emits the element index of a storage
+  buffer's runtime-sized array as a 32-bit integer, because `index *
+  ArrayStride` has to fit in 32 bits. With
+  `-fspv-enable-64bit-indexing` (default off, so a shader compiled without it
+  is byte-for-byte unchanged) the module declares the `Shader64BitIndexingEXT`
+  capability, `OpExtension "SPV_EXT_shader_64bit_indexing"` and the
+  `Shader64BitIndexingEXT` execution mode on the entry point, and the
+  runtime-array index operand of every structured-buffer access chain becomes a
+  64-bit integer (`%idx = OpUConvert %ulong ...` feeding the `OpAccessChain`, a
+  64-bit `OpConstant` for a literal index, `OpSConvert %long` for a signed one).
+  The widening is deliberately narrow: it is the
+  `index * ArrayStride` calculation of a runtime-sized array and nothing else,
+  so struct member indices, sized arrays (`cbuffer`, `groupshared`, local
+  arrays), descriptor-array indices and the HLSL index arithmetic itself stay
+  32-bit. The index paths that cannot be widened are diagnosed with a warning:
+  `(RW)ByteAddressBuffer.Load`/`Store` (32-bit byte offset) and
+  `Append`/`Consume` (32-bit counter). The flag can also be spelled
+  `-fspv-extension=SPV_EXT_shader_64bit_indexing`. A host must enable the
+  `shader64BitIndexing` feature and request 64-bit indexing for the pipeline or
+  shader object; indexing a descriptor with more than 4 GiB of range without
+  that request is undefined behaviour. Example:
+  `examples/spirv-extensions/ext-shader-64bit-indexing.hlsl`.
 - Added support for `SPV_QCOM_tile_shading` (`VK_QCOM_tile_shading`): tile
   attachments, the tile built-ins and the two tile shading execution modes. A
   tile-based GPU keeps the attachments of the tile it renders in an on-chip tile

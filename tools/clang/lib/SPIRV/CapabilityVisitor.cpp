@@ -2107,6 +2107,21 @@ bool CapabilityVisitor::visit(SpirvModule *, Visitor::Phase phase) {
     addCapability(spv::Capability::DescriptorHeapEXT);
   }
 
+  // HLSL Change Begin - VK_EXT_shader_64bit_indexing. This extension has no
+  // distinguishing opcode: the emitter only widens the runtime-array index
+  // operands of storage-buffer access chains when the feature is on, so the
+  // capability has to be requested here rather than inferred. The
+  // Shader64BitIndexingEXT execution mode itself is added by
+  // SpirvEmitter::HandleTranslationUnit, which owns the entry-point function.
+  if (spvOptions.enable64BitIndexing ||
+    featureManager.isExtensionEnabled(
+        Extension::EXT_shader_64bit_indexing)) {
+    const llvm::StringRef feature = "64-bit indexing";
+    addExtension(Extension::EXT_shader_64bit_indexing, feature, {});
+    addCapability(spv::Capability::Shader64BitIndexingEXT);
+  }
+  // HLSL Change End
+
   return true;
 }
 

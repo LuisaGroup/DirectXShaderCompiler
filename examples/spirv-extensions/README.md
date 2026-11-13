@@ -31,6 +31,7 @@ features.
 | `ext-shader-subgroup-partitioned.hlsl` | `VK_EXT_shader_subgroup_partitioned` (EXT spelling of the partitioned-wave capability) | `-fspv-extension=SPV_EXT_shader_subgroup_partitioned` |
 | `qcom-multiple-wait-queues.hlsl` | `VK_QCOM_shader_multiple_wait_queues` → `MultipleWaitQueuesQCOM` loop control | `-fspv-extension=SPV_QCOM_multiple_wait_queues` |
 | `nv-push-constant-bank.hlsl` | `VK_NV_push_constant_bank` → `BankNV`/`MemberOffsetNV` decorations | `-fspv-extension=SPV_NV_push_constant_bank` |
+| `ext-shader-64bit-indexing.hlsl` | `VK_EXT_shader_64bit_indexing` → a storage buffer range larger than 4 GiB: `Shader64BitIndexingEXT` execution mode + capability, 64-bit runtime-array index operands | `-fspv-enable-64bit-indexing` |
 | `ext-uniform-buffer-unsized-array.hlsl` | `VK_EXT_shader_uniform_buffer_unsized_array` → runtime array as last `Block` member | `-fspv-enable-uniform-buffer-unsized-array` |
 | `khr-bfloat16.hlsl` | `VK_KHR_shader_bfloat16` → `bfloat16_t` storage, `OpDot` with `BFloat16DotProductKHR`, bfloat16 cooperative matrix | `-HV 2021 -enable-16bit-types` |
 | `valve-mixed-float-dot-product.hlsl` | `VK_VALVE_shader_mixed_float_dot_product` → `OpFDot2MixAcc32VALVE` for `dot2add` | `-fspv-extension=SPV_VALVE_mixed_float_dot_product` |
