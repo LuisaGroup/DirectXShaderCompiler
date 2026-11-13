@@ -684,7 +684,18 @@ add_subdirectory(utils/hct)
 if(EXISTS "${LLVM_MAIN_SRC_DIR}/external")
   add_subdirectory(external) # SPIRV change
 endif()
-include_directories(AFTER ${DIRECTX_HEADER_INCLUDE_DIR}/directx ${DIRECTX_HEADER_INCLUDE_DIR}/wsl/stubs)
+  if (NOT WIN32)
+    # DirectX-Headers carries its own Win32 type layer for *nix builds in
+    # include/wsl/stubs (basetsd.h, rpcndr.h, unknwnbase.h).  DXC provides the
+    # same types through dxc/WinAdapter.h, so pulling both into one translation
+    # unit - which is what happens when the D3D reflection headers are used -
+    # does not compile: conflicting typedefs for ULONG/BOOL/LONG/GUID/HRESULT/
+    # LARGE_INTEGER/STATSTG, a second IUnknown, and a __uuidof that replaces the
+    # one DXC relies on.  Search DXC's stand-ins first so those includes resolve
+    # to the WinAdapter layer; see include/dxc/WslStubCompat/basetsd.h.
+    include_directories(AFTER ${LLVM_MAIN_INCLUDE_DIR}/dxc/WslStubCompat)
+  endif()
+  include_directories(AFTER ${DIRECTX_HEADER_INCLUDE_DIR}/directx ${DIRECTX_HEADER_INCLUDE_DIR}/wsl/stubs)
 
 # Enable DIA-based debug info support (DxcDiaDataSource) on Windows builds
 # using MSVC. The DIA SDK ships with Visual Studio and is already required
