@@ -18,7 +18,7 @@ microsoft upstreams.
 | --- | --- | --- | --- |
 | `external/DirectX-Headers` | `https://github.com/LuisaGroup/DirectX-Headers` | `61c7718954ec73dbdd43c723240fe1a0452a3724` | `v1.608.2b-203-g61c7718`, "Update headers" |
 | `external/SPIRV-Headers` | `https://github.com/LuisaGroup/SPIRV-Headers` | `6efe5ae6b7c6ad29da3f2cc3f164b9c3d72b78b1` | `v1.202609.0-11-g6efe5ae` |
-| `external/SPIRV-Tools` | `https://github.com/LuisaGroup/SPIRV-Tools` | `3eb9e88ee15c391811318eaadb08e1aeb044e9fc` | `v2022.4-1465-g3eb9e88e`, "Merge branch 'KhronosGroup:main' into main" |
+| `external/SPIRV-Tools` | `https://github.com/LuisaGroup/SPIRV-Tools` | `c6bbc3aa899353b7cab3978b9098f9c78677d437` | `v2022.4-1483-gc6bbc3aa`, "Merge branch 'KhronosGroup:main' into main" |
 | `external/googletest` | `https://github.com/google/googletest` | (declared, not checked out here) | left on upstream on purpose, see below |
 
 `git submodule status` must print exactly these three lines, with **no** leading `+`
@@ -27,7 +27,7 @@ microsoft upstreams.
 ```
  61c7718954ec73dbdd43c723240fe1a0452a3724 external/DirectX-Headers (v1.608.2b-203-g61c7718)
  6efe5ae6b7c6ad29da3f2cc3f164b9c3d72b78b1 external/SPIRV-Headers (v1.202609.0-11-g6efe5ae)
- 3eb9e88ee15c391811318eaadb08e1aeb044e9fc external/SPIRV-Tools (v2022.4-1465-g3eb9e88e)
+ c6bbc3aa899353b7cab3978b9098f9c78677d437 external/SPIRV-Tools (v2022.4-1483-gc6bbc3aa)
 ```
 
 A leading `+` means somebody checked out a different revision without committing the
@@ -42,12 +42,12 @@ or restore it with `git submodule update`, but do not leave the tree half-update
    owner, and an upstream rename, transfer, force-push or branch rewrite cannot
    silently change what a commit hash means for us.
 2. **The forks are not plain mirrors.** `LuisaGroup/SPIRV-Tools` `main` currently
-   carries 26 fork-only commits on top of the shared history - extra optimization
-   passes, cooperative-matrix operator support, an LCSSA/opt fix, Linux build fixes and
-   `xmake` build files. The pinned revision `3eb9e88e` *is* that fork `main`; upstream
-   `KhronosGroup/SPIRV-Tools` main is 17 commits ahead but does **not** contain those
-   patches. Re-pointing the submodule at KhronosGroup would eventually drop LuisaGroup
-   patches that this tree builds against.
+   carries 27 commits beyond the shared history - extra optimization passes,
+   cooperative-matrix operator support, an LCSSA/opt fix, Linux build fixes, `xmake`
+   build files and the current upstream merge. The pinned revision `c6bbc3aa` *is* that
+   fork `main`; its `upstream/main` comparison point is contained in the fork, while the
+   fork-only patches are not present in upstream. Re-pointing the submodule at
+   KhronosGroup would eventually drop LuisaGroup patches that this tree builds against.
 3. **The forks are the place where a header can be patched if needed.**
    `LuisaGroup/DirectX-Headers` and `LuisaGroup/SPIRV-Headers` happen to be exact
    mirrors right now (`main` == upstream `main`, i.e. `61c7718` and `6efe5ae`), but
