@@ -17,8 +17,8 @@ microsoft upstreams.
 | submodule | URL in `.gitmodules` | pinned commit | description |
 | --- | --- | --- | --- |
 | `external/DirectX-Headers` | `https://github.com/LuisaGroup/DirectX-Headers` | `61c7718954ec73dbdd43c723240fe1a0452a3724` | `v1.608.2b-203-g61c7718`, "Update headers" |
-| `external/SPIRV-Headers` | `https://github.com/LuisaGroup/SPIRV-Headers` | `6efe5ae6b7c6ad29da3f2cc3f164b9c3d72b78b1` | `v1.202609.0-11-g6efe5ae` |
-| `external/SPIRV-Tools` | `https://github.com/LuisaGroup/SPIRV-Tools` | `c6bbc3aa899353b7cab3978b9098f9c78677d437` | `v2022.4-1483-gc6bbc3aa`, "Merge branch 'KhronosGroup:main' into main" |
+| `external/SPIRV-Headers` | `https://github.com/LuisaGroup/SPIRV-Headers` | `5c6004e758e0c80185ef2cee93ae5c10fa342a5b` | `v1.202609.0-13-g5c6004e`, "Add headers for SPV_EXT_bfloat16_arithmetic extension (#604)" |
+| `external/SPIRV-Tools` | `https://github.com/LuisaGroup/SPIRV-Tools` | `29049a8ecc3c76b280b51868783f6b26738244d7` | `v2022.4-1492-g29049a8e`, "Merge branch 'KhronosGroup:main' into main" |
 | `external/googletest` | `https://github.com/google/googletest` | (declared, not checked out here) | left on upstream on purpose, see below |
 
 `git submodule status` must print exactly these three lines, with **no** leading `+`
@@ -26,8 +26,8 @@ microsoft upstreams.
 
 ```
  61c7718954ec73dbdd43c723240fe1a0452a3724 external/DirectX-Headers (v1.608.2b-203-g61c7718)
- 6efe5ae6b7c6ad29da3f2cc3f164b9c3d72b78b1 external/SPIRV-Headers (v1.202609.0-11-g6efe5ae)
- c6bbc3aa899353b7cab3978b9098f9c78677d437 external/SPIRV-Tools (v2022.4-1483-gc6bbc3aa)
+ 5c6004e758e0c80185ef2cee93ae5c10fa342a5b external/SPIRV-Headers (v1.202609.0-13-g5c6004e)
+ 29049a8ecc3c76b280b51868783f6b26738244d7 external/SPIRV-Tools (v2022.4-1492-g29049a8e)
 ```
 
 A leading `+` means somebody checked out a different revision without committing the
@@ -42,15 +42,16 @@ or restore it with `git submodule update`, but do not leave the tree half-update
    owner, and an upstream rename, transfer, force-push or branch rewrite cannot
    silently change what a commit hash means for us.
 2. **The forks are not plain mirrors.** `LuisaGroup/SPIRV-Tools` `main` currently
-   carries 27 commits beyond the shared history - extra optimization passes,
-   cooperative-matrix operator support, an LCSSA/opt fix, Linux build fixes, `xmake`
-   build files and the current upstream merge. The pinned revision `c6bbc3aa` *is* that
-   fork `main`; its `upstream/main` comparison point is contained in the fork, while the
-   fork-only patches are not present in upstream. Re-pointing the submodule at
-   KhronosGroup would eventually drop LuisaGroup patches that this tree builds against.
+   carries 15 fork-only commits on top of the shared history - extra optimization
+   passes, cooperative-matrix operator support, an LCSSA/opt fix, Linux build fixes and
+   `xmake` build files. The pinned revision `29049a8e` *is* that fork `main`, and it has
+   upstream `KhronosGroup/SPIRV-Tools` `main` (`727277f6`) fully merged in, so nothing
+   upstream is missing - but those 15 local patches are still not upstream.
+   Re-pointing the submodule at KhronosGroup would eventually drop LuisaGroup
+   patches that this tree builds against.
 3. **The forks are the place where a header can be patched if needed.**
    `LuisaGroup/DirectX-Headers` and `LuisaGroup/SPIRV-Headers` happen to be exact
-   mirrors right now (`main` == upstream `main`, i.e. `61c7718` and `6efe5ae`), but
+   mirrors right now (`main` == upstream `main`, i.e. `61c7718` and `5c6004e`), but
    they are redirected anyway so that a DXC-side workaround can be carried in the
    header project instead of being bolted onto this repository's CMake.
 4. **Fresh clones keep working.** Every pinned hash is reachable from the LuisaGroup
@@ -82,6 +83,13 @@ or restore it with `git submodule update`, but do not leave the tree half-update
 The pins in this tree and `include/dxc/WslStubCompat/` are a matched pair: the newer
 headers need the shim, and the shim exists only to support these newer headers. Do not
 revert either half alone.
+
+The two SPIR-V pins are a matched pair as well. `external/SPIRV-Tools` `29049a8e`
+validates and optimizes against the header revision its `DEPS` names, `5c6004e` - the
+one that adds `SPV_EXT_bfloat16_arithmetic` - and it references
+`spv::Capability::BFloat16ArithmeticEXT` directly, so it does not compile against
+`6efe5ae` or anything older. Roll `external/SPIRV-Headers` and
+`external/SPIRV-Tools` together, headers first.
 
 ## Rules for the next agent
 
@@ -145,3 +153,30 @@ Then, in the same commit:
   `lib/DxilContainer/D3DReflectionStrings.cpp`, `lib/DxilContainer/RDATDumper.cpp`.
 - `dxc -T ps_6_0 -spirv` on both builds emits the same 400-byte SPIR-V module, so the
   SPIRV-Headers/SPIRV-Tools pins link and run.
+
+## Update log
+
+### 2026-11-18 - submodules pulled to their `main`
+
+- `external/DirectX-Headers`: unchanged at `61c7718` (already the fork `main`).
+- `external/SPIRV-Headers`: `6efe5ae` -> `5c6004e`. The LuisaGroup mirror was two
+  commits behind `KhronosGroup/SPIRV-Headers` `main`, so it was fast-forwarded
+  first (`git push origin upstream/main:refs/heads/main`, no rewrite) before the
+  pin moved; the pin is again identical to both remotes.
+- `external/SPIRV-Tools`: `3eb9e88e` -> `29049a8e` (27 commits, including the
+  header roll and the NSDI 101/102 validator fix).
+- The SPIRV-Headers bump is not optional: `29049a8e` uses
+  `spv::Capability::BFloat16ArithmeticEXT`, which only exists from `5c6004e` on,
+  so the old header pin does not compile against the new tools pin.
+- Verified on Windows Release MSVC 14.44 + Ninja (`build/`, `ENABLE_SPIRV_CODEGEN=ON`):
+  `cmake --build build --target dxc` links `dxc.exe` + `dxcompiler.dll`;
+  `dxc -spirv` smoke tests pass for `-O3`, `-fspv-debug=vulkan-with-source` (NSDI)
+  and explicit `-Oconfig=--...` flags, including the pass added by this bump
+  (`--convert-ubo-to-push-constant`), so the new SPIRV-Tools library is really
+  driving the optimizer.
+- Differential check over the SPIR-V codegen corpus: the same 1443 self-contained
+  `tools/clang/test/CodeGenSPIRV` cases were compiled with an `dxc` built at the
+  old pins and one built at the new pins. Output is byte-identical everywhere
+  except six tests whose module is already nondeterministic run-to-run with a
+  single binary (multi-entry-point ordering, library attribute locations);
+  their variant sets are the same before and after the bump.
