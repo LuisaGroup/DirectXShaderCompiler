@@ -20256,21 +20256,41 @@ bool SpirvEmitter::spirvToolsOptimize(std::vector<uint32_t> *mod,
   options.set_max_id_bound(spirvOptions.maxId);
 
   if (spirvOptions.optConfig.empty()) {
-    // Add performance passes.
+    // Round 9: Unroll -> Simplify/CCP -> SROA -> MultiStoreElim/SSA -> StrengthReduce -> LICM/GVN -> Cleanup.
+    optimizer.RegisterPass(spvtools::CreateMergeReturnPass());
+    optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+    optimizer.RegisterPass(spvtools::CreateCFGCleanupPass());
     optimizer.RegisterPerformancePasses(spirvOptions.preserveInterface);
-
-    // The LLVM IR optimization passes named in older experiments here
-    // (loop-reroll, loop-flatten, GVN hoist, called-value-propagation,
-    // call-site-splitting, function-specialization, load-combine, etc.) do not
-    // have factories in the checked-in SPIRV-Tools optimizer API.  Registering
-    // them here either fails to compile or, when implemented as SPIR-V rewrites,
-    // produced invalid modules.  Keep this stage limited to real SPIRV-Tools
-    // passes whose factories are declared in spirv-tools/optimizer.hpp.
+    optimizer.RegisterPass(spvtools::CreateLoopUnrollPass(false, 0));
+    optimizer.RegisterPass(spvtools::CreateCCPPass());
+    optimizer.RegisterPass(spvtools::CreateSimplificationPass());
+    optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+    optimizer.RegisterPass(spvtools::CreateBlockMergePass());
+    optimizer.RegisterPass(spvtools::CreateScalarReplacementPass(0));
+    optimizer.RegisterPass(spvtools::CreateLocalAccessChainConvertPass());
+    optimizer.RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass());
+    optimizer.RegisterPass(spvtools::CreateLocalSingleStoreElimPass());
+    optimizer.RegisterPass(spvtools::CreateLocalMultiStoreElimPass());
+    optimizer.RegisterPass(spvtools::CreateSSARewritePass());
+    optimizer.RegisterPass(spvtools::CreateStrengthReductionPass());
+    optimizer.RegisterPass(spvtools::CreateBooleanSimplifyPass());
+    if (!spirvOptions.IEEEStrict)
+      optimizer.RegisterPass(spvtools::CreateFloatDivOptPass());
     optimizer.RegisterPass(spvtools::CreateLoopUnswitchPass());
-    // Add propagation of volatile semantics passes.
+    optimizer.RegisterPass(spvtools::CreateLoopInvariantCodeMotionPass());
+    optimizer.RegisterPass(spvtools::CreateGVNHoistPass());
+    optimizer.RegisterPass(spvtools::CreateNewGVNPass());
+    optimizer.RegisterPass(spvtools::CreateInsertExtractElimPass());
+    optimizer.RegisterPass(spvtools::CreateLocalRedundancyEliminationPass());
+    optimizer.RegisterPass(spvtools::CreateSimplificationPass());
+    optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass(spirvOptions.preserveInterface));
+    optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+    optimizer.RegisterPass(spvtools::CreateBlockMergePass());
+    optimizer.RegisterPass(spvtools::CreateCFGCleanupPass());
+    optimizer.RegisterPass(spvtools::CreateEliminateDeadMembersPass());
+    optimizer.RegisterPass(spvtools::CreateEliminateDeadConstantPass());
+    optimizer.RegisterPass(spvtools::CreateDeadVariableEliminationPass());
     optimizer.RegisterPass(spvtools::CreateSpreadVolatileSemanticsPass());
-
-    // Add compact ID pass.
     optimizer.RegisterPass(spvtools::CreateCompactIdsPass());
   } else {
     // Command line options use llvm::SmallVector and llvm::StringRef, whereas
@@ -20297,6 +20317,23 @@ bool SpirvEmitter::spirvToolsOptimize(std::vector<uint32_t> *mod,
     optimized.clear();
     if (converged)
       break;
+  }
+
+  // Round 10: Post-convergence FMA contraction (OpFMul + OpFAdd -> OpFmaKHR / GLSL.std.450 Fma)
+  // when IEEE strict mode (-Gis) is not requested.
+  if (spirvOptions.optConfig.empty() && !spirvOptions.IEEEStrict) {
+    spvtools::Optimizer postOpt(featureManager.getTargetEnv());
+    postOpt.SetMessageConsumer(
+        [messages](spv_message_level_t /*level*/, const char * /*source*/,
+                   const spv_position_t & /*position*/,
+                   const char *message) { *messages += message; });
+    const bool useKhrFma = featureManager.isExtensionEnabled(Extension::KHR_fma);
+    postOpt.RegisterPass(spvtools::CreateFmaContractionPass(useKhrFma));
+    postOpt.RegisterPass(spvtools::CreateEliminateDeadConstantPass());
+    postOpt.RegisterPass(spvtools::CreateCompactIdsPass());
+    if (!postOpt.Run(mod->data(), mod->size(), &optimized, options))
+      return false;
+    mod->swap(optimized);
   }
 
   return true;

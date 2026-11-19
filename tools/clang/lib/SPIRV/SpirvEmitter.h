@@ -1737,7 +1737,7 @@ private:
   /// Maximum number of fixed-point iterations for the SPIR-V optimizer.
   /// The optimizer will run repeatedly up to this many times or until the
   /// binary content stabilizes (no word changes between iterations).
-  static constexpr unsigned kSpirvOptMaxIterations = 5;
+  static constexpr unsigned kSpirvOptMaxIterations = 8;
 
   /// \brief Helper function to run SPIRV-Tools optimizer's performance passes
   /// with fixed-point iteration.
