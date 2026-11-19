@@ -758,11 +758,18 @@ line upon naming the release. Refer to previous for appropriate section names.
   buffer-like resources (`StructuredBuffer`, `ByteAddressBuffer`,
   `ConstantBuffer`, `TextureBuffer`, and RW variants) via
   `SPV_KHR_untyped_pointers`. Requires `-fspv-target-env=vulkan1.3`.
-- Extended `-fspv-use-descriptor-heap` to support `RaytracingAccelerationStructure`
-  loaded from `ResourceDescriptorHeap`. Outside ray-tracing stages, list
-  `-fspv-extension=SPV_KHR_ray_query`, `SPV_KHR_ray_tracing` or
-  `SPV_NV_ray_tracing` so the resource heap stride covers acceleration structure
-  descriptors; otherwise compilation fails.
+  - Extended `-fspv-use-descriptor-heap` to support `RaytracingAccelerationStructure`
+    loaded from `ResourceDescriptorHeap`. Outside ray-tracing stages, list
+    `-fspv-extension=SPV_KHR_ray_query`, `SPV_KHR_ray_tracing` or
+    `SPV_NV_ray_tracing` so the resource heap stride covers acceleration structure
+    descriptors; otherwise compilation fails.
+  - Implemented `WaveMultiPrefixCountBits`, which used to be rejected as
+    unimplemented
+    [#9127](https://github.com/microsoft/DirectXShaderCompiler/issues/9127).
+  - `SV_CullPrimitive` used as a pixel shader input is now replaced with zero,
+    mirroring DXIL, instead of being mapped to the `CullPrimitiveEXT` builtin,
+    which requires `MeshShadingEXT` and is not allowed in fragment shaders
+    [#9084](https://github.com/microsoft/DirectXShaderCompiler/issues/9084).
 
 #### Bug Fixes
 
@@ -781,9 +788,30 @@ line upon naming the release. Refer to previous for appropriate section names.
   after bit-tracking dead code elimination.
 - Fixed an optimizer miscompile where selects of bitwise-not values guarded by
   signed less-than or unsigned compares were treated as a signed minimum.
-- Fixed incorrect shader results caused by stale overflow, exactness, and
-  fast-math flags after merging equivalent code from both sides of a branch.
-- Reject root signatures with invalid shader visibility values.
+  - Fixed incorrect shader results caused by stale overflow, exactness, and
+    fast-math flags after merging equivalent code from both sides of a branch.
+  - Reject root signatures with invalid shader visibility values.
+  - Fixed the `SampleCmpGradientOrBias` shader flag being dropped when a
+    `SampleCmpBias`/`SampleCmpGrad` instruction was followed by another sample
+    instruction in the same function, which let shaders that need
+    `SampleCmpGradientAndBiasSupported` pass the feature check
+    [#9135](https://github.com/microsoft/DirectXShaderCompiler/issues/9135).
+  - Fixed a miscompile where the second of two breaks nested in conditionals of
+    an unrolled loop overrode the value of the first break: the loop exit
+    structurizer did not guard a later exiting block with the flag of an
+    earlier exit
+    [#9119](https://github.com/microsoft/DirectXShaderCompiler/issues/9119).
+  - Fixed static const structs initialized from another static const struct
+    losing their initializer when the chain is more than two levels deep
+    [#9063](https://github.com/microsoft/DirectXShaderCompiler/issues/9063).
+  - Debug info now tags the compile unit with `DW_LANG_HLSL` instead of
+    `DW_LANG_C_plus_plus`
+    [#9087](https://github.com/microsoft/DirectXShaderCompiler/issues/9087).
+  - Fixed a compiler crash when a vector that an intrinsic writes through an
+    out parameter (for example the integral part of `modf`) is afterwards
+    indexed with a non-constant index: lowering the vector to an array left the
+    call pointing at the erased vector
+    [#9050](https://github.com/microsoft/DirectXShaderCompiler/issues/9050).
 
 ### Upcoming Preview Release
 

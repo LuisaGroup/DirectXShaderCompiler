@@ -3975,13 +3975,25 @@ bool DeclResultIdMapper::createStageVars(StageVarDataBundle &stageVarData,
     const auto semanticKind = stageVarData.semantic->getKind();
     const auto sigPointKind = stageVarData.sigPoint->GetKind();
 
-    if (!validateShaderStageVar(stageVarData)) {
-      return false;
-    }
+      if (!validateShaderStageVar(stageVarData)) {
+        return false;
+      }
 
-    // Special handling of certain mappings between HLSL semantics and
-    // SPIR-V builtins:
-    // * SV_CullDistance/SV_ClipDistance are outsourced to GlPerVertex.
+      // DXIL replaces a pixel shader SV_CullPrimitive input with 0, and
+      // CullPrimitiveEXT can't be used in fragment shaders (VUID 07034), so
+      // mirror DXIL instead of emitting invalid SPIR-V. DXIL does not look at
+      // the type here, so aggregates are replaced as well. An explicit
+      // vk::builtin still takes precedence.
+      if (semanticKind == hlsl::Semantic::Kind::CullPrimitive &&
+          sigPointKind == hlsl::SigPoint::Kind::PSIn &&
+          !stageVarData.decl->hasAttr<VKBuiltInAttr>()) {
+        *value = spvBuilder.getConstantNull(stageVarData.type);
+        return true;
+      }
+
+      // Special handling of certain mappings between HLSL semantics and
+      // SPIR-V builtins:
+      // * SV_CullDistance/SV_ClipDistance are outsourced to GlPerVertex.
     if (glPerVertex.tryToAccess(
             sigPointKind, semanticKind, stageVarData.semantic->index,
             stageVarData.invocationId, value, noWriteBack,
@@ -4887,19 +4899,16 @@ SpirvVariable *DeclResultIdMapper::createSpirvStageVar(
   // According to DXIL spec, the ShadingRate SV can only be used by
   // MSPOut or PSIn.
   // According to Vulkan spec, the CullPrimitiveEXT BuiltIn can only
-  // be used as MSOut.
+  // be used as MSOut. A pixel shader input never gets here: it is replaced
+  // with 0 in createStageVars.
   case hlsl::Semantic::Kind::CullPrimitive: {
     switch (sigPointKind) {
-    case hlsl::SigPoint::Kind::PSIn:
-      stageVar->setIsSpirvBuiltin();
-      return spvBuilder.addStageBuiltinVar(type, sc, BuiltIn::CullPrimitiveEXT,
-                                           isPrecise, srcLoc);
     case hlsl::SigPoint::Kind::MSPOut:
       stageVar->setIsSpirvBuiltin();
       return spvBuilder.addStageBuiltinVar(type, sc, BuiltIn::CullPrimitiveEXT,
                                            isPrecise, srcLoc);
     default:
-      emitError("semantic CullPrimitive must be used only for PSIn, MSPOut",
+      emitError("semantic CullPrimitive must be used only for MSPOut",
                 srcLoc);
       break;
     }

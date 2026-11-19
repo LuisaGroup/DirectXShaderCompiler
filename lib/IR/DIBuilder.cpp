@@ -138,9 +138,10 @@ DICompileUnit *DIBuilder::createCompileUnit(
     bool isOptimized, StringRef Flags, unsigned RunTimeVer, StringRef SplitName,
     DebugEmissionKind Kind, uint64_t DWOId, bool EmitDebugInfo) {
 
-  assert(((Lang <= dwarf::DW_LANG_Fortran08 && Lang >= dwarf::DW_LANG_C89) ||
-          (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
-         "Invalid Language tag");
+    assert(((Lang <= dwarf::DW_LANG_Fortran08 && Lang >= dwarf::DW_LANG_C89) ||
+            Lang == dwarf::DW_LANG_HLSL ||
+            (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
+           "Invalid Language tag");
   assert(!Filename.empty() &&
          "Unable to create compile unit without filename");
 

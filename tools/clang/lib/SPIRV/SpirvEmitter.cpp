@@ -11421,9 +11421,13 @@ SpirvEmitter::processIntrinsicCallExpr(const CallExpr *callExpr) {
         callExpr, translateWaveOp(hlslOpcode, retType, srcLoc),
         spv::GroupOperation::PartitionedExclusiveScanNV);
   } break;
-  case hlsl::IntrinsicOp::IOP_WavePrefixCountBits:
-    retVal = processWaveCountBits(callExpr, spv::GroupOperation::ExclusiveScan);
-    break;
+    case hlsl::IntrinsicOp::IOP_WavePrefixCountBits:
+      retVal = processWaveCountBits(callExpr, spv::GroupOperation::ExclusiveScan);
+      break;
+    case hlsl::IntrinsicOp::IOP_WaveMultiPrefixCountBits:
+      retVal = processWaveCountBits(
+          callExpr, spv::GroupOperation::PartitionedExclusiveScanNV);
+      break;
   case hlsl::IntrinsicOp::IOP_WaveReadLaneAt:
   case hlsl::IntrinsicOp::IOP_WaveReadLaneFirst:
     retVal = processWaveBroadcast(callExpr);
@@ -12742,15 +12746,36 @@ SpirvEmitter::processWaveCountBits(const CallExpr *callExpr,
   // Signatures:
   // uint WaveActiveCountBits(bool bBit)
   // uint WavePrefixCountBits(Bool bBit)
-  assert(callExpr->getNumArgs() == 1);
+  // uint WaveMultiPrefixCountBits(bool value, uint4 mask)
+  const bool isMultiPrefix =
+      groupOp == spv::GroupOperation::PartitionedExclusiveScanNV;
+  assert(callExpr->getNumArgs() == (isMultiPrefix ? 2 : 1));
 
   featureManager.requestTargetEnv(SPV_ENV_VULKAN_1_1, "Wave Operation",
                                   callExpr->getExprLoc());
+  // HLSL Change - SPV_EXT_shader_subgroup_partitioned.
+  if (isMultiPrefix)
+    checkSubgroupPartitionedExtension("'WaveMultiPrefixCountBits'",
+                                      callExpr->getExprLoc());
   auto *predicate = doExpr(callExpr->getArg(0));
   const auto srcLoc = callExpr->getExprLoc();
   const QualType u32Type = astContext.UnsignedIntTy;
   const QualType v4u32Type = astContext.getExtVectorType(u32Type, 4);
   const QualType retType = callExpr->getCallReturnType(astContext);
+
+  if (isMultiPrefix) {
+    // OpGroupNonUniformBallotBitCount only accepts Reduce, InclusiveScan and
+    // ExclusiveScan in Vulkan, so the partitioned count is expressed as a
+    // partitioned sum of 1 for every lane whose value is true.
+    auto *one = spvBuilder.getConstantInt(u32Type, llvm::APInt(32, 1));
+    auto *zero = spvBuilder.getConstantInt(u32Type, llvm::APInt(32, 0));
+    auto *value = spvBuilder.createSelect(u32Type, predicate, one, zero, srcLoc);
+    auto *mask = doExpr(callExpr->getArg(1));
+    return spvBuilder.createGroupNonUniformOp(
+        spv::Op::OpGroupNonUniformIAdd, retType, spv::Scope::Subgroup,
+        {value, mask}, srcLoc, groupOp);
+  }
+
   auto *ballot = spvBuilder.createGroupNonUniformOp(
       spv::Op::OpGroupNonUniformBallot, v4u32Type, spv::Scope::Subgroup,
       {predicate}, srcLoc);

@@ -429,11 +429,38 @@ void DynamicIndexingVectorToArray::ReplaceVectorWithArray(Value *Vec,
         EltSt->setAlignment(align);
       }
       stInst->eraseFromParent();
-    } else if (BitCastInst *castInst = dyn_cast<BitCastInst>(User)) {
-      DXASSERT(onlyUsedByLifetimeMarkers(castInst),
-               "expected bitcast to only be used by lifetime intrinsics");
-      castInst->setOperand(0, A);
-    } else {
+      } else if (BitCastInst *castInst = dyn_cast<BitCastInst>(User)) {
+        DXASSERT(onlyUsedByLifetimeMarkers(castInst),
+                 "expected bitcast to only be used by lifetime intrinsics");
+        castInst->setOperand(0, A);
+      } else if (CallInst *CI = dyn_cast<CallInst>(User)) {
+        // The vector is passed by pointer to a call.  That is what an HLSL
+        // intrinsic with an out or inout parameter still looks like here, the
+        // lowering of dx.hl.op happens later.  The array can't be passed in
+        // place of the vector, so round-trip through a temporary vector: fill
+        // the temporary from the array, pass a pointer to it, and copy the
+        // result back into the array.
+        Type *VecTy = cast<PointerType>(Vec->getType())->getElementType();
+        IRBuilder<> AllocaBuilder(
+            CI->getParent()->getParent()->getEntryBlock().getFirstInsertionPt());
+        AllocaInst *Tmp = AllocaBuilder.CreateAlloca(VecTy);
+        Value *zero = Builder.getInt32(0);
+        Value *vecVal = UndefValue::get(VecTy);
+        for (unsigned i = 0; i < size; i++) {
+          Value *GEP = Builder.CreateInBoundsGEP(A, {zero, Builder.getInt32(i)});
+          vecVal =
+              Builder.CreateInsertElement(vecVal, Builder.CreateLoad(GEP), i);
+        }
+        Builder.CreateStore(vecVal, Tmp);
+        CI->replaceUsesOfWith(Vec, Tmp);
+        Builder.SetInsertPoint(CI->getNextNode());
+        vecVal = Builder.CreateLoad(Tmp);
+        for (unsigned i = 0; i < size; i++) {
+          Value *Elt = Builder.CreateExtractElement(vecVal, i);
+          Value *GEP = Builder.CreateInBoundsGEP(A, {zero, Builder.getInt32(i)});
+          Builder.CreateStore(Elt, GEP);
+        }
+      } else {
       // Vector parameter should be lowered.
       // No function call should use vector.
       DXASSERT(0, "not implement yet");

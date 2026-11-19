@@ -47,7 +47,9 @@
 #include "dxc/HlslIntrinsicOp.h"
 
 #include <fenv.h>
+#include <functional>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include "CGHLSLMSHelper.h"
@@ -1493,6 +1495,25 @@ namespace {
 //  int b;
 //}  ST = { a, b };
 // Replace user of ST with a and b.
+//
+// When the initializer element is part of another static const global,
+// *SubGlobal is set to that global: replacing the use just created a new use
+// of it, so it has to be processed as well.
+// Returns the global variable a constant expression is based on, if any.
+// Initializer lists hold either the global itself or a constant expression
+// (a GEP or a bitcast) into it.
+GlobalVariable *GetBaseGlobalVariable(Constant *C) {
+  while (C) {
+    if (GlobalVariable *GV = dyn_cast<GlobalVariable>(C))
+      return GV;
+    ConstantExpr *CE = dyn_cast<ConstantExpr>(C);
+    if (!CE)
+      return nullptr;
+    C = CE->getOperand(0);
+  }
+  return nullptr;
+}
+
 bool ReplaceConstStaticGlobalUser(GEPOperator *GEP,
                                   std::vector<Constant *> &InitList,
                                   IRBuilder<> &Builder) {
@@ -1528,11 +1549,38 @@ void ReplaceConstStaticGlobals(
         &staticConstGlobalInitListMap,
     std::unordered_map<GlobalVariable *, Function *>
         &staticConstGlobalCtorMap) {
+  // Replacing the uses of one global can create new uses of another one: a
+  // static const struct that is initialized from another static const struct
+  // still refers to the other global until that one's uses are replaced too.
+  // A chain like `C c = {b}; B b = {a};` therefore has to be processed from
+  // the outermost global inwards, otherwise the use of `b` created while
+  // replacing the uses of `c` is never replaced and `b`'s initializer is
+  // dropped.  Build the dependency graph from the initializer lists and
+  // process the globals in reverse topological order.
+  std::unordered_set<GlobalVariable *> visited;
+  std::vector<GlobalVariable *> postOrder;
+  std::function<void(GlobalVariable *)> visit = [&](GlobalVariable *GV) {
+    if (!visited.insert(GV).second)
+      return;
+    auto iter = staticConstGlobalInitListMap.find(GV);
+    if (iter == staticConstGlobalInitListMap.end())
+      return;
+    for (Constant *C : iter->second) {
+      GlobalVariable *Dep = GetBaseGlobalVariable(C);
+      if (Dep && staticConstGlobalInitListMap.count(Dep))
+        visit(Dep);
+    }
+    // Post-order: the globals this one is initialized from come first.
+    postOrder.push_back(GV);
+  };
+  for (auto &iter : staticConstGlobalInitListMap)
+    visit(iter.first);
 
-  for (auto &iter : staticConstGlobalInitListMap) {
-    GlobalVariable *GV = iter.first;
-    std::vector<Constant *> &InitList = iter.second;
+  for (auto iter = postOrder.rbegin(); iter != postOrder.rend(); ++iter) {
+    GlobalVariable *GV = *iter;
+    std::vector<Constant *> &InitList = staticConstGlobalInitListMap[GV];
     LLVMContext &Ctx = GV->getContext();
+
     // Do the replace.
     bool bPass = true;
     for (User *U : GV->users()) {

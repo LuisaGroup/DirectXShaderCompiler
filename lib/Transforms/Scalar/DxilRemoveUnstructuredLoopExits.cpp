@@ -291,11 +291,15 @@ struct Propagator {
         if (LI->getLoopFor(bb) != L) {
           return nullptr;
         }
-        // Otherwise remember the blocks with side effects (including the
-        // latch)
-        if (HasSideEffects(bb)) {
-          blocks_with_side_effect.push_back(bb);
-        }
+      // Otherwise remember the blocks that have to be guarded: those with
+      // side effects (including the latch), and those that exit the loop
+      // themselves.  Leaving the latter unguarded is not correct: once an
+      // earlier exit has been taken, a later exiting block must not run its
+      // exit branch any more, or the values it propagates win over the ones
+      // of the exit that was actually taken.
+      if (HasSideEffects(bb) || L->isLoopExiting(bb)) {
+        blocks_with_side_effect.push_back(bb);
+      }
       }
 
       for (BasicBlock *succ : llvm::successors(bb)) {

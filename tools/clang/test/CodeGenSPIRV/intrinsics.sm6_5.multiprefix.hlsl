@@ -43,7 +43,12 @@ uint4 main(int4 input0 : ATTR0, uint4 input1 : ATTR1) : SV_Target {
 
 // CHECK: [[input1:%[0-9]+]] = OpLoad %v4uint %input1
 // CHECK:   [[mask:%[0-9]+]] = OpLoad %v4uint %mask
-// CHECK:        {{%[0-9]+}} = OpGroupNonUniformBitwiseXor %v4uint %uint_3 PartitionedExclusiveScanEXT [[input1]] [[mask]]
-    res += WaveMultiPrefixBitXor(input1, mask);
-    return res;
+  // CHECK: {{%[0-9]+}} = OpGroupNonUniformBitwiseXor %v4uint %uint_3 PartitionedExclusiveScanEXT [[input1]] [[mask]]
+      res += WaveMultiPrefixBitXor(input1, mask);
+  // CHECK: [[pred:%[0-9]+]] = OpIEqual %bool {{%[0-9]+}} %int_1
+  // CHECK: [[counted:%[0-9]+]] = OpSelect %uint [[pred]] %uint_1 %uint_0
+  // CHECK: [[mask2:%[0-9]+]] = OpLoad %v4uint %mask
+  // CHECK: {{%[0-9]+}} = OpGroupNonUniformIAdd %uint %uint_3 PartitionedExclusiveScanEXT [[counted]] [[mask2]]
+      res += WaveMultiPrefixCountBits(input0.x == 1, mask);
+      return res;
 }

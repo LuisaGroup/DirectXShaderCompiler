@@ -678,16 +678,16 @@ ShaderFlags ShaderFlags::CollectShaderFlags(const Function *F,
         case DXIL::OpCode::SampleGrad:
         case DXIL::OpCode::SampleCmpGrad:
           hasAdvancedTextureOps |= hasNonConstantSampleOffsets(CI);
-          hasLodClamp |= hasSampleClamp(CI);
-          hasSampleCmpGradientOrBias = dxilOp == DXIL::OpCode::SampleCmpGrad;
-          break;
+    hasLodClamp |= hasSampleClamp(CI);
+    hasSampleCmpGradientOrBias |= dxilOp == DXIL::OpCode::SampleCmpGrad;
+    break;
         case DXIL::OpCode::Sample:
         case DXIL::OpCode::SampleBias:
         case DXIL::OpCode::SampleCmp:
         case DXIL::OpCode::SampleCmpBias:
           hasAdvancedTextureOps |= hasNonConstantSampleOffsets(CI);
           hasLodClamp |= hasSampleClamp(CI);
-          hasSampleCmpGradientOrBias = dxilOp == DXIL::OpCode::SampleCmpBias;
+          hasSampleCmpGradientOrBias |= dxilOp == DXIL::OpCode::SampleCmpBias;
           LLVM_FALLTHROUGH;
         case DXIL::OpCode::DerivFineX:
         case DXIL::OpCode::DerivFineY:

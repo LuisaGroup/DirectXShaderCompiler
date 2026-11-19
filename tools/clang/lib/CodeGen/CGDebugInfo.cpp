@@ -345,12 +345,16 @@ void CGDebugInfo::CreateCompileUnit() {
 
   llvm::dwarf::SourceLanguage LangTag;
   const LangOptions &LO = CGM.getLangOpts();
-  if (LO.CPlusPlus) {
-    if (LO.ObjC1)
-      LangTag = llvm::dwarf::DW_LANG_ObjC_plus_plus;
-    else
-      LangTag = llvm::dwarf::DW_LANG_C_plus_plus;
-  } else if (LO.ObjC1) {
+    if (LO.CPlusPlus) {
+      if (LO.HLSL)
+        // HLSL compiles with C++ language options, but the debug info must
+        // identify the source language as HLSL.
+        LangTag = llvm::dwarf::DW_LANG_HLSL;
+      else if (LO.ObjC1)
+        LangTag = llvm::dwarf::DW_LANG_ObjC_plus_plus;
+      else
+        LangTag = llvm::dwarf::DW_LANG_C_plus_plus;
+    } else if (LO.ObjC1) {
     LangTag = llvm::dwarf::DW_LANG_ObjC;
   } else if (LO.C99) {
     LangTag = llvm::dwarf::DW_LANG_C99;
